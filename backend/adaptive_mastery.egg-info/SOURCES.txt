@@ -1,6 +1,0 @@
-pyproject.toml
-adaptive_mastery.egg-info/PKG-INFO
-adaptive_mastery.egg-info/SOURCES.txt
-adaptive_mastery.egg-info/dependency_links.txt
-adaptive_mastery.egg-info/requires.txt
-adaptive_mastery.egg-info/top_level.txt
