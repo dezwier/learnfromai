@@ -1,0 +1,14 @@
+.venv/
+backend/.venv/
+**/.pytest_cache/
+**/__pycache__/
+**/*.pyc
+.env
+*.env.local
+flutter/.dart_tool/
+flutter/build/
+flutter/.flutter-plugins-dependencies
+flutter/ios/Pods/
+flutter/android/.gradle/
+.DS_Store
+firebase-service-account.json
