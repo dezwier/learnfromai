@@ -1,15 +1,8 @@
-from datetime import timedelta
-from uuid import UUID
-
 from sqlmodel import select
 
 from app.core.config import get_settings
-from app.core.time import utcnow
 from app.features.accounts.firebase_auth import verify_firebase_id_token
 from app.features.knowledge_graph.service import seed_decision_trees, stable_id
-from app.features.learning_sessions.models import AssessmentAttempt
-from app.features.mastery.models import MasteryEvidence
-from app.features.retention.models import ReviewItem
 from app.workers.runner import process_until_idle
 
 
@@ -127,42 +120,15 @@ def test_learn_assess_review_replan(client, auth, session, user):
         json={"activity_id": activity_id, "answer": {}},
     )
     assert again.json()["attempt_id"] == read.json()["attempt_id"]
-    question = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    if question.status_code == 202:
+    lesson = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
+    if lesson.status_code == 202:
         process_until_idle()
-        question = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    prompt = question.json()["activity"]
-    answer_text = prompt["body"]["prompt"]
-    graded = client.post(
-        f"/api/v1/learning-sessions/{session_id}/attempts",
-        headers={**auth, "Idempotency-Key": "grade-1"},
-        json={"activity_id": prompt["id"], "answer": {"text": answer_text}},
-    )
-    assert graded.status_code == 201
-    assert graded.json()["feedback"]["score"] == 1
-    evidence = session.exec(select(MasteryEvidence).where(MasteryEvidence.user_id == user.id)).all()
-    assert evidence
-    attempt = session.get(AssessmentAttempt, UUID(graded.json()["attempt_id"]))
-    original = (attempt.response, attempt.score, str(attempt.concept_revision_id))
-    reviews = session.exec(select(ReviewItem).where(ReviewItem.user_id == user.id)).all()
-    assert reviews
-    reviews[0].due_at = utcnow() - timedelta(minutes=1)
-    session.add(reviews[0])
-    session.commit()
-    due = client.get("/api/v1/reviews/due", headers=auth).json()["items"]
-    assert due
-    submitted_review = client.post(
-        f"/api/v1/reviews/{due[0]['id']}/submit",
-        headers={**auth, "Idempotency-Key": "rev-1"},
-        json={"answer": {"text": due[0]["prompt"]}, "rating": "good"},
-    )
-    assert submitted_review.status_code == 200
-    session.refresh(attempt)
-    assert (attempt.response, attempt.score, str(attempt.concept_revision_id)) == original
-    current = client.get(f"/api/v1/learning-sessions/{session_id}", headers=auth)
-    _ = current
-    still = client.get("/api/v1/learning-sessions/" + session_id + "/next", headers=auth)
-    _ = (pinned, still)
+        lesson = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
+    activity = lesson.json()["activity"]
+    assert activity["kind"] == "explain"
+    assert "prompt" not in activity["body"]
+    assert "explanation" in activity["body"]
+    _ = pinned
 
 
 def test_quota(client, auth, session, user):

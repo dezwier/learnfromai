@@ -279,11 +279,18 @@ class FakeLLMProvider:
         body: dict
         rubric: dict
         if kind == "explain":
+            title = str(context.get("concept_title") or "").strip() or statement
+            subject = statement.strip().rstrip(".")
+            for prefix in ("Explain ", "Describe ", "Name ", "Contrast "):
+                if subject.startswith(prefix):
+                    subject = subject[len(prefix) :]
+                    break
+            if subject:
+                subject = subject[:1].upper() + subject[1:]
             body = {
-                "explanation": f"{statement}. This is a short worked explanation, not a mastery claim.",
-                "analogy": f"Think of {statement} as a tool you can reuse.",
-                "counterexample": "A vague paraphrase with none of the defining terms.",
-                "worked_example": statement,
+                "explanation": f"{title}. {subject}.",
+                "analogy": f"One way to picture {title} is as one part of a larger subject.",
+                "worked_example": subject or title,
             }
             rubric = {"mode": "none", "dimension": "understanding"}
         elif kind == "multiple_choice":

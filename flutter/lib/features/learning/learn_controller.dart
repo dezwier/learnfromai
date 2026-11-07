@@ -33,6 +33,29 @@ class LearnController extends ChangeNotifier {
     }
   }
 
+  Future<void> continueLesson() async {
+    final client = api;
+    if (client == null || sessionId == null || activity == null) return;
+    loading = true;
+    feedback = null;
+    notifyListeners();
+    try {
+      await client.post(
+        '/learning-sessions/$sessionId/attempts',
+        body: {'activity_id': activity!['id'], 'answer': <String, dynamic>{}},
+        idempotencyKey: 'read-${activity!['id']}',
+      );
+      activity = null;
+      await _loadNext();
+      error = null;
+    } on ApiException catch (exc) {
+      error = exc.message;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> submit(String text) async {
     final client = api;
     if (client == null || sessionId == null || activity == null) return;

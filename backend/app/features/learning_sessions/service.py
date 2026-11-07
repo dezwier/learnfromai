@@ -62,7 +62,7 @@ def next_activity(session: Session, user: User, learning_session: LearningSessio
     step = _current_step(session, learning_session)
     if step is None:
         return {"status": "complete", "activity": None, "job_id": None}
-    kind = "explain" if learning_session.activity_phase == "explain" else "retrieval_short_answer"
+    kind = "explain"
     snapshot = load_snapshot(session, learning_session.release_id)
     concept = snapshot.concept(step.concept_id)
     if concept is None:
@@ -148,7 +148,7 @@ def submit_attempt(
         )
         session.add(attempt)
         session.flush()
-        learning_session.activity_phase = "assess"
+        _advance(session, learning_session)
         return _attempt_payload(session, learning_session, attempt, objectives_changed=0), 201
 
     graded = grade_deterministic(activity.kind, activity.body, activity.rubric, answer)

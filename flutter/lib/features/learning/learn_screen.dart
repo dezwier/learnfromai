@@ -38,10 +38,23 @@ class _LearnScreenState extends State<LearnScreen> {
           StudyCard(
             eyebrow: 'LEARN',
             title: 'Start the next step',
-            subtitle: 'Read first. Answering is what counts toward mastery.',
+            subtitle: 'Read the lesson, then continue to the next part.',
             footer: FilledButton(
               onPressed: goals.goal == null ? null : () => learn.start(goals.goal!['id'].toString()),
               child: const Text('Start the next step'),
+            ),
+          )
+        else if (learn.activity?['kind'] == 'explain' || body?['explanation'] != null)
+          StudyCard(
+            eyebrow: 'LEARN',
+            title: body?['explanation']?.toString() ?? prompt,
+            subtitle: [
+              body?['analogy']?.toString() ?? '',
+              body?['worked_example']?.toString() ?? '',
+            ].where((line) => line.isNotEmpty).join('\n\n'),
+            footer: FilledButton(
+              onPressed: learn.loading ? null : () => learn.continueLesson(),
+              child: const Text('Continue'),
             ),
           )
         else
