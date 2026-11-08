@@ -184,13 +184,10 @@ def _strip_fences(text: str) -> str:
 
 def get_provider() -> LLMProvider:
     settings = get_settings()
-    # Tests pin the one-node provider. Everywhere else, a request becomes the
-    # article's real topic graph, or Gemini when a key is configured.
-    if settings.environment == "test":
+    # Tests keep the one-node stand-in. A running worker asks Gemini.
+    if settings.environment == "test" or settings.llm_provider == "fake":
         return FakeLLMProvider()
-    if settings.llm_provider == "gemini" and settings.google_gemini_api_key:
-        return GeminiProvider()
-    return EncyclopediaProvider()
+    return GeminiProvider()
 
 
 def record_usage(

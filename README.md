@@ -27,7 +27,7 @@ LLM_PROVIDER=fake .venv/bin/python -m app.workers
 LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
 ```
 
-`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. Tests use `LLM_PROVIDER=fake`. A running worker builds the topic graph from the encyclopedia article for the request, and uses Gemini when `GOOGLE_GEMINI_API_KEY` is set.
+`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. Tests use `LLM_PROVIDER=fake`. A running worker asks Gemini, using `GOOGLE_GEMINI_API_KEY`.
 
 ## Flutter
 
@@ -58,7 +58,7 @@ Backend tests use database `adaptive_mastery_test` on local Postgres. `tests/tes
 
 The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, worker, and web service. It does not share a project or variables with the other apps.
 
-The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. `LLM_PROVIDER` is `fake` until a Gemini key is added. A new `SECRET_KEY` was generated for this project.
+The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. The worker uses Gemini. A new `SECRET_KEY` was generated for this project.
 
 ```bash
 make deploy-api

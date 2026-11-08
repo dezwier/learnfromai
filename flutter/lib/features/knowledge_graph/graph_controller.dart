@@ -41,7 +41,7 @@ class GraphController extends ChangeNotifier {
       final queued = Map<String, dynamic>.from(await client.post('/graph/extend', body: body) as Map);
       final jobId = queued['job_id']?.toString();
       if (jobId != null) {
-        for (var attempt = 0; attempt < 40; attempt++) {
+        for (var attempt = 0; attempt < 80; attempt++) {
           final job = Map<String, dynamic>.from(await client.get('/jobs/$jobId') as Map);
           final state = job['state']?.toString();
           if (state == 'succeeded') break;
@@ -49,7 +49,7 @@ class GraphController extends ChangeNotifier {
             error = job['error_code']?.toString() ?? 'Extend failed';
             break;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 300));
+          await Future<void>.delayed(const Duration(milliseconds: 500));
         }
       }
       workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
