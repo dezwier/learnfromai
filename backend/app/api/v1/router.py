@@ -13,7 +13,7 @@ from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
 from app.features.graph_extend.models import ExtendRequest
 from app.features.knowledge_graph.models import Concept
-from app.features.knowledge_graph.service import remove_concept, shared_graph
+from app.features.knowledge_graph.service import clear_graph, remove_concept, shared_graph
 from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.platform.jobs import enqueue
 from app.features.platform.llm import assert_user_quota
@@ -98,6 +98,14 @@ def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Se
     request.job_id = job.id
     session.commit()
     return {"request_id": str(request.id), "job_id": str(job.id)}
+
+
+@router.delete("/graph")
+def delete_graph(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    _ = user
+    removed = clear_graph(session)
+    session.commit()
+    return removed
 
 
 @router.delete("/graph/nodes/{concept_id}")

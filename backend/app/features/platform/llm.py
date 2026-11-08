@@ -114,7 +114,9 @@ class GeminiProvider:
         prompt = (
             "Extend one shared knowledge graph from this request. Return JSON with nodes and edges only. "
             "Cover the request exhaustively: the subject plus the real subtopics a full treatment of that subject needs, "
-            "several levels deep when the subject has real parts. "
+            "several levels deep, not a single layer of children. "
+            "Each title is short and names the subject, for example a section called classification becomes "
+            "'Classification of dinosaurs' when the subject is dinosaurs. "
             "Use the actual parts of the subject. Do not substitute a generic outline such as foundations, methods, and applications. "
             "Each node has title, summary, explanation, and level. "
             "level 0 is the broadest topic and larger numbers are more specific parts. "
