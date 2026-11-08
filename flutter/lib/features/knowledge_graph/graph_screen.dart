@@ -58,11 +58,6 @@ class _GraphScreenState extends State<GraphScreen> {
         title: 'Graph',
         actions: [
           IconButton(
-            tooltip: 'Settings',
-            onPressed: () => _showSettings(context),
-            icon: const Icon(Icons.settings),
-          ),
-          IconButton(
             tooltip: 'Theme',
             onPressed: () {
               final themes = context.read<ThemeController>();
@@ -373,88 +368,72 @@ class _GraphScreenState extends State<GraphScreen> {
     );
   }
 
-  Future<void> _showSettings(BuildContext context) async {
-    await showModalBottomSheet<void>(
+  void _showHistory(BuildContext context) {
+    final graph = context.read<GraphController>();
+    showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Settings',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () async {
-                final confirmed = await showDialog<bool>(
-                  context: sheetContext,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text('Delete the whole graph?'),
-                    content: const Text(
-                      'This removes every node and every edge. Past extend requests stay.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext, true),
-                        child: const Text('Delete all'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed != true || !sheetContext.mounted) return;
-                Navigator.pop(sheetContext);
-                await context.read<GraphController>().clearGraph();
-              },
-              child: Text(
-                'Delete all nodes and edges',
-                style: TextStyle(
-                  color: Theme.of(sheetContext).colorScheme.error,
-                ),
+      builder: (sheetContext) => ListenableBuilder(
+        listenable: graph,
+        builder: (context, _) {
+          final requests = [
+            for (final raw
+                in (graph.workspace?['extend_requests'] as List?) ?? const [])
+              Map<String, dynamic>.from(raw as Map),
+          ];
+          return ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            children: [
+              const Text(
+                'Past extends',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(height: 12),
+              if (requests.isEmpty) const Text('No extends yet.'),
+              for (final request in requests)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _ExtendCard(
+                    request: request,
+                    onDelete: () => _deleteExtend(sheetContext, request),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  void _showHistory(BuildContext context) {
-    final requests = [
-      for (final raw
-          in (context.read<GraphController>().workspace?['extend_requests']
-                  as List?) ??
-              const [])
-        Map<String, dynamic>.from(raw as Map),
-    ];
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        children: [
-          const Text(
-            'Past extends',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+  Future<void> _deleteExtend(
+    BuildContext sheetContext,
+    Map<String, dynamic> request,
+  ) async {
+    final instruction = request['instruction']?.toString() ?? 'this extend';
+    final confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete $instruction?'),
+        content: const Text(
+          'This removes the extend and the nodes and edges it added.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
           ),
-          const SizedBox(height: 12),
-          if (requests.isEmpty) const Text('No extends yet.'),
-          for (final request in requests)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _ExtendCard(request: request),
-            ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
+    if (confirmed != true || !sheetContext.mounted) return;
+    final requestId = request['id']?.toString();
+    if (requestId == null) return;
+    await sheetContext.read<GraphController>().deleteRequest(requestId);
   }
 
   Matrix4 _cameraFor(ClusterMap map, Size viewport) {
@@ -512,9 +491,10 @@ int _levelOf(Map<String, dynamic> node) {
 }
 
 class _ExtendCard extends StatelessWidget {
-  const _ExtendCard({required this.request});
+  const _ExtendCard({required this.request, required this.onDelete});
 
   final Map<String, dynamic> request;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -536,8 +516,11 @@ class _ExtendCard extends StatelessWidget {
           : failed && error != null && error.isNotEmpty
           ? error
           : _when(request['created_at']?.toString()),
-      footer: pending
-          ? ClipRRect(
+      footer: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (pending)
+            ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
                 value: request['progress_fraction'] is num
@@ -545,8 +528,19 @@ class _ExtendCard extends StatelessWidget {
                     : 0.2,
                 minHeight: 8,
               ),
-            )
-          : null,
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onDelete,
+              child: Text(
+                'Delete',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

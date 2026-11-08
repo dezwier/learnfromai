@@ -140,14 +140,14 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  Future<void> clearGraph() async {
+  Future<void> deleteRequest(String requestId) async {
     final client = api;
     if (client == null) return;
     deleting = true;
     error = null;
     notifyListeners();
     try {
-      await client.delete('/graph');
+      await client.delete('/graph/extend/$requestId');
       workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
     } on ApiException catch (exc) {
       error = exc.message;

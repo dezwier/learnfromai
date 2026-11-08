@@ -234,15 +234,20 @@ void main() {
     expect(find.text('Waiting to generate'), findsOneWidget);
     expect(find.text('GENERATION_UNAVAILABLE'), findsNothing);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byTooltip('Past extends'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete all nodes and edges'), findsOneWidget);
-    await tester.tap(find.text('Delete all nodes and edges'));
+    expect(find.byTooltip('Settings'), findsNothing);
+    await tester.tap(find.text('Delete').last);
     await tester.pumpAndSettle();
-    expect(find.text('Delete the whole graph?'), findsOneWidget);
+    expect(find.text('Delete Dinosaurs?'), findsOneWidget);
+    expect(
+      find.text('This removes the extend and the nodes and edges it added.'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('Birds'), findsOneWidget);
+    expect(find.text('Dinosaurs'), findsWidgets);
   });
 
   testWidgets('expired session surfaces the auth error', (tester) async {

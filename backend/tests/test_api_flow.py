@@ -106,7 +106,8 @@ def test_openapi_is_auth_and_graph(client):
     assert "/api/v1/workspace/graph" in paths
     assert "/api/v1/graph/extend" in paths
     assert "/api/v1/graph/nodes/{concept_id}" in paths
-    assert "delete" in paths["/api/v1/graph"]
+    assert "delete" in paths["/api/v1/graph/extend/{request_id}"]
+    assert "/api/v1/graph" not in paths
     assert "/api/v1/goals" not in paths
     assert "/api/v1/reviews/due" not in paths
     assert "/api/v1/mastery/overview" not in paths
@@ -196,19 +197,36 @@ def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, sessi
     assert session.get(Concept, target) is None
 
 
-def test_clear_graph_removes_every_node_and_edge(client, auth):
+def test_delete_extend_removes_the_nodes_and_edges_it_added(client, auth, other_auth):
     created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
     assert created.status_code == 202
     process_until_idle()
-    removed = client.delete("/api/v1/graph", headers=auth)
+    first = client.get("/api/v1/workspace/graph", headers=auth).json()
+    parent_id = next(node["concept_id"] for node in first["nodes"] if node["title"] == "Dinosaurs")
+    child = client.post(
+        "/api/v1/graph/extend",
+        headers=other_auth,
+        json={"instruction": "Birds", "parent_concept_id": parent_id},
+    )
+    assert child.status_code == 202
+    process_until_idle()
+    grown = client.get("/api/v1/workspace/graph", headers=auth).json()
+    dinosaurs = next(item for item in grown["extend_requests"] if item["instruction"] == "Dinosaurs")
+    removed = client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}", headers=auth)
     assert removed.status_code == 200
     assert removed.json()["removed_nodes"] >= 1
-    body = client.get("/api/v1/workspace/graph", headers=auth).json()
-    assert body["nodes"] == []
-    assert body["edges"] == []
-    assert body["extend_requests"][0]["instruction"] == "Dinosaurs"
-    assert body["extend_requests"][0]["parent_concept_id"] is None
-    assert client.delete("/api/v1/graph").status_code == 401
+    body = client.get("/api/v1/workspace/graph", headers=other_auth).json()
+    titles = {node["title"] for node in body["nodes"]}
+    assert "Dinosaurs" not in titles
+    assert "Life sciences" not in titles
+    assert "Birds" in titles
+    assert all(item["instruction"] != "Dinosaurs" for item in body["extend_requests"])
+    assert any(item["instruction"] == "Birds" for item in body["extend_requests"])
+    dinosaur_ids = {node["concept_id"] for node in grown["nodes"] if node["title"] in {"Dinosaurs", "Life sciences"}}
+    assert all(edge["from_concept_id"] not in dinosaur_ids and edge["to_concept_id"] not in dinosaur_ids for edge in body["edges"])
+    missing = client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}", headers=auth)
+    assert missing.status_code == 404
+    assert client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}").status_code == 401
 
 
 def _reachable(root: str, edges: list[dict]) -> set[str]:

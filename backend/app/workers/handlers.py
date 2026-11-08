@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import UUID
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.db import engine
@@ -87,7 +87,14 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
         }
     )
     record_usage(session, user_id=user.id, job_id=job.id, task="propose_graph_branch", provider=provider.name, usage=usage)
-    session.commit()
+    session.exec(select(Graph).where(Graph.id == graph.id).with_for_update()).one()
+    session.expire(job)
+    session.expire(request)
+    session.refresh(job)
+    request = session.get(ExtendRequest, UUID(payload["request_id"]))
+    if job.state == "failed" or request is None:
+        session.commit()
+        return {"added_nodes": 0, "added_edges": 0, "truncated": False}
     _progress(session, job, request, "merging", "Adding topics to the graph", 0.85)
     result = apply_branch(
         session,
@@ -95,7 +102,13 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
         parent_concept_id=parent.id if parent else None,
         branch=branch,
         instruction=request.instruction,
+        extend_request_id=request.id,
     )
+    session.expire(request)
+    request = session.get(ExtendRequest, UUID(payload["request_id"]))
+    if request is None:
+        session.commit()
+        return result
     request.status = "succeeded"
     request.error_code = None
     request.truncated = bool(result["truncated"])

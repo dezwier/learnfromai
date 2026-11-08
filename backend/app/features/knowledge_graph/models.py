@@ -36,6 +36,7 @@ class Concept(SQLModel, table=True):
     summary: str = ""
     explanation: str = ""
     level: int = Field(default=0, index=True)
+    extend_request_id: UUID | None = Field(default=None, foreign_key="extend_requests.id", index=True)
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
@@ -52,4 +53,5 @@ class Edge(SQLModel, table=True):
     to_concept_id: UUID = Field(foreign_key="concepts.id")
     type: str
     is_primary_parent: bool = False
+    extend_request_id: UUID | None = Field(default=None, foreign_key="extend_requests.id", index=True)
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))

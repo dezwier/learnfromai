@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
+from app.features.graph_extend.models import ExtendRequest
 from app.features.knowledge_graph.domain import DIRECTED_TYPES, EDGE_TYPES, creates_cycle
 from app.features.knowledge_graph.hierarchy import assign_levels
 from app.features.knowledge_graph.placement import seat_branch
@@ -24,6 +25,7 @@ def apply_branch(
     parent_concept_id: UUID | None,
     branch: dict,
     instruction: str | None = None,
+    extend_request_id: UUID | None = None,
 ) -> dict:
     """Insert the model's nodes and edges, reusing concepts that already exist.
 
@@ -32,6 +34,12 @@ def apply_branch(
     no edges, while the rest of the branch is connected, is removed.
     """
     session.exec(select(Graph).where(Graph.id == graph.id).with_for_update()).one()
+    if extend_request_id is not None:
+        cached = session.get(ExtendRequest, extend_request_id)
+        if cached is not None:
+            session.expire(cached)
+        if session.get(ExtendRequest, extend_request_id) is None:
+            return {"added_nodes": 0, "added_edges": 0, "truncated": False}
     concepts = list(session.exec(select(Concept).where(Concept.origin_graph_id == graph.id)).all())
     edges = list(session.exec(select(Edge).where(Edge.graph_id == graph.id)).all())
     by_id = {concept.id: concept for concept in concepts}
@@ -74,6 +82,7 @@ def apply_branch(
             explanation=str(node.get("explanation") or "").strip(),
             level=_proposed_level(node) or 0,
             canonical_key=key,
+            extend_request_id=extend_request_id,
         )
         session.add(concept)
         session.flush()
@@ -94,7 +103,18 @@ def apply_branch(
 
     added_edges: list[Edge] = []
     for edge in _candidate_edges(branch):
-        _consider_edge(session, graph, edge, temp_ids, by_id, seen_edges, directed, primary_targets, added_edges)
+        _consider_edge(
+            session,
+            graph,
+            edge,
+            temp_ids,
+            by_id,
+            seen_edges,
+            directed,
+            primary_targets,
+            added_edges,
+            extend_request_id,
+        )
 
     incident = {concept_id for edge in added_edges for concept_id in (edge.from_concept_id, edge.to_concept_id)}
     branch_ids = set(temp_ids.values())
@@ -125,6 +145,7 @@ def apply_branch(
                 directed,
                 primary_targets,
                 added_edges,
+                extend_request_id,
             )
 
     live = [concept for concept in by_id.values() if concept.id not in deleted]
@@ -237,6 +258,7 @@ def _consider_edge(
     directed: dict[UUID, set[UUID]],
     primary_targets: set[UUID],
     added: list[Edge],
+    extend_request_id: UUID | None,
 ) -> None:
     kind = str(edge.get("type") or "contains")
     if kind not in EDGE_TYPES:
@@ -257,6 +279,7 @@ def _consider_edge(
         to_concept_id=target,
         type=kind,
         is_primary_parent=primary,
+        extend_request_id=extend_request_id,
     )
     session.add(row)
     seen_edges.add(identity)
