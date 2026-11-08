@@ -53,6 +53,10 @@ class _GraphScreenState extends State<GraphScreen> {
       for (final label in map.labels)
         if (label.level <= _shown) label,
     ];
+    final hexById = <String, ClusterHex>{
+      for (final hex in map.hexes)
+        if (hex.nodeId != null) hex.nodeId!: hex,
+    };
     return Scaffold(
       appBar: GradientTopBar(
         title: 'Graph',
@@ -128,8 +132,8 @@ class _GraphScreenState extends State<GraphScreen> {
                       transformationController: _camera,
                       alignment: Alignment.topLeft,
                       constrained: false,
-                      minScale: 0.25,
-                      maxScale: 4.5,
+                      minScale: _minGraphScale,
+                      maxScale: _maxGraphScale,
                       boundaryMargin: const EdgeInsets.all(double.infinity),
                       onInteractionStart: (_) {
                         _userMoved = true;
@@ -143,17 +147,23 @@ class _GraphScreenState extends State<GraphScreen> {
                           children: [
                             Positioned.fill(
                               child: CustomPaint(
-                                painter: _HexPainter(map.hexes),
+                                painter: _HexPainter(
+                                  [
+                                    ...map.hexes,
+                                  ]..sort((a, b) => a.level.compareTo(b.level)),
+                                  _shown,
+                                ),
                               ),
                             ),
                             for (final hex in map.hexes)
                               if (hex.nodeId != null &&
+                                  hex.filledAt(_shown) &&
                                   byId[hex.nodeId] != null)
                                 Positioned(
-                                  left: hex.cx - clusterHexRadius,
-                                  top: hex.cy - clusterHexRadius,
-                                  width: clusterHexRadius * 2,
-                                  height: clusterHexRadius * 2,
+                                  left: hex.cx - hex.radius,
+                                  top: hex.cy - hex.radius,
+                                  width: hex.radius * 2,
+                                  height: hex.radius * 2,
                                   child: GestureDetector(
                                     onTap: () =>
                                         _openNode(context, byId[hex.nodeId]!),
@@ -161,14 +171,11 @@ class _GraphScreenState extends State<GraphScreen> {
                                 ),
                             for (final label in visibleLabels)
                               if (byId[label.nodeId] != null)
-                                Positioned(
-                                  left: label.cx - label.width / 2,
-                                  top: label.cy - label.height / 2,
-                                  child: _ClusterPill(
-                                    label: label,
-                                    onTap: () =>
-                                        _openNode(context, byId[label.nodeId]!),
-                                  ),
+                                _placedLabel(
+                                  label,
+                                  hexById[label.nodeId],
+                                  _shown,
+                                  () => _openNode(context, byId[label.nodeId]!),
                                 ),
                           ],
                         ),
@@ -442,7 +449,7 @@ class _GraphScreenState extends State<GraphScreen> {
     var scale = viewport.width / boundsW;
     final heightScale = viewport.height / boundsH;
     if (heightScale < scale) scale = heightScale;
-    if (scale < 0.25) scale = 0.25;
+    if (scale < _minGraphScale) scale = _minGraphScale;
     if (scale > 1.2) scale = 1.2;
     return Matrix4.identity()
       ..translateByDouble(viewport.width / 2, viewport.height / 2, 0, 1)
@@ -481,6 +488,34 @@ class _GraphScreenState extends State<GraphScreen> {
       setState(() => _shown -= 1);
     }
   }
+}
+
+const _minGraphScale = 0.05;
+const _maxGraphScale = 32.0;
+
+Widget _placedLabel(
+  ClusterLabel label,
+  ClusterHex? hex,
+  int shown,
+  VoidCallback onTap,
+) {
+  final radius = hex?.radius ?? clusterHexRadius;
+  final height = (radius * 0.32).clamp(16.0, label.height);
+  final width = math.min(label.width, math.max(48.0, radius * 1.35));
+  // A split hexagon keeps its title in the upper point, clear of the children.
+  final shift = hex != null && hex.outlineAt(shown)
+      ? -math.min(hex.radius * 0.46, math.max(0.0, hex.radius - height))
+      : 0.0;
+  return Positioned(
+    left: label.cx - width / 2,
+    top: label.cy + shift - height / 2,
+    child: _ClusterPill(
+      label: label,
+      width: width,
+      height: height,
+      onTap: onTap,
+    ),
+  );
 }
 
 int _levelOf(Map<String, dynamic> node) {
@@ -558,18 +593,21 @@ String _when(String? raw) {
 }
 
 class _ClusterPill extends StatelessWidget {
-  const _ClusterPill({required this.label, required this.onTap});
+  const _ClusterPill({
+    required this.label,
+    required this.width,
+    required this.height,
+    required this.onTap,
+  });
 
   final ClusterLabel label;
+  final double width;
+  final double height;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final size = label.level <= 1
-        ? 15.0
-        : label.level == 2
-        ? 13.0
-        : 11.0;
+    final size = (height * 0.42).clamp(8.0, label.level <= 1 ? 15.0 : 13.0);
     final ink = label.color.computeLuminance() > 0.62
         ? const Color(0xFF1C2430)
         : Colors.white;
@@ -577,13 +615,13 @@ class _ClusterPill extends StatelessWidget {
       color: label.color,
       elevation: label.level <= 1 ? 3 : 1,
       shadowColor: Colors.black54,
-      borderRadius: BorderRadius.circular(label.height),
+      borderRadius: BorderRadius.circular(height),
       child: InkWell(
-        borderRadius: BorderRadius.circular(label.height),
+        borderRadius: BorderRadius.circular(height),
         onTap: onTap,
         child: SizedBox(
-          width: label.width,
-          height: label.height,
+          width: width,
+          height: height,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Center(
@@ -607,34 +645,54 @@ class _ClusterPill extends StatelessWidget {
 }
 
 class _HexPainter extends CustomPainter {
-  const _HexPainter(this.hexes);
+  const _HexPainter(this.hexes, this.shown);
 
   final List<ClusterHex> hexes;
+  final int shown;
 
   @override
   void paint(Canvas canvas, Size size) {
     for (final hex in hexes) {
-      final path = Path();
-      for (var corner = 0; corner < 6; corner++) {
-        final angle = math.pi / 180 * (60 * corner - 30);
-        final point = Offset(
-          hex.cx + clusterHexRadius * 0.9 * math.cos(angle),
-          hex.cy + clusterHexRadius * 0.9 * math.sin(angle),
-        );
-        if (corner == 0) {
-          path.moveTo(point.dx, point.dy);
-        } else {
-          path.lineTo(point.dx, point.dy);
-        }
-      }
-      path.close();
-      canvas.drawPath(path, Paint()..color = hex.color);
+      final filled = hex.filledAt(shown);
+      if (!filled && !hex.outlineAt(shown)) continue;
+      final path = _hexPath(hex.cx, hex.cy, hex.radius * 0.94);
+      canvas.drawPath(
+        path,
+        Paint()..color = filled ? hex.color : hex.color.withValues(alpha: 0.16),
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = math.min(5, math.max(1.25, hex.radius * 0.028))
+          ..color = const Color(
+            0xFF0E1218,
+          ).withValues(alpha: filled ? 0.5 : 0.28),
+      );
     }
   }
 
   @override
   bool shouldRepaint(covariant _HexPainter oldDelegate) =>
-      oldDelegate.hexes != hexes;
+      oldDelegate.shown != shown || oldDelegate.hexes != hexes;
+}
+
+Path _hexPath(double cx, double cy, double radius) {
+  final path = Path();
+  for (var corner = 0; corner < 6; corner++) {
+    final angle = math.pi / 180 * (60 * corner - 30);
+    final point = Offset(
+      cx + radius * math.cos(angle),
+      cy + radius * math.sin(angle),
+    );
+    if (corner == 0) {
+      path.moveTo(point.dx, point.dy);
+    } else {
+      path.lineTo(point.dx, point.dy);
+    }
+  }
+  path.close();
+  return path;
 }
 
 class _NodeSheet extends StatefulWidget {
