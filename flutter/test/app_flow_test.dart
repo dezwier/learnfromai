@@ -65,6 +65,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Partitions'), findsOneWidget);
     expect(find.text('Extend this node'), findsOneWidget);
+    expect(find.text('Delete node'), findsOneWidget);
+
+    await tester.tap(find.text('Delete node'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete Decision Trees?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Decision Trees'), findsWidgets);
+
+    await tester.tap(find.text('Delete node'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Extend this node'), findsNothing);
+    expect(find.text('Decision Trees'), findsOneWidget);
   });
 
   testWidgets('expired session surfaces the auth error', (tester) async {
