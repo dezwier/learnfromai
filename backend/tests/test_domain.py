@@ -108,8 +108,8 @@ def test_second_extend_adds_only_missing_edges(session):
     stored = list(session.exec(select(Concept).where(Concept.origin_graph_id == graph.id)).all())
     assert len(stored) == 2
     by_title = {concept.title: concept for concept in stored}
-    assert by_title["Dinosaurs"].level == 0
-    assert by_title["Birds"].level == 1
+    assert by_title["Dinosaurs"].level == 1
+    assert by_title["Birds"].level == 2
 
 
 def test_explanation_reuses_a_covered_topic_and_keeps_a_deeper_part(session):
@@ -216,7 +216,7 @@ def test_a_real_explanation_replaces_a_short_placeholder(session):
                     "title": "Anatomy",
                     "summary": "The body",
                     "explanation": "Covers the skeleton and soft tissue of dinosaurs.",
-                    "level": 1,
+                    "level": 2,
                 },
             ],
             "edges": [{"from": "root", "to": "anatomy", "type": "contains", "is_primary_parent": True}],
@@ -226,4 +226,4 @@ def test_a_real_explanation_replaces_a_short_placeholder(session):
     stored = {concept.title: concept for concept in session.exec(select(Concept).where(Concept.origin_graph_id == graph.id)).all()}
     assert set(stored) == {"Dinosaurs", "Anatomy"}
     assert stored["Dinosaurs"].explanation == long
-    assert stored["Anatomy"].level == 1
+    assert stored["Anatomy"].level == 2

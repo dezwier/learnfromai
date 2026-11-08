@@ -54,9 +54,16 @@ def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
     assert first.status_code == 200
     body = first.json()
     titles = {node["title"]: node for node in body["nodes"]}
-    assert set(titles) == {"Dinosaurs"}
+    assert set(titles) == {"Life sciences", "Dinosaurs"}
     dinosaur = titles["Dinosaurs"]
-    assert dinosaur["level"] == 0
+    assert titles["Life sciences"]["level"] == 1
+    assert dinosaur["level"] == 2
+    assert any(
+        edge["from_concept_id"] == titles["Life sciences"]["concept_id"]
+        and edge["to_concept_id"] == dinosaur["concept_id"]
+        and edge["type"] == "contains"
+        for edge in body["edges"]
+    )
     assert "dinosaurs" in dinosaur["explanation"].lower()
     assert "foundations" not in dinosaur["title"].lower()
     assert body["extend_requests"][0]["instruction"] == "Dinosaurs"
@@ -77,7 +84,7 @@ def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
     by_title = {node["title"]: node["concept_id"] for node in second["nodes"]}
     assert "Birds" in by_title
     birds_node = next(node for node in second["nodes"] if node["title"] == "Birds")
-    assert birds_node["level"] == 1
+    assert birds_node["level"] == 3
     assert "birds" in birds_node["explanation"].lower()
     assert any(
         edge["from_concept_id"] == parent_id and edge["to_concept_id"] == by_title["Birds"] and edge["type"] == "contains"

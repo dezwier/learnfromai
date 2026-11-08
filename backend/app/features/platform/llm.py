@@ -18,7 +18,7 @@ from app.features.platform.models import LlmUsage
 
 logger = logging.getLogger(__name__)
 
-PROMPT_GRAPH = "graph_branch_v3"
+PROMPT_GRAPH = "graph_branch_v4"
 INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
 
@@ -119,7 +119,14 @@ class GeminiProvider:
             "'Classification of dinosaurs' when the subject is dinosaurs. "
             "Use the actual parts of the subject. Do not substitute a generic outline such as foundations, methods, and applications. "
             "Each node has title, summary, explanation, and level. "
-            "level 0 is the broadest topic and larger numbers are more specific parts. "
+            "Level 1 is one broad domain, such as life sciences, physical health, social sciences, literature, "
+            "life skills, psychology, mental wellbeing, mathematics, physical sciences, history, arts, technology, or language. "
+            "A broad topic such as parenting or dinosaurs is level 2 under the single domain that contains it: "
+            "parenting under life skills, dinosaurs under life sciences. "
+            "If the request names a domain, that domain is the only branch root, at level 1. "
+            "If an existing node should contain the request, reuse that node as the parent instead of adding another root. "
+            "The requested topic is one node. Every other new node hangs under it by a contains edge. "
+            "Do not return several unconnected top-level nodes. "
             "explanation is several sentences that state the range the node covers, so a later request can tell "
             "whether an idea is already included. "
             "summary is one short line. "

@@ -25,25 +25,48 @@ void main() {
     final tokens = MemoryTokenStore();
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
-    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
+    await tester.pumpWidget(
+      AdaptiveMasteryApp(auth: auth, graph: GraphController()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsWidgets);
     expect(find.text('Trajectories'), findsNothing);
     expect(find.text('Review'), findsNothing);
   });
 
-  testWidgets('graph shows nodes, summary, and solid extend history', (tester) async {
+  testWidgets('graph shows nodes, summary, and solid extend history', (
+    tester,
+  ) async {
     final graph = GraphController()
       ..workspace = {
         'nodes': [
-          {'concept_id': 'dt', 'title': 'Decision Trees', 'summary': 'Partitions'},
-          {'concept_id': 'entropy', 'title': 'Entropy', 'summary': 'Uncertainty'},
+          {
+            'concept_id': 'dt',
+            'title': 'Decision Trees',
+            'summary': 'Partitions',
+          },
+          {
+            'concept_id': 'entropy',
+            'title': 'Entropy',
+            'summary': 'Uncertainty',
+          },
         ],
         'edges': [
-          {'edge_id': 'e1', 'from_concept_id': 'dt', 'to_concept_id': 'entropy', 'type': 'prerequisite'},
+          {
+            'edge_id': 'e1',
+            'from_concept_id': 'dt',
+            'to_concept_id': 'entropy',
+            'type': 'prerequisite',
+          },
         ],
         'extend_requests': [
-          {'id': 'r1', 'instruction': 'Add dinosaurs', 'status': 'succeeded', 'author': 'Ada', 'created_at': '2026-11-08T04:00:00Z'},
+          {
+            'id': 'r1',
+            'instruction': 'Add dinosaurs',
+            'status': 'succeeded',
+            'author': 'Ada',
+            'created_at': '2026-11-08T04:00:00Z',
+          },
         ],
       };
     await tester.pumpWidget(_app(_signedIn(), graph));
@@ -82,15 +105,34 @@ void main() {
     expect(find.text('Decision Trees'), findsOneWidget);
   });
 
-  testWidgets('zoomed out graph hides the next hierarchy level', (tester) async {
+  testWidgets('zoomed out graph hides the next hierarchy level', (
+    tester,
+  ) async {
     final graph = GraphController()
       ..workspace = {
         'nodes': [
-          {'concept_id': 'birds', 'title': 'Birds', 'summary': 'Animals', 'explanation': 'Covers the range of birds.', 'level': 0},
-          {'concept_id': 'flight', 'title': 'Flight', 'summary': 'Wings', 'explanation': 'Covers how birds fly.', 'level': 1},
+          {
+            'concept_id': 'birds',
+            'title': 'Birds',
+            'summary': 'Animals',
+            'explanation': 'Covers the range of birds.',
+            'level': 0,
+          },
+          {
+            'concept_id': 'flight',
+            'title': 'Flight',
+            'summary': 'Wings',
+            'explanation': 'Covers how birds fly.',
+            'level': 1,
+          },
         ],
         'edges': [
-          {'edge_id': 'e1', 'from_concept_id': 'birds', 'to_concept_id': 'flight', 'type': 'contains'},
+          {
+            'edge_id': 'e1',
+            'from_concept_id': 'birds',
+            'to_concept_id': 'flight',
+            'type': 'contains',
+          },
         ],
         'extend_requests': [],
       };
@@ -116,11 +158,61 @@ void main() {
     expect(find.text('Birds'), findsOneWidget);
   });
 
-  testWidgets('a queued extend shows pending generation and its step', (tester) async {
+  testWidgets('zooming reveals level 2 groups and then level 3 hex labels', (
+    tester,
+  ) async {
     final graph = GraphController()
       ..workspace = {
         'nodes': [
-          {'concept_id': 'birds', 'title': 'Birds', 'summary': 'Animals', 'level': 0},
+          {'concept_id': 'life', 'title': 'Life sciences', 'level': 1},
+          {'concept_id': 'dinos', 'title': 'Dinosaurs', 'level': 2},
+          {'concept_id': 'teeth', 'title': 'Teeth of dinosaurs', 'level': 3},
+        ],
+        'edges': [
+          {
+            'edge_id': 'e1',
+            'from_concept_id': 'life',
+            'to_concept_id': 'dinos',
+            'type': 'contains',
+          },
+          {
+            'edge_id': 'e2',
+            'from_concept_id': 'dinos',
+            'to_concept_id': 'teeth',
+            'type': 'contains',
+          },
+        ],
+        'extend_requests': [],
+      };
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+    expect(find.text('Life sciences'), findsOneWidget);
+    expect(find.text('Dinosaurs'), findsNothing);
+    expect(find.text('Teeth of dinosaurs'), findsNothing);
+
+    await tester.tap(find.byTooltip('Show more detail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Teeth of dinosaurs'), findsNothing);
+
+    await tester.tap(find.byTooltip('Show more detail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Teeth of dinosaurs'), findsOneWidget);
+    expect(find.text('Life sciences'), findsOneWidget);
+  });
+
+  testWidgets('a queued extend shows pending generation and its step', (
+    tester,
+  ) async {
+    final graph = GraphController()
+      ..workspace = {
+        'nodes': [
+          {
+            'concept_id': 'birds',
+            'title': 'Birds',
+            'summary': 'Animals',
+            'level': 0,
+          },
         ],
         'edges': [],
         'extend_requests': [
@@ -158,24 +250,38 @@ void main() {
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
     auth.error = 'Session expired';
-    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
+    await tester.pumpWidget(
+      AdaptiveMasteryApp(auth: auth, graph: GraphController()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Session expired'), findsOneWidget);
     expect(find.text('Sign in'), findsWidgets);
   });
 
   testWidgets('loading slot uses a full-size pulse', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox(height: 120, width: 200, child: PulsePlaceholder()))));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SizedBox(height: 120, width: 200, child: PulsePlaceholder()),
+        ),
+      ),
+    );
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
   test('api client maps the error envelope', () {
-    expect(ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code, 'UNAUTHORIZED');
+    expect(
+      ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code,
+      'UNAUTHORIZED',
+    );
   });
 }
 
 AuthController _signedIn() {
-  final auth = AuthController(api: ApiClient(baseUrl: 'http://localhost', tokens: MemoryTokenStore()), gateway: _Gateway());
+  final auth = AuthController(
+    api: ApiClient(baseUrl: 'http://localhost', tokens: MemoryTokenStore()),
+    gateway: _Gateway(),
+  );
   auth.user = UserProfile(id: '1', displayName: 'Ada', timezone: 'UTC');
   return auth;
 }

@@ -94,6 +94,7 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
         graph=graph,
         parent_concept_id=parent.id if parent else None,
         branch=branch,
+        instruction=request.instruction,
     )
     request.status = "succeeded"
     request.error_code = None

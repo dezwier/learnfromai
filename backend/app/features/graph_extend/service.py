@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.features.knowledge_graph.domain import DIRECTED_TYPES, EDGE_TYPES, creates_cycle
 from app.features.knowledge_graph.hierarchy import assign_levels
+from app.features.knowledge_graph.placement import seat_branch
 from app.features.knowledge_graph.identity import (
     canonical_key_for,
     explanation_covers,
@@ -22,6 +23,7 @@ def apply_branch(
     graph: Graph,
     parent_concept_id: UUID | None,
     branch: dict,
+    instruction: str | None = None,
 ) -> dict:
     """Insert the model's nodes and edges, reusing concepts that already exist.
 
@@ -35,6 +37,8 @@ def apply_branch(
     by_id = {concept.id: concept for concept in concepts}
     catalog = _catalog(concepts)
     parent = by_id.get(parent_concept_id) if parent_concept_id else None
+    if parent is None and instruction and instruction.strip():
+        seat_branch(branch, instruction, [_snapshot(concept) for concept in concepts])
 
     raw_nodes = [node for node in (branch.get("nodes") or []) if isinstance(node, dict)]
     known_titles = {concept.title for concept in concepts} | {str(node.get("title") or "") for node in raw_nodes}
@@ -134,6 +138,16 @@ def apply_branch(
         "added_nodes": len(created) - len(deleted),
         "added_edges": len(added_edges),
         "truncated": truncated,
+    }
+
+
+def _snapshot(concept: Concept) -> dict:
+    return {
+        "concept_id": str(concept.id),
+        "title": concept.title,
+        "level": concept.level,
+        "explanation": concept.explanation or "",
+        "canonical_key": concept.canonical_key or "",
     }
 
 

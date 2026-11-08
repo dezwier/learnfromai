@@ -6,7 +6,7 @@ from app.features.knowledge_graph.models import Concept, Edge
 
 
 def assign_levels(concepts: list[Concept], edges: list[Edge]) -> None:
-    """Set each node's level from the contains tree. Zero is the broadest."""
+    """Set each node's level from the contains tree. A root domain is level 1."""
     ids = [concept.id for concept in concepts]
     children: dict[UUID, list[UUID]] = {concept_id: [] for concept_id in ids}
     incoming = {concept_id: 0 for concept_id in ids}
@@ -18,7 +18,7 @@ def assign_levels(concepts: list[Concept], edges: list[Edge]) -> None:
         children[edge.from_concept_id].append(edge.to_concept_id)
         incoming[edge.to_concept_id] += 1
     unreachable = len(ids) + 1
-    level = {concept_id: 0 if incoming[concept_id] == 0 else unreachable for concept_id in ids}
+    level = {concept_id: 1 if incoming[concept_id] == 0 else unreachable for concept_id in ids}
     changed = True
     guard = 0
     while changed and guard <= len(ids):
@@ -34,4 +34,4 @@ def assign_levels(concepts: list[Concept], edges: list[Edge]) -> None:
                     changed = True
     for concept in concepts:
         value = level[concept.id]
-        concept.level = 0 if value >= unreachable else value
+        concept.level = 1 if value >= unreachable else value
