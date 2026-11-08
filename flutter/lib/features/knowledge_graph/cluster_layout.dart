@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-/// A level-1 domain drawn as one colored field of hexagons.
+/// Fractal hexagon map of one shared graph.
+///
+/// Level-1 domains are hexagons packed together into a larger hexagon.
+/// A domain splits into the same kind of hexagons — its children — and each
+/// of those splits the same way.
 class ClusterMap {
   const ClusterMap({
     required this.hexes,
@@ -20,15 +24,29 @@ class ClusterHex {
   const ClusterHex({
     required this.cx,
     required this.cy,
+    required this.radius,
+    required this.level,
+    required this.childLevel,
     required this.color,
     this.nodeId,
   });
 
-  /// Concept this cell opens. Empty cells only fill out the group.
   final String? nodeId;
   final double cx;
   final double cy;
+
+  /// Center to vertex.
+  final double radius;
+  final int level;
+
+  /// Detail level at which this hexagon splits into its children.
+  /// Leaves use a level past any real node so they stay on screen.
+  final int childLevel;
   final Color color;
+
+  bool filledAt(int shown) => level <= shown && shown < childLevel;
+
+  bool outlineAt(int shown) => level < shown && childLevel <= shown;
 }
 
 class ClusterLabel {
@@ -53,7 +71,8 @@ class ClusterLabel {
   final Color color;
 }
 
-const clusterHexRadius = 12.0;
+/// Vertex radius of a hexagon with nothing nested inside it.
+const clusterHexRadius = 22.0;
 
 const clusterPalette = <Color>[
   Color(0xFF3B82F6),
@@ -70,18 +89,19 @@ const clusterPalette = <Color>[
   Color(0xFF06B6D4),
 ];
 
+/// Extra space so neighboring hexagons stay separate honeycombs.
+const _packGap = 1.06;
+
+/// Parent hexagon is a little larger than the children it splits into.
+const _outlinePad = 1.08;
+
+const _leafSplit = 1000000;
+
 class _Axial {
   const _Axial(this.q, this.r);
 
   final int q;
   final int r;
-
-  @override
-  bool operator ==(Object other) =>
-      other is _Axial && other.q == q && other.r == r;
-
-  @override
-  int get hashCode => Object.hash(q, r);
 }
 
 const _dirs = <_Axial>[
@@ -101,12 +121,15 @@ class _Node {
   final int level;
 }
 
-class _Cell {
-  _Cell(this.axial, this.color, [this.nodeId]);
+class _Placed {
+  _Placed(this.node, this.color, this.radius, this.childLevel, this.children);
 
-  final _Axial axial;
+  final _Node node;
   final Color color;
-  final String? nodeId;
+  double radius;
+  final int childLevel;
+  final List<_Placed> children;
+  Offset center = Offset.zero;
 }
 
 ClusterMap layoutClusters(
@@ -129,7 +152,11 @@ ClusterMap layoutClusters(
     if (edge['type']?.toString() != 'contains') continue;
     final from = edge['from_concept_id']?.toString();
     final to = edge['to_concept_id']?.toString();
-    if (from == null || to == null || from == to || !byId.containsKey(from) || !byId.containsKey(to)) {
+    if (from == null ||
+        to == null ||
+        from == to ||
+        !byId.containsKey(from) ||
+        !byId.containsKey(to)) {
       continue;
     }
     if (parent.containsKey(to)) continue;
@@ -141,196 +168,219 @@ ClusterMap layoutClusters(
     for (final id in byId.keys)
       if (!parent.containsKey(id)) id,
   ]..sort();
+  final placed = <_Placed>[];
+  for (var index = 0; index < roots.length; index++) {
+    final id = roots[index];
+    placed.add(
+      _layout(
+        byId[id]!,
+        clusterPalette[index % clusterPalette.length],
+        children,
+        byId,
+        {id},
+      ),
+    );
+  }
+  _spread(placed);
+
   final hexes = <ClusterHex>[];
   final labels = <ClusterLabel>[];
-  final occupied = <Rect>[];
-
-  for (var index = 0; index < roots.length; index++) {
-    final root = roots[index];
-    final color = clusterPalette[index % clusterPalette.length];
-    final island = _island(root, byId, children, color);
-    final bounds = _bounds(island);
-    final origin = _place(bounds, occupied);
-    occupied.add(bounds.shift(origin));
-    for (final cell in island) {
-      final pixel = _pixel(cell.axial) + origin;
-      hexes.add(
-        ClusterHex(
-          nodeId: cell.nodeId,
-          cx: pixel.dx,
-          cy: pixel.dy,
-          color: cell.color,
-        ),
-      );
-    }
-    labels.addAll(_labels(root, byId, children, island, origin, color));
+  for (final root in placed) {
+    _emit(root, Offset.zero, hexes, labels);
   }
-
   return _canvas(hexes, labels);
 }
 
-List<_Cell> _island(
-  String root,
-  Map<String, _Node> byId,
-  Map<String, List<String>> children,
+_Placed _layout(
+  _Node node,
   Color color,
-) {
-  final branches = children[root] ?? const <String>[];
-  if (branches.isEmpty) {
-    return _flower(const _Axial(0, 0), color, root);
-  }
-  final blobs = <List<_Cell>>[];
-  for (final branch in branches) {
-    final members = _hexMembers(branch, byId, children);
-    final locals = _spiral(math.max(members.length, 1));
-    final cells = <_Cell>[];
-    for (var i = 0; i < members.length; i++) {
-      cells.add(_Cell(locals[i], color, members[i]));
-    }
-    blobs.add(
-      cells.length < 7
-          ? _flower(const _Axial(0, 0), color, members.first)
-          : cells,
-    );
-  }
-  return _arrange(blobs);
-}
-
-List<String> _hexMembers(
-  String branch,
+  Map<String, List<String>> children,
   Map<String, _Node> byId,
-  Map<String, List<String>> children,
+  Set<String> stack,
 ) {
-  final deep = <String>[];
-  void walk(String id) {
-    final node = byId[id];
-    if (node != null && node.level >= 3) deep.add(id);
-    for (final child in children[id] ?? const <String>[]) {
-      walk(child);
-    }
+  final childIds = [...?children[node.id]]..sort();
+  final kids = <_Placed>[];
+  for (final id in childIds) {
+    if (stack.contains(id)) continue;
+    kids.add(_layout(byId[id]!, color, children, byId, {...stack, id}));
   }
-
-  walk(branch);
-  if (deep.isNotEmpty) return deep;
-  return [branch];
+  _spread(kids);
+  var split = _leafSplit;
+  if (kids.isNotEmpty) {
+    split = kids.first.node.level;
+    for (final kid in kids.skip(1)) {
+      if (kid.node.level < split) split = kid.node.level;
+    }
+    if (split <= node.level) split = node.level + 1;
+  }
+  return _Placed(
+    node,
+    color,
+    kids.isEmpty ? clusterHexRadius : _enclose(kids),
+    split,
+    kids,
+  );
 }
 
-List<_Cell> _flower(_Axial center, Color color, String nodeId) {
-  return [
-    _Cell(center, color, nodeId),
-    for (final dir in _dirs)
-      _Cell(_Axial(center.q + dir.q, center.r + dir.r), color),
-  ];
-}
-
-List<_Cell> _arrange(List<List<_Cell>> blobs) {
-  final origins = <_Axial>[];
-  for (var i = 0; i < blobs.length; i++) {
-    final radius = _radius(blobs[i]) + 1;
-    if (i == 0) {
-      origins.add(const _Axial(0, 0));
-      continue;
-    }
-    _Axial? chosen;
-    for (final candidate in _spiral(180)) {
-      var clear = true;
-      for (var j = 0; j < origins.length; j++) {
-        final limit = radius + _radius(blobs[j]) + 1;
-        if (_distance(candidate, origins[j]) < limit) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) {
-        chosen = candidate;
-        break;
-      }
-    }
-    origins.add(chosen ?? _Axial(i * 6, 0));
-  }
-  final cells = <_Cell>[];
-  for (var i = 0; i < blobs.length; i++) {
-    for (final cell in blobs[i]) {
-      cells.add(
-        _Cell(
-          _Axial(origins[i].q + cell.axial.q, origins[i].r + cell.axial.r),
-          cell.color,
-          cell.nodeId,
-        ),
-      );
-    }
-  }
-  return cells;
-}
-
-List<ClusterLabel> _labels(
-  String root,
-  Map<String, _Node> byId,
-  Map<String, List<String>> children,
-  List<_Cell> island,
-  Offset shift,
-  Color color,
+void _emit(
+  _Placed node,
+  Offset origin,
+  List<ClusterHex> hexes,
+  List<ClusterLabel> labels,
 ) {
-  final labels = <ClusterLabel>[];
-  labels.add(_label(byId[root]!, _centroid(island, null) + shift, color));
+  final world = origin + node.center;
+  hexes.add(
+    ClusterHex(
+      nodeId: node.node.id,
+      cx: world.dx,
+      cy: world.dy,
+      radius: node.radius,
+      level: node.node.level,
+      childLevel: node.childLevel,
+      color: node.color,
+    ),
+  );
+  labels.add(_label(node.node, world, node.color));
+  for (final child in node.children) {
+    _emit(child, world, hexes, labels);
+  }
+}
 
-  void walk(String id) {
-    for (final child in children[id] ?? const <String>[]) {
-      final node = byId[child];
-      if (node != null) {
-        final anchor =
-            _centroid(_cellsFor(island, child, children), null) + shift;
-        final nudged = node.level >= 3
-            ? anchor + const Offset(0, 14)
-            : anchor + const Offset(0, 18);
-        labels.add(_label(node, nudged, color));
+/// Sibling hexagons match in size, so a split looks like the parent.
+/// The fullest subtree keeps the middle of the hexagon.
+void _spread(List<_Placed> nodes) {
+  if (nodes.isEmpty) return;
+  var slot = nodes.first.radius;
+  for (final node in nodes.skip(1)) {
+    if (node.radius > slot) slot = node.radius;
+  }
+  final weight = {for (final node in nodes) node: node.radius};
+  for (final node in nodes) {
+    _fit(node, slot);
+  }
+  final spots = [..._centers(nodes.length, math.sqrt(3) * slot * _packGap)]
+    ..sort((a, b) => a.distance.compareTo(b.distance));
+  final ordered = [...nodes]
+    ..sort((a, b) {
+      final byWeight = weight[b]!.compareTo(weight[a]!);
+      if (byWeight != 0) return byWeight;
+      return a.node.id.compareTo(b.node.id);
+    });
+  for (var i = 0; i < ordered.length; i++) {
+    ordered[i].center = spots[i];
+  }
+}
+
+void _fit(_Placed node, double target) {
+  if (node.radius <= 0) {
+    node.radius = target;
+    return;
+  }
+  final scale = target / node.radius;
+  node.radius = target;
+  if ((scale - 1).abs() < 0.0001) return;
+  for (final child in node.children) {
+    _scaleTree(child, scale);
+  }
+}
+
+void _scaleTree(_Placed node, double scale) {
+  node.radius *= scale;
+  node.center = Offset(node.center.dx * scale, node.center.dy * scale);
+  for (final child in node.children) {
+    _scaleTree(child, scale);
+  }
+}
+
+double _enclose(List<_Placed> kids) {
+  var reach = 0.0;
+  for (final kid in kids) {
+    final vertex = (kid.center.distance + kid.radius) / math.cos(math.pi / 6);
+    if (vertex > reach) reach = vertex;
+  }
+  return reach * _outlinePad;
+}
+
+List<Offset> _centers(int count, double step) {
+  if (count <= 1) return const [Offset.zero];
+  if (count < 6) {
+    return _recenter([for (final cell in _spiral(count)) _pixel(cell, step)]);
+  }
+  if (count == 6) {
+    return _recenter(_ringPixels(1, 6, step));
+  }
+  var ring = 1;
+  while (_hexCount(ring) < count) {
+    ring++;
+  }
+  final inner = _hexCount(ring - 1);
+  return _recenter([
+    ..._disk(ring - 1, step),
+    ..._ringPixels(ring, count - inner, step),
+  ]);
+}
+
+List<Offset> _disk(int ring, double step) {
+  return [for (final cell in _spiral(_hexCount(ring))) _pixel(cell, step)];
+}
+
+List<Offset> _ringPixels(int ring, int take, double step) {
+  if (take <= 0) return const [];
+  final cells = _spiral(_hexCount(ring)).sublist(_hexCount(ring - 1));
+  if (take >= cells.length) {
+    return [for (final cell in cells) _pixel(cell, step)];
+  }
+  final used = <int>{};
+  final picked = <_Axial>[];
+  for (var i = 0; i < take; i++) {
+    final target = i * cells.length / take;
+    var best = 0;
+    var bestScore = cells.length.toDouble();
+    for (var j = 0; j < cells.length; j++) {
+      if (used.contains(j)) continue;
+      var delta = (j - target).abs();
+      if (delta > cells.length / 2) delta = cells.length - delta;
+      if (delta < bestScore) {
+        bestScore = delta;
+        best = j;
       }
-      walk(child);
     }
+    used.add(best);
+    picked.add(cells[best]);
   }
-
-  walk(root);
-  return labels;
+  return [for (final cell in picked) _pixel(cell, step)];
 }
 
-List<_Cell> _cellsFor(
-  List<_Cell> island,
-  String id,
-  Map<String, List<String>> children,
-) {
-  final ids = <String>{id};
-  void walk(String current) {
-    for (final child in children[current] ?? const <String>[]) {
-      ids.add(child);
-      walk(child);
-    }
+List<Offset> _recenter(List<Offset> points) {
+  var x = 0.0;
+  var y = 0.0;
+  for (final point in points) {
+    x += point.dx;
+    y += point.dy;
   }
-
-  walk(id);
-  final cells = [
-    for (final cell in island)
-      if (cell.nodeId != null && ids.contains(cell.nodeId)) cell,
-  ];
-  return cells.isEmpty ? island : cells;
+  final center = Offset(x / points.length, y / points.length);
+  return [for (final point in points) point - center];
 }
+
+int _hexCount(int ring) => ring < 0 ? 0 : 3 * ring * (ring + 1) + 1;
 
 ClusterLabel _label(_Node node, Offset center, Color color) {
-  final width = _labelWidth(node.title, node.level);
-  final height = node.level <= 1
-      ? 34.0
-      : node.level == 2
-      ? 28.0
-      : 22.0;
   return ClusterLabel(
     nodeId: node.id,
     title: node.title,
     level: node.level,
     cx: center.dx,
     cy: center.dy,
-    width: width,
-    height: height,
+    width: _labelWidth(node.title, node.level),
+    height: _labelHeight(node.level),
     color: color,
   );
+}
+
+double _labelHeight(int level) {
+  if (level <= 1) return 34;
+  if (level == 2) return 28;
+  return 22;
 }
 
 double _labelWidth(String title, int level) {
@@ -370,10 +420,10 @@ ClusterMap _canvas(List<ClusterHex> hexes, List<ClusterLabel> labels) {
 
   for (final hex in hexes) {
     include(
-      hex.cx - clusterHexRadius,
-      hex.cy - clusterHexRadius,
-      hex.cx + clusterHexRadius,
-      hex.cy + clusterHexRadius,
+      hex.cx - hex.radius,
+      hex.cy - hex.radius,
+      hex.cx + hex.radius,
+      hex.cy + hex.radius,
     );
   }
   for (final label in labels) {
@@ -394,6 +444,9 @@ ClusterMap _canvas(List<ClusterHex> hexes, List<ClusterLabel> labels) {
           nodeId: hex.nodeId,
           cx: hex.cx + dx,
           cy: hex.cy + dy,
+          radius: hex.radius,
+          level: hex.level,
+          childLevel: hex.childLevel,
           color: hex.color,
         ),
     ],
@@ -415,81 +468,12 @@ ClusterMap _canvas(List<ClusterHex> hexes, List<ClusterLabel> labels) {
   );
 }
 
-Rect _bounds(List<_Cell> cells) {
-  var minX = 0.0;
-  var minY = 0.0;
-  var maxX = 0.0;
-  var maxY = 0.0;
-  for (var i = 0; i < cells.length; i++) {
-    final pixel = _pixel(cells[i].axial);
-    final left = pixel.dx - clusterHexRadius;
-    final top = pixel.dy - clusterHexRadius;
-    final right = pixel.dx + clusterHexRadius;
-    final bottom = pixel.dy + clusterHexRadius;
-    if (i == 0 || left < minX) minX = left;
-    if (i == 0 || top < minY) minY = top;
-    if (i == 0 || right > maxX) maxX = right;
-    if (i == 0 || bottom > maxY) maxY = bottom;
-  }
-  return Rect.fromLTRB(minX, minY, maxX, maxY);
-}
-
-Offset _place(Rect bounds, List<Rect> occupied) {
-  if (occupied.isEmpty) return Offset.zero;
-  final step = math.max(bounds.width, bounds.height) + clusterHexRadius * 4;
-  for (var ring = 1; ring < 24; ring++) {
-    for (var turn = 0; turn < ring * 6; turn++) {
-      final angle = turn / (ring * 6) * math.pi * 2;
-      final origin = Offset(
-        math.cos(angle) * step * ring,
-        math.sin(angle) * step * ring,
-      );
-      final moved = bounds.shift(origin).inflate(clusterHexRadius * 3);
-      final hits = occupied.any(
-        (other) => other.inflate(clusterHexRadius * 3).overlaps(moved),
-      );
-      if (!hits) return origin;
-    }
-  }
-  return Offset(step * (occupied.length + 1), 0);
-}
-
-Offset _centroid(List<_Cell> cells, String? nodeId) {
-  final chosen = [
-    for (final cell in cells)
-      if (nodeId == null || cell.nodeId == nodeId) cell,
-  ];
-  final sample = chosen.isEmpty ? cells : chosen;
-  var x = 0.0;
-  var y = 0.0;
-  for (final cell in sample) {
-    final pixel = _pixel(cell.axial);
-    x += pixel.dx;
-    y += pixel.dy;
-  }
-  return Offset(x / sample.length, y / sample.length);
-}
-
-Offset _pixel(_Axial cell) {
+Offset _pixel(_Axial cell, double step) {
+  final size = step / math.sqrt(3);
   return Offset(
-    clusterHexRadius * math.sqrt(3) * (cell.q + cell.r / 2),
-    clusterHexRadius * 1.5 * cell.r,
+    size * math.sqrt(3) * (cell.q + cell.r / 2),
+    size * 1.5 * cell.r,
   );
-}
-
-int _radius(List<_Cell> cells) {
-  var radius = 0;
-  for (final cell in cells) {
-    final distance = _distance(cell.axial, const _Axial(0, 0));
-    if (distance > radius) radius = distance;
-  }
-  return radius;
-}
-
-int _distance(_Axial a, _Axial b) {
-  final dq = a.q - b.q;
-  final dr = a.r - b.r;
-  return (dq.abs() + dr.abs() + (dq + dr).abs()) ~/ 2;
 }
 
 List<_Axial> _spiral(int count) {
