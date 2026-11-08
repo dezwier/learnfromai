@@ -39,6 +39,8 @@ flutter test
 flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
 ```
 
+The same Flutter UI is served on the web from the Railway `web` service. It is a release build of this client, with `API_BASE_URL` set to the API. `make deploy-web` uploads `flutter/` and Railway builds it.
+
 Sign-in needs a Firebase project that belongs to this app. `lib/core/firebase/firebase_options.dart` is a placeholder (`adaptive-mastery-dev`). Replace it with `flutterfire configure` for a new project. Do not reuse an Archipelago, Mesozoica, or CycleTravels Firebase app. For the Auth emulator, run the emulator and set `FIREBASE_AUTH_EMULATOR_HOST` on the API.
 
 The API JWT is stored with `flutter_secure_storage`.
