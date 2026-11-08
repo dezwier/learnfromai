@@ -82,29 +82,27 @@ void main() {
     expect(find.text('Decision Trees'), findsOneWidget);
   });
 
-  testWidgets('the tree opens the next level and settings can clear the graph', (tester) async {
+  testWidgets('zoomed out graph hides the next hierarchy level', (tester) async {
     final graph = GraphController()
       ..workspace = {
         'nodes': [
           {'concept_id': 'birds', 'title': 'Birds', 'summary': 'Animals', 'explanation': 'Covers the range of birds.', 'level': 0},
-          {'concept_id': 'flight', 'title': 'Flight of birds', 'summary': 'Wings', 'explanation': 'Covers how birds fly.', 'level': 1},
-          {'concept_id': 'wings', 'title': 'Wings of birds', 'summary': 'Feathers', 'explanation': 'Covers the wings.', 'level': 2},
+          {'concept_id': 'flight', 'title': 'Flight', 'summary': 'Wings', 'explanation': 'Covers how birds fly.', 'level': 1},
         ],
         'edges': [
           {'edge_id': 'e1', 'from_concept_id': 'birds', 'to_concept_id': 'flight', 'type': 'contains'},
-          {'edge_id': 'e2', 'from_concept_id': 'flight', 'to_concept_id': 'wings', 'type': 'contains'},
         ],
         'extend_requests': [],
       };
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
     expect(find.text('Birds'), findsOneWidget);
-    expect(find.text('Flight of birds'), findsOneWidget);
-    expect(find.text('Wings of birds'), findsNothing);
+    expect(find.text('Flight'), findsNothing);
 
-    await tester.tap(find.byTooltip('Show parts'));
+    await tester.tap(find.byTooltip('Show more detail'));
     await tester.pumpAndSettle();
-    expect(find.text('Wings of birds'), findsOneWidget);
+    expect(find.text('Flight'), findsOneWidget);
+    expect(find.text('Birds'), findsOneWidget);
 
     await tester.tap(find.text('Birds'));
     await tester.pumpAndSettle();
@@ -112,14 +110,9 @@ void main() {
     await tester.tapAt(const Offset(20, 40));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byTooltip('Show less detail'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete all nodes and edges'), findsOneWidget);
-    await tester.tap(find.text('Delete all nodes and edges'));
-    await tester.pumpAndSettle();
-    expect(find.text('Delete the whole graph?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
+    expect(find.text('Flight'), findsNothing);
     expect(find.text('Birds'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Settings'));
