@@ -118,7 +118,21 @@ class _GraphScreenState extends State<GraphScreen> {
                 );
               },
             ),
-          if (graph.extending)
+          if (graph.error != null && !graph.extending && !graph.deleting)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 84,
+              child: Material(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(graph.error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                ),
+              ),
+            ),
+          if (graph.extending || graph.deleting)
             const Positioned(
               left: 16,
               right: 16,
@@ -129,7 +143,7 @@ class _GraphScreenState extends State<GraphScreen> {
             right: 16,
             bottom: 16,
             child: FloatingActionButton.extended(
-              onPressed: graph.extending ? null : () => _ask(context, null),
+              onPressed: graph.extending || graph.deleting ? null : () => _ask(context, null),
               icon: const Icon(Icons.add),
               label: const Text('Extend'),
             ),
@@ -181,6 +195,26 @@ class _GraphScreenState extends State<GraphScreen> {
         onExtend: (instruction) async {
           Navigator.pop(sheetContext);
           await context.read<GraphController>().extend(instruction, parentConceptId: node['concept_id']?.toString());
+        },
+        onDelete: () async {
+          final title = node['title']?.toString() ?? 'this node';
+          final confirmed = await showDialog<bool>(
+            context: sheetContext,
+            builder: (dialogContext) => AlertDialog(
+              title: Text('Delete $title?'),
+              content: const Text('This removes the node and the edges connected to it. Other nodes stay.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete')),
+              ],
+            ),
+          );
+          if (confirmed != true || !sheetContext.mounted) return;
+          final graph = context.read<GraphController>();
+          final conceptId = node['concept_id']?.toString();
+          Navigator.pop(sheetContext);
+          if (conceptId == null) return;
+          await graph.deleteNode(conceptId);
         },
       ),
     );
@@ -371,10 +405,11 @@ class _EdgePainter extends CustomPainter {
 }
 
 class _NodeSheet extends StatefulWidget {
-  const _NodeSheet({required this.node, required this.onExtend});
+  const _NodeSheet({required this.node, required this.onExtend, required this.onDelete});
 
   final Map<String, dynamic> node;
   final Future<void> Function(String instruction) onExtend;
+  final Future<void> Function() onDelete;
 
   @override
   State<_NodeSheet> createState() => _NodeSheetState();
@@ -416,6 +451,11 @@ class _NodeSheetState extends State<_NodeSheet> {
               widget.onExtend(text);
             },
             child: const Text('Extend'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: widget.onDelete,
+            child: Text('Delete node', style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
         ],
       ),

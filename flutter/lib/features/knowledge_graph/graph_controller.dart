@@ -10,6 +10,7 @@ class GraphController extends ChangeNotifier {
   Map<String, dynamic>? workspace;
   bool loading = false;
   bool extending = false;
+  bool deleting = false;
   String? error;
 
   Future<void> load() async {
@@ -56,6 +57,23 @@ class GraphController extends ChangeNotifier {
       error = exc.message;
     } finally {
       extending = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteNode(String conceptId) async {
+    final client = api;
+    if (client == null) return;
+    deleting = true;
+    error = null;
+    notifyListeners();
+    try {
+      await client.delete('/graph/nodes/$conceptId');
+      workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
+    } on ApiException catch (exc) {
+      error = exc.message;
+    } finally {
+      deleting = false;
       notifyListeners();
     }
   }

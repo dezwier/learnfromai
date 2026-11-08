@@ -73,9 +73,54 @@ def test_openapi_is_auth_and_graph(client):
     assert "/api/v1/me" in paths
     assert "/api/v1/workspace/graph" in paths
     assert "/api/v1/graph/extend" in paths
+    assert "/api/v1/graph/nodes/{concept_id}" in paths
     assert "/api/v1/goals" not in paths
     assert "/api/v1/reviews/due" not in paths
     assert "/api/v1/mastery/overview" not in paths
+
+
+def test_delete_node_removes_its_edges(client, auth, other_auth):
+    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
+    assert created.status_code == 202
+    process_until_idle()
+    before = client.get("/api/v1/workspace/graph", headers=auth).json()
+    titles = {node["title"]: node["concept_id"] for node in before["nodes"]}
+    target = titles["Definitions in Dinosaurs"]
+    edge_count = len(before["edges"])
+
+    removed = client.delete(f"/api/v1/graph/nodes/{target}", headers=other_auth)
+    assert removed.status_code == 200
+    assert removed.json()["removed_edges"] >= 1
+
+    after = client.get("/api/v1/workspace/graph", headers=auth).json()
+    remaining = {node["title"] for node in after["nodes"]}
+    assert "Definitions in Dinosaurs" not in remaining
+    assert "Foundations of Dinosaurs" in remaining
+    assert "Dinosaurs" in remaining
+    assert all(edge["from_concept_id"] != target and edge["to_concept_id"] != target for edge in after["edges"])
+    assert len(after["edges"]) < edge_count
+    assert after["extend_requests"][0]["instruction"] == "Dinosaurs"
+
+    parent_id = titles["Dinosaurs"]
+    child = client.post(
+        "/api/v1/graph/extend",
+        headers=other_auth,
+        json={"instruction": "Birds", "parent_concept_id": parent_id},
+    )
+    assert child.status_code == 202
+    process_until_idle()
+    deleted_parent = client.delete(f"/api/v1/graph/nodes/{parent_id}", headers=auth)
+    assert deleted_parent.status_code == 200
+    cleared = client.get("/api/v1/workspace/graph", headers=other_auth).json()
+    assert "Dinosaurs" not in {node["title"] for node in cleared["nodes"]}
+    assert "Birds" in {node["title"] for node in cleared["nodes"]}
+    birds = next(item for item in cleared["extend_requests"] if item["instruction"] == "Birds")
+    assert birds["parent_concept_id"] is None
+    assert all(edge["from_concept_id"] != parent_id and edge["to_concept_id"] != parent_id for edge in cleared["edges"])
+
+    missing = client.delete(f"/api/v1/graph/nodes/{target}", headers=auth)
+    assert missing.status_code == 404
+    assert client.delete(f"/api/v1/graph/nodes/{target}").status_code == 401
 
 
 def _reachable(root: str, edges: list[dict]) -> set[str]:
