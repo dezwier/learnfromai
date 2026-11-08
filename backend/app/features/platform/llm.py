@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import generation_unavailable
 from app.core.time import utcnow
 from app.features.knowledge_graph.identity import canonical_key_for, explanation_covers
+from app.features.platform.encyclopedia import article_graph
 from app.features.platform.models import LlmUsage
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,17 @@ class FakeLLMProvider:
         ), _usage("fake")
 
 
+class EncyclopediaProvider:
+    name = "encyclopedia"
+
+    def propose_graph_branch(self, context: dict) -> tuple[dict, dict]:
+        """The real parts of the requested topic, taken from its encyclopedia article."""
+        built = article_graph(context)
+        branch = _branch(built["nodes"], built["edges"])
+        branch["truncated"] = bool(built["truncated"])
+        return branch, _usage("encyclopedia", 0, 0)
+
+
 class GeminiProvider:
     name = "gemini"
 
@@ -101,7 +113,9 @@ class GeminiProvider:
     def propose_graph_branch(self, context: dict) -> tuple[dict, dict]:
         prompt = (
             "Extend one shared knowledge graph from this request. Return JSON with nodes and edges only. "
-            "Generate the nodes this request needs. Do not use a fixed outline such as foundations, methods, and applications. "
+            "Cover the request exhaustively: the subject plus the real subtopics a full treatment of that subject needs, "
+            "several levels deep when the subject has real parts. "
+            "Use the actual parts of the subject. Do not substitute a generic outline such as foundations, methods, and applications. "
             "Each node has title, summary, explanation, and level. "
             "level 0 is the broadest topic and larger numbers are more specific parts. "
             "explanation is several sentences that state the range the node covers, so a later request can tell "
@@ -167,9 +181,14 @@ def _strip_fences(text: str) -> str:
 
 
 def get_provider() -> LLMProvider:
-    if get_settings().llm_provider == "fake":
+    settings = get_settings()
+    # Tests pin the one-node provider. Everywhere else, a request becomes the
+    # article's real topic graph, or Gemini when a key is configured.
+    if settings.environment == "test":
         return FakeLLMProvider()
-    return GeminiProvider()
+    if settings.llm_provider == "gemini" and settings.google_gemini_api_key:
+        return GeminiProvider()
+    return EncyclopediaProvider()
 
 
 def record_usage(

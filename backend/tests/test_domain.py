@@ -172,3 +172,58 @@ def test_explanation_reuses_a_covered_topic_and_keeps_a_deeper_part(session):
     assert reused["added_nodes"] == 0
     assert deeper["added_nodes"] == 1
     assert titles == {"Dinosaurs", "Birds"}
+
+
+def test_a_real_explanation_replaces_a_short_placeholder(session):
+    graph = shared_graph(session)
+    session.commit()
+    apply_branch(
+        session,
+        graph=graph,
+        parent_concept_id=None,
+        branch={
+            "nodes": [
+                {
+                    "temp_id": "root",
+                    "title": "Dinosaurs",
+                    "summary": "Dinosaurs",
+                    "explanation": "Covers the range of Dinosaurs.",
+                    "level": 0,
+                }
+            ],
+            "edges": [],
+        },
+    )
+    long = (
+        "Dinosaurs are a diverse group of reptiles from the Mesozoic. "
+        "The range includes their anatomy, evolution, classification, and extinction."
+    )
+    apply_branch(
+        session,
+        graph=graph,
+        parent_concept_id=None,
+        branch={
+            "nodes": [
+                {
+                    "temp_id": "root",
+                    "title": "Dinosaur",
+                    "summary": "Reptiles",
+                    "explanation": long,
+                    "level": 0,
+                },
+                {
+                    "temp_id": "anatomy",
+                    "title": "Anatomy",
+                    "summary": "The body",
+                    "explanation": "Covers the skeleton and soft tissue of dinosaurs.",
+                    "level": 1,
+                },
+            ],
+            "edges": [{"from": "root", "to": "anatomy", "type": "contains", "is_primary_parent": True}],
+        },
+    )
+    session.commit()
+    stored = {concept.title: concept for concept in session.exec(select(Concept).where(Concept.origin_graph_id == graph.id)).all()}
+    assert set(stored) == {"Dinosaurs", "Anatomy"}
+    assert stored["Dinosaurs"].explanation == long
+    assert stored["Anatomy"].level == 1

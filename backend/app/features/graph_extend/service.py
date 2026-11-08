@@ -198,7 +198,10 @@ def _merge_explanation(concept: Concept, node: dict) -> None:
     if not incoming:
         return
     current = (concept.explanation or "").strip()
-    if not current or (len(incoming) > len(current) and current.lower() in incoming.lower()):
+    longer = len(incoming) > len(current)
+    grew = longer and current.lower() in incoming.lower()
+    # A one-line placeholder does not describe the range. A real explanation replaces it.
+    if longer and (not current or len(current) < 240 or grew):
         concept.explanation = incoming
 
 
