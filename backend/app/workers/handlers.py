@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
 from sqlmodel import Session
@@ -35,6 +36,11 @@ def handle(job_id: UUID, token: UUID) -> None:
         except Exception as exc:
             session.rollback()
             code = exc.code if isinstance(exc, AppError) else "GENERATION_UNAVAILABLE"
+            if isinstance(exc, AppError) and exc.details.get("terminal"):
+                fresh = session.get(GenerationJob, job_id)
+                if fresh is not None and fresh.attempts < fresh.max_attempts:
+                    fresh.attempts = fresh.max_attempts
+                    session.commit()
             _fail_request(job_id, code)
             raise
         finish(session, job_id, token, result)
@@ -66,8 +72,7 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
     if request.parent_concept_id is not None and (parent is None or parent.origin_graph_id != graph.id):
         raise AppError("NOT_FOUND", "Parent concept is not in the graph", 404)
     assert_user_quota(session, user.id)
-    request.status = "running"
-    session.commit()
+    _progress(session, job, request, "asking", "Asking the model", 0.55)
 
     provider = get_provider()
     branch, usage = provider.propose_graph_branch(
@@ -83,6 +88,7 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
     )
     record_usage(session, user_id=user.id, job_id=job.id, task="propose_graph_branch", provider=provider.name, usage=usage)
     session.commit()
+    _progress(session, job, request, "merging", "Adding topics to the graph", 0.85)
     result = apply_branch(
         session,
         graph=graph,
@@ -93,8 +99,18 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
     request.error_code = None
     request.truncated = bool(result["truncated"])
     request.finished_at = utcnow()
-    session.commit()
+    _progress(session, job, request, "done", "Generation finished", 1)
     return result
+
+
+def _progress(session: Session, job: GenerationJob, request: ExtendRequest, stage: str, message: str, fraction: float) -> None:
+    job.progress = {"stage": stage, "message": message, "fraction": fraction}
+    job.updated_at = utcnow()
+    if stage not in {"done", "failed"}:
+        job.lease_until = utcnow() + timedelta(seconds=max(get_settings().job_lease_seconds, 180))
+    if request.status not in {"succeeded", "failed"}:
+        request.status = "queued" if stage == "queued" else "running"
+    session.commit()
 
 
 def _fail_request(job_id: UUID, code: str) -> None:

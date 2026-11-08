@@ -114,6 +114,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Flight'), findsNothing);
     expect(find.text('Birds'), findsOneWidget);
+  });
+
+  testWidgets('a queued extend shows pending generation and its step', (tester) async {
+    final graph = GraphController()
+      ..workspace = {
+        'nodes': [
+          {'concept_id': 'birds', 'title': 'Birds', 'summary': 'Animals', 'level': 0},
+        ],
+        'edges': [],
+        'extend_requests': [
+          {
+            'id': 'r1',
+            'instruction': 'Dinosaurs',
+            'status': 'queued',
+            'progress_message': 'Waiting to generate',
+            'progress_fraction': 0.2,
+            'author': 'Ada',
+            'created_at': '2026-11-08T04:00:00Z',
+          },
+        ],
+      };
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+    expect(find.text('Pending generation'), findsOneWidget);
+    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Waiting to generate'), findsOneWidget);
+    expect(find.text('GENERATION_UNAVAILABLE'), findsNothing);
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();

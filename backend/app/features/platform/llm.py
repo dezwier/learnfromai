@@ -136,11 +136,8 @@ class GeminiProvider:
 
     def _json(self, prompt: str, prompt_version: str) -> tuple[dict, dict]:
         if not self.api_key:
-            raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured")
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model}:generateContent?key={self.api_key}"
-        )
+            raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured", terminal=True)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -149,11 +146,16 @@ class GeminiProvider:
                 "maxOutputTokens": 8192,
             },
         }
+        # The key travels in a header so request logs cannot record it.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
         for attempt in range(1, 4):
             try:
                 with httpx.Client(timeout=60) as client:
-                    response = client.post(url, json=body)
+                    response = client.post(url, json=body, headers={"x-goog-api-key": self.api_key})
+                if response.status_code == 402:
+                    raise generation_unavailable("The model account has no credits left", terminal=True)
                 response.raise_for_status()
                 payload = response.json()
                 text = payload["candidates"][0]["content"]["parts"][0]["text"]

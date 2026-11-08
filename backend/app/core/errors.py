@@ -54,5 +54,6 @@ def rate_limited(message: str = "Generation quota exceeded") -> AppError:
     return AppError("RATE_LIMITED", message, 429)
 
 
-def generation_unavailable(message: str = "The model is unavailable") -> AppError:
-    return AppError("GENERATION_UNAVAILABLE", message, 503)
+def generation_unavailable(message: str = "The model is unavailable", *, terminal: bool = False) -> AppError:
+    details = {"terminal": True} if terminal else {}
+    return AppError("GENERATION_UNAVAILABLE", message, 503, details)
