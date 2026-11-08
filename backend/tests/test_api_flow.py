@@ -123,6 +123,36 @@ def test_delete_node_removes_its_edges(client, auth, other_auth):
     assert client.delete(f"/api/v1/graph/nodes/{target}").status_code == 401
 
 
+def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, session):
+    from app.features.knowledge_graph.models import Concept, Edge, Graph
+
+    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
+    assert created.status_code == 202
+    process_until_idle()
+    body = client.get("/api/v1/workspace/graph", headers=auth).json()
+    titles = {node["title"]: node["concept_id"] for node in body["nodes"]}
+    target = titles["Dinosaurs"]
+    other = Graph(slug="leftover", title="Leftover")
+    session.add(other)
+    session.commit()
+    session.add(
+        Edge(
+            graph_id=other.id,
+            from_concept_id=target,
+            to_concept_id=titles["Foundations of Dinosaurs"],
+            type="related",
+        )
+    )
+    session.commit()
+
+    removed = client.delete(f"/api/v1/graph/nodes/{target}", headers=auth)
+    assert removed.status_code == 200
+    assert removed.json()["removed_edges"] >= 1
+    after = client.get("/api/v1/workspace/graph", headers=auth).json()
+    assert "Dinosaurs" not in {node["title"] for node in after["nodes"]}
+    assert session.get(Concept, target) is None
+
+
 def _reachable(root: str, edges: list[dict]) -> set[str]:
     children: dict[str, list[str]] = {}
     for edge in edges:
