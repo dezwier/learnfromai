@@ -134,7 +134,23 @@ class _GraphScreenState extends State<GraphScreen> {
                 );
               },
             ),
-          if (graph.error != null && !graph.extending && !graph.deleting)
+          if (graph.generationPending)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 84,
+              child: StudyCard(
+                dense: true,
+                eyebrow: 'Pending generation',
+                title: graph.generationSubject,
+                subtitle: graph.generationLabel,
+                footer: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(value: graph.generationFraction, minHeight: 8),
+                ),
+              ),
+            ),
+          if (graph.error != null && !graph.generationPending && !graph.deleting)
             Positioned(
               left: 16,
               right: 16,
@@ -148,7 +164,7 @@ class _GraphScreenState extends State<GraphScreen> {
                 ),
               ),
             ),
-          if (graph.extending || graph.deleting)
+          if (graph.deleting)
             const Positioned(
               left: 16,
               right: 16,
@@ -323,12 +339,7 @@ class _GraphScreenState extends State<GraphScreen> {
           for (final request in requests)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: StudyCard(
-                dense: true,
-                eyebrow: '${request['author'] ?? 'Someone'} · ${request['status'] ?? ''}',
-                title: request['instruction']?.toString() ?? 'Extend',
-                subtitle: _when(request['created_at']?.toString()),
-              ),
+              child: _ExtendCard(request: request),
             ),
         ],
       ),
@@ -420,6 +431,40 @@ int _levelOf(Map<String, dynamic> node) {
   if (raw is int) return raw;
   if (raw is num) return raw.toInt();
   return int.tryParse('$raw') ?? 0;
+}
+
+class _ExtendCard extends StatelessWidget {
+  const _ExtendCard({required this.request});
+
+  final Map<String, dynamic> request;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = request['status']?.toString() ?? '';
+    final pending = status == 'queued' || status == 'running';
+    final message = request['progress_message']?.toString();
+    final failed = status == 'failed';
+    final error = request['error_message']?.toString();
+    return StudyCard(
+      dense: true,
+      eyebrow: pending ? 'Pending generation' : '${request['author'] ?? 'Someone'} · $status',
+      title: request['instruction']?.toString() ?? 'Extend',
+      subtitle: pending
+          ? (message != null && message.isNotEmpty ? message : 'Waiting to generate')
+          : failed && error != null && error.isNotEmpty
+              ? error
+              : _when(request['created_at']?.toString()),
+      footer: pending
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: request['progress_fraction'] is num ? (request['progress_fraction'] as num).toDouble() : 0.2,
+                minHeight: 8,
+              ),
+            )
+          : null,
+    );
+  }
 }
 
 String _when(String? raw) {
