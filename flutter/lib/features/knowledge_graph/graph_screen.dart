@@ -7,9 +7,7 @@ import '../../core/widgets/pulse_placeholder.dart';
 import '../../core/widgets/study_card.dart';
 import '../auth/auth_controller.dart';
 import 'graph_controller.dart';
-
-const _nodeWidth = 168.0;
-const _nodeHeight = 72.0;
+import 'graph_layout.dart';
 
 class GraphScreen extends StatefulWidget {
   const GraphScreen({super.key});
@@ -20,7 +18,7 @@ class GraphScreen extends StatefulWidget {
 
 class _GraphScreenState extends State<GraphScreen> {
   final _camera = TransformationController();
-  bool _framed = false;
+  String? _framedSignature;
   bool _userMoved = false;
 
   @override
@@ -38,9 +36,9 @@ class _GraphScreenState extends State<GraphScreen> {
     final edges = [
       for (final raw in (graph.workspace?['edges'] as List?) ?? const []) Map<String, dynamic>.from(raw as Map),
     ];
-    final placed = _place(nodes, edges);
-    final width = placed.isEmpty ? 360.0 : placed.map((item) => item.dx).reduce((a, b) => a > b ? a : b) + _nodeWidth + 48;
-    final height = placed.isEmpty ? 240.0 : placed.map((item) => item.dy).reduce((a, b) => a > b ? a : b) + _nodeHeight + 48;
+    final layout = _layout(nodes, edges);
+    final byId = {for (final node in nodes) node['concept_id'].toString(): node};
+    final placed = [for (final point in layout.points) _Placed(byId[point.id]!, point.dx, point.dy)];
     return Scaffold(
       appBar: GradientTopBar(
         title: 'Graph',
@@ -86,10 +84,10 @@ class _GraphScreenState extends State<GraphScreen> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                if (!_framed && constraints.maxWidth > 0 && placed.isNotEmpty) {
-                  final next = _cameraFor(placed, constraints.biggest);
-                  _userMoved = false;
-                  _framed = true;
+                final signature = '${layout.points.map((point) => point.id).join(',')}:${layout.frames.length}:${layout.width.round()}x${layout.height.round()}';
+                if (!_userMoved && signature != _framedSignature && constraints.maxWidth > 0 && placed.isNotEmpty) {
+                  final next = _cameraFor(layout, placed, constraints.biggest);
+                  _framedSignature = signature;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted && !_userMoved) _camera.value = next;
                   });
@@ -103,11 +101,11 @@ class _GraphScreenState extends State<GraphScreen> {
                   boundaryMargin: const EdgeInsets.all(double.infinity),
                   onInteractionStart: (_) => _userMoved = true,
                   child: SizedBox(
-                    width: width,
-                    height: height,
+                    width: layout.width,
+                    height: layout.height,
                     child: Stack(
                       children: [
-                        Positioned.fill(child: CustomPaint(painter: _EdgePainter(placed: placed, edges: edges))),
+                        Positioned.fill(child: CustomPaint(painter: _EdgePainter(placed: placed, edges: edges, frames: layout.frames))),
                         for (final item in placed)
                           Positioned(
                             left: item.dx,
@@ -218,23 +216,29 @@ class _GraphScreenState extends State<GraphScreen> {
     );
   }
 
-  Matrix4 _cameraFor(List<_Placed> placed, Size viewport) {
+  Matrix4 _cameraFor(GraphLayout layout, List<_Placed> placed, Size viewport) {
     var minX = placed.first.dx;
     var minY = placed.first.dy;
-    var maxX = placed.first.dx + _nodeWidth;
-    var maxY = placed.first.dy + _nodeHeight;
+    var maxX = placed.first.dx + graphNodeWidth;
+    var maxY = placed.first.dy + graphNodeHeight;
     for (final item in placed.skip(1)) {
       if (item.dx < minX) minX = item.dx;
       if (item.dy < minY) minY = item.dy;
-      if (item.dx + _nodeWidth > maxX) maxX = item.dx + _nodeWidth;
-      if (item.dy + _nodeHeight > maxY) maxY = item.dy + _nodeHeight;
+      if (item.dx + graphNodeWidth > maxX) maxX = item.dx + graphNodeWidth;
+      if (item.dy + graphNodeHeight > maxY) maxY = item.dy + graphNodeHeight;
+    }
+    for (final frame in layout.frames) {
+      if (frame.left < minX) minX = frame.left;
+      if (frame.top < minY) minY = frame.top;
+      if (frame.left + frame.width > maxX) maxX = frame.left + frame.width;
+      if (frame.top + frame.height > maxY) maxY = frame.top + frame.height;
     }
     final boundsW = (maxX - minX) + 96;
     final boundsH = (maxY - minY) + 96;
     var scale = viewport.width / boundsW;
     final heightScale = viewport.height / boundsH;
     if (heightScale < scale) scale = heightScale;
-    if (scale < 0.45) scale = 0.45;
+    if (scale < 0.2) scale = 0.2;
     if (scale > 1.15) scale = 1.15;
     final cx = (minX + maxX) / 2;
     final cy = (minY + maxY) / 2;
@@ -265,45 +269,19 @@ class _Placed {
   final double dy;
 }
 
-List<_Placed> _place(List<Map<String, dynamic>> nodes, List<Map<String, dynamic>> edges) {
-  final ids = [for (final node in nodes) node['concept_id'].toString()];
-  final depth = {for (final id in ids) id: 0};
-  final children = {for (final id in ids) id: <String>[]};
-  final incoming = {for (final id in ids) id: 0};
-  for (final edge in edges) {
-    final type = edge['type']?.toString();
-    if (type != 'contains' && type != 'prerequisite') continue;
-    final from = edge['from_concept_id']?.toString();
-    final to = edge['to_concept_id']?.toString();
-    if (from == null || to == null || !depth.containsKey(from) || !depth.containsKey(to)) continue;
-    children[from]!.add(to);
-    incoming[to] = incoming[to]! + 1;
-  }
-  final roots = [for (final id in ids) if (incoming[id] == 0) id];
-  final queue = <String>[...(roots.isEmpty ? ids : roots)];
-  final seen = <String>{};
-  while (queue.isNotEmpty) {
-    final id = queue.removeAt(0);
-    if (!seen.add(id)) continue;
-    for (final child in children[id] ?? const <String>[]) {
-      if (depth[child]! < depth[id]! + 1) depth[child] = depth[id]! + 1;
-      queue.add(child);
-    }
-  }
-  final columns = <int, List<String>>{};
-  for (final id in ids) {
-    columns.putIfAbsent(depth[id]!, () => []).add(id);
-  }
-  final byId = {for (final node in nodes) node['concept_id'].toString(): node};
-  final placed = <_Placed>[];
-  final depths = columns.keys.toList()..sort();
-  for (final column in depths) {
-    final columnIds = columns[column]!;
-    for (var index = 0; index < columnIds.length; index++) {
-      placed.add(_Placed(byId[columnIds[index]]!, 20 + column * 224, 20 + index * 112.0));
-    }
-  }
-  return placed;
+GraphLayout _layout(List<Map<String, dynamic>> nodes, List<Map<String, dynamic>> edges) {
+  return layoutGraph(
+    [for (final node in nodes) node['concept_id'].toString()],
+    [
+      for (final edge in edges)
+        if (edge['from_concept_id'] != null && edge['to_concept_id'] != null)
+          GraphEdge(
+            from: edge['from_concept_id'].toString(),
+            to: edge['to_concept_id'].toString(),
+            type: edge['type']?.toString() ?? '',
+          ),
+    ],
+  );
 }
 
 class _GraphNode extends StatelessWidget {
@@ -325,8 +303,8 @@ class _GraphNode extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: SizedBox(
-          width: _nodeWidth,
-          height: _nodeHeight,
+          width: graphNodeWidth,
+          height: graphNodeHeight,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             child: Text(
@@ -343,15 +321,31 @@ class _GraphNode extends StatelessWidget {
 }
 
 class _EdgePainter extends CustomPainter {
-  const _EdgePainter({required this.placed, required this.edges});
+  const _EdgePainter({required this.placed, required this.edges, required this.frames});
 
   final List<_Placed> placed;
   final List<Map<String, dynamic>> edges;
+  final List<GraphFrame> frames;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final fill = Paint()
+      ..color = const Color(0xFF1F4B6E).withValues(alpha: 0.06)
+      ..style = PaintingStyle.fill;
+    final border = Paint()
+      ..color = const Color(0xFF1F4B6E).withValues(alpha: 0.28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (final frame in frames) {
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(frame.left, frame.top, frame.width, frame.height),
+        const Radius.circular(28),
+      );
+      canvas.drawRRect(rect, fill);
+      canvas.drawRRect(rect, border);
+    }
     final centers = {
-      for (final item in placed) item.node['concept_id'].toString(): Offset(item.dx + _nodeWidth / 2, item.dy + _nodeHeight / 2),
+      for (final item in placed) item.node['concept_id'].toString(): Offset(item.dx + graphNodeWidth / 2, item.dy + graphNodeHeight / 2),
     };
     for (final edge in edges) {
       final from = centers[edge['from_concept_id']?.toString()];
@@ -372,7 +366,8 @@ class _EdgePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _EdgePainter oldDelegate) => oldDelegate.placed != oldDelegate.placed || oldDelegate.edges != oldDelegate.edges;
+  bool shouldRepaint(covariant _EdgePainter oldDelegate) =>
+      oldDelegate.placed != oldDelegate.placed || oldDelegate.edges != oldDelegate.edges || oldDelegate.frames != oldDelegate.frames;
 }
 
 class _NodeSheet extends StatefulWidget {
