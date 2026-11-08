@@ -5,21 +5,13 @@ import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'features/auth/auth_controller.dart';
-import 'features/goals/goals_controller.dart';
 import 'features/knowledge_graph/graph_controller.dart';
-import 'features/learning/learn_controller.dart';
-import 'features/mastery/mastery_controller.dart';
-import 'features/review/review_controller.dart';
 
 class AdaptiveMasteryApp extends StatefulWidget {
-  const AdaptiveMasteryApp({super.key, required this.auth, required this.goals, required this.graph, required this.learn, required this.review, required this.mastery});
+  const AdaptiveMasteryApp({super.key, required this.auth, required this.graph});
 
   final AuthController auth;
-  final GoalsController goals;
   final GraphController graph;
-  final LearnController learn;
-  final ReviewController review;
-  final MasteryController mastery;
 
   @override
   State<AdaptiveMasteryApp> createState() => _AdaptiveMasteryAppState();
@@ -53,11 +45,7 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
       providers: [
         ChangeNotifierProvider.value(value: widget.auth),
         ChangeNotifierProvider.value(value: themes),
-        ChangeNotifierProvider.value(value: widget.goals),
         ChangeNotifierProvider.value(value: widget.graph),
-        ChangeNotifierProvider.value(value: widget.learn),
-        ChangeNotifierProvider.value(value: widget.review),
-        ChangeNotifierProvider.value(value: widget.mastery),
       ],
       child: ListenableBuilder(
         listenable: themes,

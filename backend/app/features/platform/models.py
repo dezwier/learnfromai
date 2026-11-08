@@ -62,19 +62,6 @@ class LlmUsage(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
-class AuditEvent(SQLModel, table=True):
-    __tablename__ = "audit_events"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    actor: str
-    action: str
-    entity_type: str
-    entity_id: str
-    before: dict | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
-    after: dict | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
-    created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
-
-
 class WorkerHeartbeat(SQLModel, table=True):
     __tablename__ = "worker_heartbeats"
 

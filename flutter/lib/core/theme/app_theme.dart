@@ -31,41 +31,11 @@ ThemeData buildTheme({Brightness brightness = Brightness.light}) {
   );
 }
 
-Color masteryColor(String status) {
-  switch (status) {
-    case 'demonstrated':
-      return const Color(0xFF2E7D4F);
-    case 'learning':
-      return const Color(0xFF1F4B6E);
-    case 'needs_reassessment':
-      return const Color(0xFF8A5A00);
-    case 'archived':
-      return const Color(0xFF6B7280);
-    default:
-      return const Color(0xFF6B7280);
-  }
-}
-
 class _InstantPageTransitionsBuilder extends PageTransitionsBuilder {
   const _InstantPageTransitionsBuilder();
 
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
     return child;
-  }
-}
-
-String masteryLabel(String status) {
-  switch (status) {
-    case 'demonstrated':
-      return 'Demonstrated';
-    case 'learning':
-      return 'Learning';
-    case 'needs_reassessment':
-      return 'Needs recheck';
-    case 'archived':
-      return 'Archived';
-    default:
-      return 'Unknown';
   }
 }

@@ -41,7 +41,7 @@ class ApiClient {
         if (response.statusCode == 401 && allowRefresh && !skipAuth && refreshIdToken != null) {
           final refreshed = await _refreshOnce();
           if (refreshed) {
-            return _send(method, path, body: body, idempotencyKey: idempotencyKey, skipAuth: skipAuth, retry: false, allowRefresh: false);
+            return await _send(method, path, body: body, idempotencyKey: idempotencyKey, skipAuth: skipAuth, retry: false, allowRefresh: false);
           }
         }
         return _decode(response);

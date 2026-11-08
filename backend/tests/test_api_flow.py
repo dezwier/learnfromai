@@ -1,8 +1,4 @@
-from sqlmodel import select
-
-from app.core.config import get_settings
 from app.features.accounts.firebase_auth import verify_firebase_id_token
-from app.features.knowledge_graph.service import seed_decision_trees, stable_id
 from app.workers.runner import process_until_idle
 
 
@@ -25,149 +21,75 @@ def test_me_and_firebase_exchange(client, monkeypatch):
     assert client.get("/api/v1/me").status_code == 401
 
 
-def test_cross_user_goal_is_forbidden(client, auth, other_auth, session):
-    seed_decision_trees(session)
-    session.commit()
-    created = client.post("/api/v1/goals", headers=auth, json={"topic": "Decision Trees", "purpose": "systems", "target_depth": "professional", "minutes_per_week": 180, "language": "en"})
+def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
+    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
     assert created.status_code == 202
-    process_until_idle()
-    goal_id = created.json()["goal_id"]
-    denied = client.post(f"/api/v1/goals/{goal_id}/diagnostic", headers=other_auth, json={})
-    assert denied.status_code == 403
-    assert denied.json()["code"] == "FORBIDDEN"
-
-
-def test_seeded_tree_and_rollback(client, auth, session):
-    seed_decision_trees(session)
-    session.commit()
-    graph_id = str(stable_id("graph:decision-trees"))
-    tree = client.get(f"/api/v1/graphs/{graph_id}/tree", headers=auth)
-    assert tree.status_code == 200
-    titles = _titles(tree.json()["nodes"])
-    assert {"Decision Trees", "Entropy", "Information Gain"} <= titles
-    release_id = tree.json()["release_id"]
-    admin = session.exec(__import__("sqlmodel").select(__import__("app.features.accounts.models", fromlist=["User"]).User)).first()
-    _ = admin
-    from app.features.accounts.models import User
-
-    owner = session.exec(select(User)).first()
-    owner.is_admin = True
-    session.add(owner)
-    session.commit()
-    renamed = client.post(
-        f"/api/v1/graphs/{graph_id}/rollback",
-        headers=auth,
-        json={"source_release_id": release_id, "base_release_id": release_id},
-    )
-    assert renamed.status_code == 201
-    assert renamed.json()["version"] == 2
-    assert renamed.json()["release_id"] != release_id
-    diff = client.get(
-        f"/api/v1/graphs/{graph_id}/diff",
-        headers=auth,
-        params={"from_release": release_id, "to_release": renamed.json()["release_id"]},
-    )
-    assert diff.status_code == 200
-    stale = client.post(
-        f"/api/v1/graphs/{graph_id}/rollback",
-        headers=auth,
-        json={"source_release_id": release_id, "base_release_id": release_id},
-    )
-    assert stale.status_code == 409
-    assert stale.json()["code"] == "GRAPH_STALE"
-
-
-def test_learn_assess_review_replan(client, auth, session, user):
-    seed_decision_trees(session)
-    session.commit()
-    created = client.post(
-        "/api/v1/goals",
-        headers=auth,
-        json={"topic": "Decision Trees", "purpose": "Read trees", "target_depth": "professional", "minutes_per_week": 120, "language": "en"},
-    )
-    process_until_idle()
-    goal_id = created.json()["goal_id"]
-    questions = client.post(f"/api/v1/goals/{goal_id}/diagnostic", headers=auth, json={})
-    assert questions.json()["questions"]
-    submitted = client.post(
-        f"/api/v1/goals/{goal_id}/diagnostic",
-        headers=auth,
-        json={"answers": [{"objective_id": questions.json()["questions"][0]["objective_id"], "response": "unknown"}]},
-    )
-    assert submitted.status_code == 200
-    recommendation = client.get(f"/api/v1/goals/{goal_id}/recommendation", headers=auth).json()
-    assert recommendation["step"] is not None
-    opened = client.post("/api/v1/learning-sessions", headers=auth, json={"goal_id": goal_id})
-    session_id = opened.json()["session_id"]
-    pinned = opened.json()["trajectory_id"]
-    first = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    assert first.status_code == 202
-    process_until_idle()
-    explain = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    assert explain.status_code == 200
-    activity_id = explain.json()["activity"]["id"]
-    assert "answer" not in explain.json()["activity"]["body"]
-    read = client.post(
-        f"/api/v1/learning-sessions/{session_id}/attempts",
-        headers={**auth, "Idempotency-Key": "read-1"},
-        json={"activity_id": activity_id, "answer": {}},
-    )
-    assert read.status_code == 201
-    assert read.json()["mastery_update"]["objectives_changed"] == 0
-    again = client.post(
-        f"/api/v1/learning-sessions/{session_id}/attempts",
-        headers={**auth, "Idempotency-Key": "read-1"},
-        json={"activity_id": activity_id, "answer": {}},
-    )
-    assert again.json()["attempt_id"] == read.json()["attempt_id"]
-    lesson = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    if lesson.status_code == 202:
-        process_until_idle()
-        lesson = client.get(f"/api/v1/learning-sessions/{session_id}/next", headers=auth)
-    activity = lesson.json()["activity"]
-    assert activity["kind"] == "explain"
-    assert "prompt" not in activity["body"]
-    assert "explanation" in activity["body"]
-    _ = pinned
-
-
-def test_quota(client, auth, session, user):
-    seed_decision_trees(session)
-    session.commit()
-    get_settings().llm_daily_tokens_user_limit = 0
-    created = client.post("/api/v1/goals", headers=auth, json={"topic": "Quantum basket weaving", "purpose": "fun", "target_depth": "overview", "minutes_per_week": 30, "language": "en"})
-    process_until_idle()
     job_id = created.json()["job_id"]
-    job = client.get(f"/api/v1/jobs/{job_id}", headers=auth)
-    assert job.json()["error_code"] in {"RATE_LIMITED", "GENERATION_UNAVAILABLE", None} or job.json()["state"] in {"failed", "succeeded"}
-    get_settings().llm_daily_tokens_user_limit = 1_000_000
+    assert client.get(f"/api/v1/jobs/{job_id}", headers=other_auth).status_code == 403
+    process_until_idle()
+    first = client.get("/api/v1/workspace/graph", headers=other_auth)
+    assert first.status_code == 200
+    body = first.json()
+    titles = {node["title"]: node["concept_id"] for node in body["nodes"]}
+    assert "Dinosaurs" in titles
+    assert "Foundations of Dinosaurs" in titles
+    assert "Definitions in Dinosaurs" in titles
+    assert _reachable(titles["Dinosaurs"], body["edges"]) == set(titles.values())
+    assert sum(1 for edge in body["edges"] if edge["type"] == "prerequisite") == 1
+    assert sum(1 for edge in body["edges"] if edge["type"] == "related") == 1
+    assert body["extend_requests"][0]["instruction"] == "Dinosaurs"
+    assert body["extend_requests"][0]["author"] == "Ada"
+    assert body["extend_requests"][0]["status"] == "succeeded"
+    assert "goal" not in body
+    assert all("status" not in edge for edge in body["edges"])
 
-
-def test_delete_goal_removes_it_from_the_list(client, auth):
-    created = client.post(
-        "/api/v1/goals",
-        headers=auth,
-        json={"topic": "Childhood nutrition", "purpose": "feed children well", "target_depth": "overview", "minutes_per_week": 60, "language": "en"},
+    parent_id = titles["Dinosaurs"]
+    child = client.post(
+        "/api/v1/graph/extend",
+        headers=other_auth,
+        json={"instruction": "Birds", "parent_concept_id": parent_id},
     )
-    goal_id = created.json()["goal_id"]
-    deleted = client.delete(f"/api/v1/goals/{goal_id}", headers=auth)
-    assert deleted.status_code == 200
-    listed = client.get("/api/v1/goals", headers=auth).json()["goals"]
-    assert goal_id not in {row["id"] for row in listed}
+    assert child.status_code == 202
+    process_until_idle()
+    second = client.get("/api/v1/workspace/graph", headers=auth).json()
+    by_title = {node["title"]: node["concept_id"] for node in second["nodes"]}
+    assert "Birds" in by_title
+    assert any(
+        edge["from_concept_id"] == parent_id and edge["to_concept_id"] == by_title["Birds"] and edge["type"] == "contains"
+        for edge in second["edges"]
+    )
+    again = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
+    assert again.status_code == 202
+    process_until_idle()
+    third = client.get("/api/v1/workspace/graph", headers=other_auth).json()
+    assert len(third["nodes"]) == len(second["nodes"])
+    assert [item["instruction"] for item in third["extend_requests"][:3]] == ["Dinosaurs", "Birds", "Dinosaurs"]
+    assert {item["author"] for item in third["extend_requests"]} == {"Ada", "Grace"}
 
 
-def test_childhood_nutrition_branch_uses_real_topics():
-    from app.features.platform.llm import FakeLLMProvider
+def test_openapi_is_auth_and_graph(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/v1/auth/firebase" in paths
+    assert "/api/v1/me" in paths
+    assert "/api/v1/workspace/graph" in paths
+    assert "/api/v1/graph/extend" in paths
+    assert "/api/v1/goals" not in paths
+    assert "/api/v1/reviews/due" not in paths
+    assert "/api/v1/mastery/overview" not in paths
 
-    payload, _usage = FakeLLMProvider().propose_graph_branch({"topic": "childhood nutrition"})
-    titles = {node["title"] for node in payload["nodes"]}
-    assert {"Childhood nutrition", "Breastfeeding", "Complementary feeding", "Micronutrients", "Growth", "Stunting"} <= titles
-    assert not any(title.lower().endswith(" structure") or title.lower().endswith(" origins") for title in titles)
 
-
-def _titles(nodes: list[dict]) -> set[str]:
-    found = set()
-    for node in nodes:
-        found.add(node["title"])
-        found |= _titles(node["children"])
-    return found
+def _reachable(root: str, edges: list[dict]) -> set[str]:
+    children: dict[str, list[str]] = {}
+    for edge in edges:
+        if edge["type"] != "contains":
+            continue
+        children.setdefault(edge["from_concept_id"], []).append(edge["to_concept_id"])
+    seen = {root}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        for child in children.get(node, []):
+            if child not in seen:
+                seen.add(child)
+                stack.append(child)
+    return seen

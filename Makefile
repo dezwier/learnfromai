@@ -2,7 +2,7 @@ BACKEND=backend
 FLUTTER=flutter
 PY=$(BACKEND)/.venv/bin
 
-.PHONY: backend-install backend-test backend-run worker migrate seed demo flutter-test flutter-analyze deploy-api deploy-worker
+.PHONY: backend-install backend-test backend-run worker migrate seed flutter-test flutter-analyze deploy-api deploy-worker
 
 backend-install:
 	python3.13 -m venv $(BACKEND)/.venv
@@ -22,9 +22,6 @@ migrate:
 
 seed:
 	cd $(BACKEND) && .venv/bin/python -m scripts.seed
-
-demo:
-	cd $(BACKEND) && LLM_PROVIDER=fake .venv/bin/python -m scripts.demo_flow
 
 flutter-test:
 	cd $(FLUTTER) && flutter test
