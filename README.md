@@ -39,9 +39,9 @@ flutter test
 flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
 ```
 
-The same Flutter UI is served on the web from the Railway `web` service. It is a release build of this client, with `API_BASE_URL` set to the API. `make deploy-web` uploads `flutter/` and Railway builds it.
+The same Flutter UI is served at https://web-production-82d46b.up.railway.app. It is a release build of this client, with `API_BASE_URL` set to the API. `make deploy-web` uploads `flutter/` and Railway builds it.
 
-Sign-in needs a Firebase project that belongs to this app. `lib/core/firebase/firebase_options.dart` is a placeholder (`adaptive-mastery-dev`). Replace it with `flutterfire configure` for a new project. Do not reuse an Archipelago, Mesozoica, or CycleTravels Firebase app. For the Auth emulator, run the emulator and set `FIREBASE_AUTH_EMULATOR_HOST` on the API.
+Sign-in uses this app's `learnfromai` Firebase project, including the Adaptive Mastery web app. Do not reuse an Archipelago, Mesozoica, or CycleTravels Firebase app. For the Auth emulator, run the emulator and set `FIREBASE_AUTH_EMULATOR_HOST` on the API.
 
 The API JWT is stored with `flutter_secure_storage`.
 
@@ -56,7 +56,7 @@ Backend tests use database `adaptive_mastery_test` on local Postgres. `tests/tes
 
 ## Deploy
 
-The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, and worker. It does not share a project or variables with the other apps.
+The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, worker, and web service. It does not share a project or variables with the other apps.
 
 The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. `LLM_PROVIDER` is `fake` until a Gemini key is added. A new `SECRET_KEY` was generated for this project.
 
