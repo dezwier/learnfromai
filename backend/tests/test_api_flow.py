@@ -30,20 +30,19 @@ def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
     first = client.get("/api/v1/workspace/graph", headers=other_auth)
     assert first.status_code == 200
     body = first.json()
-    titles = {node["title"]: node["concept_id"] for node in body["nodes"]}
-    assert "Dinosaurs" in titles
-    assert "Foundations of Dinosaurs" in titles
-    assert "Definitions in Dinosaurs" in titles
-    assert _reachable(titles["Dinosaurs"], body["edges"]) == set(titles.values())
-    assert sum(1 for edge in body["edges"] if edge["type"] == "prerequisite") == 1
-    assert sum(1 for edge in body["edges"] if edge["type"] == "related") == 1
+    titles = {node["title"]: node for node in body["nodes"]}
+    assert set(titles) == {"Dinosaurs"}
+    dinosaur = titles["Dinosaurs"]
+    assert dinosaur["level"] == 0
+    assert "dinosaurs" in dinosaur["explanation"].lower()
+    assert "foundations" not in dinosaur["title"].lower()
     assert body["extend_requests"][0]["instruction"] == "Dinosaurs"
     assert body["extend_requests"][0]["author"] == "Ada"
     assert body["extend_requests"][0]["status"] == "succeeded"
     assert "goal" not in body
     assert all("status" not in edge for edge in body["edges"])
 
-    parent_id = titles["Dinosaurs"]
+    parent_id = dinosaur["concept_id"]
     child = client.post(
         "/api/v1/graph/extend",
         headers=other_auth,
@@ -54,6 +53,9 @@ def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
     second = client.get("/api/v1/workspace/graph", headers=auth).json()
     by_title = {node["title"]: node["concept_id"] for node in second["nodes"]}
     assert "Birds" in by_title
+    birds_node = next(node for node in second["nodes"] if node["title"] == "Birds")
+    assert birds_node["level"] == 1
+    assert "birds" in birds_node["explanation"].lower()
     assert any(
         edge["from_concept_id"] == parent_id and edge["to_concept_id"] == by_title["Birds"] and edge["type"] == "contains"
         for edge in second["edges"]
@@ -85,22 +87,6 @@ def test_delete_node_removes_its_edges(client, auth, other_auth):
     process_until_idle()
     before = client.get("/api/v1/workspace/graph", headers=auth).json()
     titles = {node["title"]: node["concept_id"] for node in before["nodes"]}
-    target = titles["Definitions in Dinosaurs"]
-    edge_count = len(before["edges"])
-
-    removed = client.delete(f"/api/v1/graph/nodes/{target}", headers=other_auth)
-    assert removed.status_code == 200
-    assert removed.json()["removed_edges"] >= 1
-
-    after = client.get("/api/v1/workspace/graph", headers=auth).json()
-    remaining = {node["title"] for node in after["nodes"]}
-    assert "Definitions in Dinosaurs" not in remaining
-    assert "Foundations of Dinosaurs" in remaining
-    assert "Dinosaurs" in remaining
-    assert all(edge["from_concept_id"] != target and edge["to_concept_id"] != target for edge in after["edges"])
-    assert len(after["edges"]) < edge_count
-    assert after["extend_requests"][0]["instruction"] == "Dinosaurs"
-
     parent_id = titles["Dinosaurs"]
     child = client.post(
         "/api/v1/graph/extend",
@@ -109,11 +95,28 @@ def test_delete_node_removes_its_edges(client, auth, other_auth):
     )
     assert child.status_code == 202
     process_until_idle()
+    with_child = client.get("/api/v1/workspace/graph", headers=auth).json()
+    child_titles = {node["title"]: node["concept_id"] for node in with_child["nodes"]}
+    target = child_titles["Birds"]
+    edge_count = len(with_child["edges"])
+
+    removed = client.delete(f"/api/v1/graph/nodes/{target}", headers=other_auth)
+    assert removed.status_code == 200
+    assert removed.json()["removed_edges"] >= 1
+
+    after = client.get("/api/v1/workspace/graph", headers=auth).json()
+    remaining = {node["title"] for node in after["nodes"]}
+    assert "Birds" not in remaining
+    assert "Dinosaurs" in remaining
+    assert all(edge["from_concept_id"] != target and edge["to_concept_id"] != target for edge in after["edges"])
+    assert len(after["edges"]) < edge_count
+    assert any(item["instruction"] == "Dinosaurs" for item in after["extend_requests"])
+
     deleted_parent = client.delete(f"/api/v1/graph/nodes/{parent_id}", headers=auth)
     assert deleted_parent.status_code == 200
     cleared = client.get("/api/v1/workspace/graph", headers=other_auth).json()
     assert "Dinosaurs" not in {node["title"] for node in cleared["nodes"]}
-    assert "Birds" in {node["title"] for node in cleared["nodes"]}
+    assert "Birds" not in {node["title"] for node in cleared["nodes"]}
     birds = next(item for item in cleared["extend_requests"] if item["instruction"] == "Birds")
     assert birds["parent_concept_id"] is None
     assert all(edge["from_concept_id"] != parent_id and edge["to_concept_id"] != parent_id for edge in cleared["edges"])
@@ -131,6 +134,15 @@ def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, sessi
     process_until_idle()
     body = client.get("/api/v1/workspace/graph", headers=auth).json()
     titles = {node["title"]: node["concept_id"] for node in body["nodes"]}
+    child = client.post(
+        "/api/v1/graph/extend",
+        headers=auth,
+        json={"instruction": "Birds", "parent_concept_id": titles["Dinosaurs"]},
+    )
+    assert child.status_code == 202
+    process_until_idle()
+    grown = client.get("/api/v1/workspace/graph", headers=auth).json()
+    titles = {node["title"]: node["concept_id"] for node in grown["nodes"]}
     target = titles["Dinosaurs"]
     other = Graph(slug="leftover", title="Leftover")
     session.add(other)
@@ -139,7 +151,7 @@ def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, sessi
         Edge(
             graph_id=other.id,
             from_concept_id=target,
-            to_concept_id=titles["Foundations of Dinosaurs"],
+            to_concept_id=titles["Birds"],
             type="related",
         )
     )

@@ -34,6 +34,8 @@ class Concept(SQLModel, table=True):
     origin_graph_id: UUID = Field(foreign_key="graphs.id", index=True)
     title: str
     summary: str = ""
+    explanation: str = ""
+    level: int = Field(default=0, index=True)
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 

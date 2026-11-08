@@ -75,6 +75,8 @@ def _expand_graph(session: Session, job: GenerationJob) -> dict:
             "instruction": request.instruction,
             "parent_concept_id": str(parent.id) if parent else None,
             "parent_title": parent.title if parent else None,
+            "parent_level": parent.level if parent else None,
+            "parent_explanation": parent.explanation if parent else None,
             "existing": neighborhood(session, graph.id),
             "max_new_concepts": get_settings().graph_expansion_max_nodes,
         }
