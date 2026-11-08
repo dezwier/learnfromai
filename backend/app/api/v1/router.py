@@ -95,6 +95,7 @@ def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Se
         user_id=user.id,
         payload={"request_id": str(request.id)},
     )
+    job.progress = {"stage": "queued", "message": "Waiting to generate", "fraction": 0.2}
     request.job_id = job.id
     session.commit()
     return {"request_id": str(request.id), "job_id": str(job.id)}

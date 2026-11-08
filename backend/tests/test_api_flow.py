@@ -21,6 +21,29 @@ def test_me_and_firebase_exchange(client, monkeypatch):
     assert client.get("/api/v1/me").status_code == 401
 
 
+def test_extend_stays_pending_with_progress_until_the_worker_finishes(client, auth):
+    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
+    assert created.status_code == 202
+    job_id = created.json()["job_id"]
+    queued = client.get(f"/api/v1/jobs/{job_id}", headers=auth)
+    assert queued.status_code == 200
+    assert queued.json()["state"] == "queued"
+    assert queued.json()["progress"]["message"] == "Waiting to generate"
+    assert queued.json()["progress"]["fraction"] == 0.2
+    workspace = client.get("/api/v1/workspace/graph", headers=auth).json()
+    request = workspace["extend_requests"][0]
+    assert request["status"] == "queued"
+    assert request["progress_message"] == "Waiting to generate"
+    assert request["progress_fraction"] == 0.2
+    process_until_idle()
+    finished = client.get(f"/api/v1/jobs/{job_id}", headers=auth).json()
+    assert finished["state"] == "succeeded"
+    assert finished["progress"]["stage"] == "done"
+    done = client.get("/api/v1/workspace/graph", headers=auth).json()
+    assert done["extend_requests"][0]["status"] == "succeeded"
+    assert done["extend_requests"][0]["progress_message"] == "Generation finished"
+
+
 def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
     created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
     assert created.status_code == 202
