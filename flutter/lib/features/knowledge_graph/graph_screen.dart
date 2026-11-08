@@ -20,6 +20,10 @@ class _GraphScreenState extends State<GraphScreen> {
   final _camera = TransformationController();
   String? _framedSignature;
   bool _userMoved = false;
+  int _shown = 0;
+  int _floor = 0;
+  int _ceiling = 0;
+  double _gestureScale = 1;
 
   @override
   void dispose() {
@@ -36,8 +40,15 @@ class _GraphScreenState extends State<GraphScreen> {
     final edges = [
       for (final raw in (graph.workspace?['edges'] as List?) ?? const []) Map<String, dynamic>.from(raw as Map),
     ];
-    final layout = _layout(nodes, edges);
-    final byId = {for (final node in nodes) node['concept_id'].toString(): node};
+    _syncDepth(nodes);
+    final visibleNodes = [for (final node in nodes) if (_levelOf(node) <= _shown) node];
+    final visibleIds = {for (final node in visibleNodes) node['concept_id'].toString()};
+    final visibleEdges = [
+      for (final edge in edges)
+        if (visibleIds.contains('${edge['from_concept_id']}') && visibleIds.contains('${edge['to_concept_id']}')) edge,
+    ];
+    final layout = _layout(visibleNodes, visibleEdges);
+    final byId = {for (final node in visibleNodes) node['concept_id'].toString(): node};
     final placed = [for (final point in layout.points) _Placed(byId[point.id]!, point.dx, point.dy)];
     return Scaffold(
       appBar: GradientTopBar(
@@ -84,7 +95,7 @@ class _GraphScreenState extends State<GraphScreen> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final signature = '${layout.points.map((point) => point.id).join(',')}:${layout.frames.length}:${layout.width.round()}x${layout.height.round()}';
+                final signature = '$_shown:${layout.points.map((point) => point.id).join(',')}:${layout.frames.length}:${layout.width.round()}x${layout.height.round()}';
                 if (!_userMoved && signature != _framedSignature && constraints.maxWidth > 0 && placed.isNotEmpty) {
                   final next = _cameraFor(layout, placed, constraints.biggest);
                   _framedSignature = signature;
@@ -96,10 +107,14 @@ class _GraphScreenState extends State<GraphScreen> {
                   transformationController: _camera,
                   alignment: Alignment.topLeft,
                   constrained: false,
-                  minScale: 0.2,
-                  maxScale: 2.8,
+                  minScale: 0.85,
+                  maxScale: 1.35,
                   boundaryMargin: const EdgeInsets.all(double.infinity),
-                  onInteractionStart: (_) => _userMoved = true,
+                  onInteractionStart: (_) {
+                    _userMoved = true;
+                    _gestureScale = _camera.value.getMaxScaleOnAxis();
+                  },
+                  onInteractionEnd: (_) => _finishZoom(),
                   child: SizedBox(
                     width: layout.width,
                     height: layout.height,
@@ -139,6 +154,38 @@ class _GraphScreenState extends State<GraphScreen> {
               bottom: 84,
               child: SizedBox(height: 44, child: PulsePlaceholder()),
             ),
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton.filledTonal(
+                  tooltip: 'Show more detail',
+                  onPressed: graph.extending || graph.deleting || _shown >= _ceiling
+                      ? null
+                      : () => setState(() {
+                            _shown += 1;
+                            _userMoved = false;
+                            _framedSignature = null;
+                          }),
+                  icon: const Icon(Icons.zoom_in),
+                ),
+                const SizedBox(height: 8),
+                IconButton.filledTonal(
+                  tooltip: 'Show less detail',
+                  onPressed: graph.extending || graph.deleting || _shown <= _floor
+                      ? null
+                      : () => setState(() {
+                            _shown -= 1;
+                            _userMoved = false;
+                            _framedSignature = null;
+                          }),
+                  icon: const Icon(Icons.zoom_out),
+                ),
+              ],
+            ),
+          ),
           Positioned(
             right: 16,
             bottom: 16,
@@ -272,7 +319,7 @@ class _GraphScreenState extends State<GraphScreen> {
     var scale = viewport.width / boundsW;
     final heightScale = viewport.height / boundsH;
     if (heightScale < scale) scale = heightScale;
-    if (scale < 0.2) scale = 0.2;
+    if (scale < 1) scale = 1;
     if (scale > 1.15) scale = 1.15;
     final cx = (minX + maxX) / 2;
     final cy = (minY + maxY) / 2;
@@ -281,6 +328,60 @@ class _GraphScreenState extends State<GraphScreen> {
       ..scaleByDouble(scale, scale, 1, 1)
       ..translateByDouble(-cx, -cy, 0, 1);
   }
+
+  void _syncDepth(List<Map<String, dynamic>> nodes) {
+    if (nodes.isEmpty) {
+      _floor = 0;
+      _ceiling = 0;
+      _shown = 0;
+      return;
+    }
+    var floor = _levelOf(nodes.first);
+    var ceiling = floor;
+    for (final node in nodes.skip(1)) {
+      final level = _levelOf(node);
+      if (level < floor) floor = level;
+      if (level > ceiling) ceiling = level;
+    }
+    _floor = floor;
+    _ceiling = ceiling;
+    if (_shown < floor) _shown = floor;
+    if (_shown > ceiling) _shown = ceiling;
+  }
+
+  void _finishZoom() {
+    final now = _camera.value.getMaxScaleOnAxis();
+    final ratio = _gestureScale == 0 ? 1.0 : now / _gestureScale;
+    if (ratio > 1.08 && _shown < _ceiling) {
+      setState(() {
+        _shown += 1;
+        _userMoved = false;
+        _framedSignature = null;
+      });
+      return;
+    }
+    if (ratio < 0.92 && _shown > _floor) {
+      setState(() {
+        _shown -= 1;
+        _userMoved = false;
+        _framedSignature = null;
+      });
+      return;
+    }
+    if ((ratio - 1).abs() > 0.04) {
+      setState(() {
+        _userMoved = false;
+        _framedSignature = null;
+      });
+    }
+  }
+}
+
+int _levelOf(Map<String, dynamic> node) {
+  final raw = node['level'];
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  return int.tryParse('$raw') ?? 0;
 }
 
 String _when(String? raw) {
@@ -345,7 +446,7 @@ class _GraphNode extends StatelessWidget {
               node['title']?.toString() ?? 'Concept',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w700, height: 1.15, color: ink),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, height: 1.15, color: ink),
             ),
           ),
         ),
@@ -427,6 +528,8 @@ class _NodeSheetState extends State<_NodeSheet> {
   @override
   Widget build(BuildContext context) {
     final summary = widget.node['summary']?.toString() ?? '';
+    final explanation = widget.node['explanation']?.toString() ?? '';
+    final range = explanation.isNotEmpty ? explanation : summary;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
       child: Column(
@@ -434,9 +537,12 @@ class _NodeSheetState extends State<_NodeSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(widget.node['title']?.toString() ?? 'Concept', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-          if (summary.isNotEmpty) ...[
+          if (range.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(summary),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.4),
+              child: SingleChildScrollView(child: Text(range)),
+            ),
           ],
           const SizedBox(height: 16),
           TextField(

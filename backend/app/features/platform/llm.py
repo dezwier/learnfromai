@@ -12,12 +12,13 @@ from sqlmodel import Session, func, select
 from app.core.config import get_settings
 from app.core.errors import generation_unavailable
 from app.core.time import utcnow
-from app.features.knowledge_graph.identity import canonical_key_for
+from app.features.knowledge_graph.identity import canonical_key_for, explanation_covers
+from app.features.platform.encyclopedia import article_graph
 from app.features.platform.models import LlmUsage
 
 logger = logging.getLogger(__name__)
 
-PROMPT_GRAPH = "graph_branch_v2"
+PROMPT_GRAPH = "graph_branch_v3"
 INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
 
@@ -37,80 +38,67 @@ def _usage(model: str, input_tokens: int = 12, output_tokens: int = 24) -> dict:
     }
 
 
-def _node(temp_id: str, title: str, summary: str) -> dict:
+def _branch(nodes: list[dict], edges: list[dict] | None = None) -> dict:
     return {
-        "temp_id": temp_id,
-        "title": title,
-        "summary": summary,
-        "canonical_key": canonical_key_for(title),
+        "schema_version": 1,
+        "prompt_version": PROMPT_GRAPH,
+        "nodes": nodes,
+        "edges": edges or [],
+        "truncated": False,
     }
-
-
-def _contains(parent: str, child: str) -> dict:
-    return {"from": parent, "to": child, "type": "contains", "is_primary_parent": True}
-
-
-def _outline(subject: str) -> tuple[list[dict], list[dict]]:
-    """A connected branch: three areas, two children each, plus cross edges."""
-    areas = [
-        (
-            f"Foundations of {subject}",
-            f"Core ideas in {subject}.",
-            [
-                (f"Definitions in {subject}", f"The terms {subject} uses."),
-                (f"Examples of {subject}", f"Concrete cases of {subject}."),
-            ],
-        ),
-        (
-            f"Methods of {subject}",
-            f"How to work with {subject}.",
-            [
-                (f"Procedures for {subject}", f"The usual steps in {subject}."),
-                (f"Tools for {subject}", f"What you use for {subject}."),
-            ],
-        ),
-        (
-            f"Applications of {subject}",
-            f"Where {subject} is used.",
-            [
-                (f"Use cases of {subject}", f"Typical situations for {subject}."),
-                (f"Limits of {subject}", f"Where {subject} stops applying."),
-            ],
-        ),
-    ]
-    nodes = [_node("root", subject, f"The subject of {subject}.")]
-    edges = []
-    for index, (title, summary, children) in enumerate(areas):
-        area_id = f"a{index}"
-        nodes.append(_node(area_id, title, summary))
-        edges.append(_contains("root", area_id))
-        for child_index, (child_title, child_summary) in enumerate(children):
-            child_id = f"a{index}c{child_index}"
-            nodes.append(_node(child_id, child_title, child_summary))
-            edges.append(_contains(area_id, child_id))
-    edges.append({"from": "a0", "to": "a1", "type": "prerequisite", "is_primary_parent": False})
-    edges.append({"from": "a1", "to": "a2", "type": "related", "is_primary_parent": False})
-    return nodes, edges
 
 
 class FakeLLMProvider:
     name = "fake"
 
     def propose_graph_branch(self, context: dict) -> tuple[dict, dict]:
+        """One node for this request. Nothing is filled in from a fixed outline."""
         instruction = str(context.get("instruction") or "").strip()
-        topic = str(context.get("topic") or "").strip()
-        subject = instruction or topic or "Topic"
-        nodes, edges = _outline(subject)
-        return (
-            {
-                "schema_version": 1,
-                "prompt_version": PROMPT_GRAPH,
-                "nodes": nodes,
-                "edges": edges,
-                "truncated": False,
-            },
-            _usage("fake"),
-        )
+        parent_title = str(context.get("parent_title") or "").strip()
+        subject = instruction or parent_title or "Topic"
+        parent_level = context.get("parent_level")
+        proposed = 0 if parent_level is None else int(parent_level) + 1
+        for node in context.get("existing") or []:
+            if not isinstance(node, dict):
+                continue
+            explanation = str(node.get("explanation") or "")
+            level = int(node.get("level") or 0)
+            if explanation_covers(explanation, instruction) and proposed <= level:
+                title = str(node.get("title") or subject)
+                reused = {
+                    "temp_id": "reused",
+                    "concept_id": node.get("concept_id"),
+                    "title": title,
+                    "summary": node.get("summary") or "",
+                    "explanation": explanation,
+                    "level": level,
+                    "canonical_key": node.get("canonical_key") or canonical_key_for(title),
+                }
+                return _branch([reused]), _usage("fake")
+        explanation = f"Covers the range of {subject}."
+        return _branch(
+            [
+                {
+                    "temp_id": "requested",
+                    "title": subject,
+                    "summary": subject,
+                    "explanation": explanation,
+                    "level": proposed,
+                    "canonical_key": canonical_key_for(subject),
+                }
+            ]
+        ), _usage("fake")
+
+
+class EncyclopediaProvider:
+    name = "encyclopedia"
+
+    def propose_graph_branch(self, context: dict) -> tuple[dict, dict]:
+        """The real parts of the requested topic, taken from its encyclopedia article."""
+        built = article_graph(context)
+        branch = _branch(built["nodes"], built["edges"])
+        branch["truncated"] = bool(built["truncated"])
+        return branch, _usage("encyclopedia", 0, 0)
 
 
 class GeminiProvider:
@@ -124,12 +112,20 @@ class GeminiProvider:
 
     def propose_graph_branch(self, context: dict) -> tuple[dict, dict]:
         prompt = (
-            "Extend one shared knowledge graph. Return JSON with nodes and edges only. "
-            "Cover the user's request exhaustively: every distinct subtopic a careful outline needs, "
-            "usually two or three levels when the subject has real children. "
-            "Use contains for hierarchy, prerequisite when one idea must be known before another, "
-            "and related for cross-links. Every new node except the branch root must be the target of a contains edge. "
-            "Reuse an existing node by copying its concept_id and canonical_key instead of inventing a duplicate. "
+            "Extend one shared knowledge graph from this request. Return JSON with nodes and edges only. "
+            "Cover the request exhaustively: the subject plus the real subtopics a full treatment of that subject needs, "
+            "several levels deep when the subject has real parts. "
+            "Use the actual parts of the subject. Do not substitute a generic outline such as foundations, methods, and applications. "
+            "Each node has title, summary, explanation, and level. "
+            "level 0 is the broadest topic and larger numbers are more specific parts. "
+            "explanation is several sentences that state the range the node covers, so a later request can tell "
+            "whether an idea is already included. "
+            "summary is one short line. "
+            "Reuse an existing node when its explanation already covers the idea: copy its concept_id, canonical_key, "
+            "level, and explanation, and do not invent a duplicate. "
+            "Add a new node only for a part outside every existing explanation, one level deeper than the node that contains it. "
+            "Use contains for that hierarchy, prerequisite when one idea must be known before another, and related for a cross-link. "
+            "Every new node except the branch root must be the target of a contains edge. "
             "Do not recreate the parent. Do not emit practice nodes, structure nodes, or origins nodes. "
             "temp_id values are local to this response. Edge endpoints are a temp_id or an existing concept_id.\n"
             + json.dumps(context)
@@ -185,9 +181,14 @@ def _strip_fences(text: str) -> str:
 
 
 def get_provider() -> LLMProvider:
-    if get_settings().llm_provider == "fake":
+    settings = get_settings()
+    # Tests pin the one-node provider. Everywhere else, a request becomes the
+    # article's real topic graph, or Gemini when a key is configured.
+    if settings.environment == "test":
         return FakeLLMProvider()
-    return GeminiProvider()
+    if settings.llm_provider == "gemini" and settings.google_gemini_api_key:
+        return GeminiProvider()
+    return EncyclopediaProvider()
 
 
 def record_usage(

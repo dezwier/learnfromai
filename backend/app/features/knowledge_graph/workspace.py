@@ -19,7 +19,13 @@ def workspace_graph(session: Session) -> dict:
     return {
         "graph_id": str(graph.id),
         "nodes": [
-            {"concept_id": str(concept.id), "title": concept.title, "summary": concept.summary}
+            {
+                "concept_id": str(concept.id),
+                "title": concept.title,
+                "summary": concept.summary,
+                "explanation": concept.explanation,
+                "level": concept.level,
+            }
             for concept in concepts
         ],
         "edges": [

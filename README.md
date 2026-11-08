@@ -27,7 +27,7 @@ LLM_PROVIDER=fake .venv/bin/python -m app.workers
 LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
 ```
 
-`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. With `LLM_PROVIDER=fake` it does not call a paid model.
+`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. Tests use `LLM_PROVIDER=fake`. A running worker builds the topic graph from the encyclopedia article for the request, and uses Gemini when `GOOGLE_GEMINI_API_KEY` is set.
 
 ## Flutter
 

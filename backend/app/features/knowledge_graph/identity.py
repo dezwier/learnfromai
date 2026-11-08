@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from sqlmodel import Session, select
@@ -40,6 +41,15 @@ def same_topic(left: str, right: str) -> bool:
     return (a.endswith("s") and a[:-1] == b) or (b.endswith("s") and b[:-1] == a)
 
 
+def explanation_covers(explanation: str, title: str) -> bool:
+    """True when the title is already inside the range an explanation describes."""
+    phrase = re.sub(r"\s+", " ", title.strip().lower())
+    if len(phrase) < 4:
+        return False
+    haystack = re.sub(r"\s+", " ", explanation.lower())
+    return re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", haystack) is not None
+
+
 def neighborhood(session: Session, graph_id: UUID, limit: int = 400) -> list[dict]:
     """Recent nodes the generator should reuse instead of copying."""
     rows = session.exec(
@@ -50,6 +60,9 @@ def neighborhood(session: Session, graph_id: UUID, limit: int = 400) -> list[dic
             "concept_id": str(row.id),
             "title": row.title,
             "canonical_key": row.canonical_key or canonical_key_for(row.title),
+            "level": row.level,
+            "summary": row.summary,
+            "explanation": (row.explanation or "")[:600],
         }
         for row in rows
     ]

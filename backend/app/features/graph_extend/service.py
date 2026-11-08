@@ -6,8 +6,10 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.features.knowledge_graph.domain import DIRECTED_TYPES, EDGE_TYPES, creates_cycle
+from app.features.knowledge_graph.hierarchy import assign_levels
 from app.features.knowledge_graph.identity import (
     canonical_key_for,
+    explanation_covers,
     is_placeholder_title,
     same_topic,
 )
@@ -49,15 +51,24 @@ def apply_branch(
         temp = str(node.get("temp_id") or f"n{index}")
         if parent is not None and (same_topic(title, parent.title) or key == (parent.canonical_key or "")):
             temp_ids[temp] = parent.id
+            _merge_explanation(parent, node)
             continue
-        existing = _match(catalog, title, key)
+        referenced = _referenced_concept(node, by_id)
+        if referenced is not None:
+            temp_ids[temp] = referenced.id
+            _merge_explanation(referenced, node)
+            continue
+        existing = _match(catalog, title, key, _proposed_level(node))
         if existing is not None:
             temp_ids[temp] = existing.id
+            _merge_explanation(existing, node)
             continue
         concept = Concept(
             origin_graph_id=graph.id,
             title=title,
             summary=str(node.get("summary") or "").strip(),
+            explanation=str(node.get("explanation") or "").strip(),
+            level=_proposed_level(node) or 0,
             canonical_key=key,
         )
         session.add(concept)
@@ -112,6 +123,13 @@ def apply_branch(
                 added_edges,
             )
 
+    live = [concept for concept in by_id.values() if concept.id not in deleted]
+    live_edges = [
+        edge
+        for edge in [*edges, *added_edges]
+        if edge.from_concept_id not in deleted and edge.to_concept_id not in deleted
+    ]
+    assign_levels(live, live_edges)
     return {
         "added_nodes": len(created) - len(deleted),
         "added_edges": len(added_edges),
@@ -131,7 +149,7 @@ def _catalog(concepts: list[Concept]) -> dict[str, Concept]:
     return catalog
 
 
-def _match(catalog: dict[str, Concept], title: str, key: str) -> Concept | None:
+def _match(catalog: dict[str, Concept], title: str, key: str, proposed_level: int | None) -> Concept | None:
     for candidate in (key, canonical_key_for(title)):
         found = catalog.get(candidate)
         if found is not None:
@@ -144,7 +162,47 @@ def _match(catalog: dict[str, Concept], title: str, key: str) -> Concept | None:
     for concept in catalog.values():
         if same_topic(concept.title, title):
             return concept
-    return None
+    covered = [concept for concept in catalog.values() if explanation_covers(concept.explanation, title)]
+    if not covered:
+        return None
+    covered.sort(key=lambda concept: (concept.level, len(concept.explanation)))
+    broadest = covered[0]
+    if proposed_level is not None and proposed_level > broadest.level:
+        return None
+    return broadest
+
+
+def _proposed_level(node: dict) -> int | None:
+    raw = node.get("level")
+    if raw is None or raw == "":
+        return None
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _referenced_concept(node: dict, by_id: dict[UUID, Concept]) -> Concept | None:
+    raw = node.get("concept_id")
+    if not raw:
+        return None
+    try:
+        concept_id = UUID(str(raw))
+    except ValueError:
+        return None
+    return by_id.get(concept_id)
+
+
+def _merge_explanation(concept: Concept, node: dict) -> None:
+    incoming = str(node.get("explanation") or "").strip()
+    if not incoming:
+        return
+    current = (concept.explanation or "").strip()
+    longer = len(incoming) > len(current)
+    grew = longer and current.lower() in incoming.lower()
+    # A one-line placeholder does not describe the range. A real explanation replaces it.
+    if longer and (not current or len(current) < 240 or grew):
+        concept.explanation = incoming
 
 
 def _candidate_edges(branch: dict) -> list[dict]:
