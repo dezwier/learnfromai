@@ -6,7 +6,6 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["LLM_PROVIDER"] = "fake"
 os.environ["LLM_DAILY_TOKENS_USER_LIMIT"] = "1000000"
 os.environ["SENTRY_DSN"] = ""
-os.environ["GRAPH_FRESHNESS_CHECK_ENABLED"] = "false"
 
 import pytest
 from alembic.config import Config
@@ -34,13 +33,8 @@ def clean_db():
     with Session(engine, expire_on_commit=False) as session:
         session.exec(
             text(
-                "TRUNCATE TABLE review_events, review_items, mastery_evidence, learner_objective_states, "
-                "migration_items, migration_runs, objective_mappings, concept_mappings, assessment_attempts, "
-                "activity_objectives, learning_activities, learning_sessions, trajectory_steps, trajectory_releases, "
-                "trajectories, goal_graphs, learning_goals, source_claims, source_documents, release_edges, "
-                "release_concepts, graph_change_proposals, graph_releases, graph_overlays, objective_revisions, "
-                "learning_objectives, concept_revisions, concepts, edge_revisions, edges, graphs, llm_usage, "
-                "generation_jobs, audit_events, worker_heartbeats, users RESTART IDENTITY CASCADE"
+                "TRUNCATE TABLE extend_requests, llm_usage, generation_jobs, edges, concepts, graphs, "
+                "worker_heartbeats, users RESTART IDENTITY CASCADE"
             )
         )
         session.commit()

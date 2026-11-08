@@ -19,20 +19,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""
     llm_daily_tokens_user_limit: int = 200_000
-    graph_expansion_max_nodes: int = 12
-    graph_expansion_max_depth: int = 4
-    graph_max_fanout: int = 8
+    graph_expansion_max_nodes: int = 80
     job_worker_concurrency: int = 2
     job_lease_seconds: int = 60
     job_max_attempts: int = 5
     job_idle_seconds: float = 1.0
-    graph_freshness_check_enabled: bool = False
     llm_provider: str = "gemini"
     access_token_expire_minutes: int = 60 * 24 * 7
     api_v1_prefix: str = "/api/v1"
-    planner_version: str = "deterministic-v1"
-    mastery_model_version: str = "weighted-mean-v1"
-    scheduler_version: str = "fsrs-6.3.2"
 
     @property
     def cors_origin_list(self) -> list[str]:

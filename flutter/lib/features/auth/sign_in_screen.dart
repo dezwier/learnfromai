@@ -37,8 +37,8 @@ class _SignInScreenState extends State<SignInScreen> {
                 const SizedBox(height: 24),
                 StudyCard(
                   eyebrow: 'ADAPTIVE MASTERY',
-                  title: 'Pick up the next card',
-                  subtitle: 'Sign in with Firebase. The API then issues its own session.',
+                  title: 'Sign in',
+                  subtitle: 'Firebase proves who you are. Then you can see and extend the shared graph.',
                   footer: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

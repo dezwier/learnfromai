@@ -1,8 +1,8 @@
 # Adaptive Mastery
 
-A Flutter client and a FastAPI service for learning one topic through a versioned concept graph, a deterministic study plan, evidence-backed mastery, and scheduled review.
+A Flutter client and a FastAPI service for one shared knowledge graph. Sign in, look at the nodes and edges, and extend the graph. Past extend requests from every user stay on the graph.
 
-The product contract is `docs/SPEC.md`. Architecture and the data model are in `docs/ARCHITECTURE.md`. Reused patterns are listed in `docs/REUSE_AUDIT.md`.
+The product contract is `docs/SPEC.md`. Architecture is in `docs/ARCHITECTURE.md`.
 
 ## Local API
 
@@ -25,10 +25,9 @@ In another shell, from `backend`:
 ```bash
 LLM_PROVIDER=fake .venv/bin/python -m app.workers
 LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
-LLM_PROVIDER=fake .venv/bin/python -m scripts.demo_flow
 ```
 
-`make backend-test`, `make worker`, `make migrate`, `make seed`, and `make demo` wrap the same commands. The demo uses `LLM_PROVIDER=fake` and makes no paid model calls. It signs in a local demo user, reuses the Decision Trees graph, answers the diagnostic as unknown, studies the next step, scores a retrieval item, previews an expansion, and activates it as a personal overlay.
+`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. With `LLM_PROVIDER=fake` it does not call a paid model.
 
 ## Flutter
 
@@ -51,9 +50,7 @@ cd backend && .venv/bin/ruff check app tests scripts && .venv/bin/pytest
 cd flutter && flutter analyze && flutter test
 ```
 
-Backend integration tests use database `adaptive_mastery_test` on local Postgres. `tests/test_alembic_empty.py` upgrades an empty `adaptive_mastery_alembic` database.
-
-Latest local run: ruff clean, **31** pytest tests passed, `flutter analyze` reported no issues, **8** Flutter tests passed. The Decision Trees demo printed a next step of Decision Trees, a retrieval score of 1.0, a preview of 4 preserved and 2 new objectives, and a succeeded personal activation.
+Backend tests use database `adaptive_mastery_test` on local Postgres. `tests/test_alembic_empty.py` upgrades an empty `adaptive_mastery_alembic` database and checks that an old published release flattens into nodes and edges.
 
 ## Deploy
 
@@ -68,7 +65,3 @@ railway ssh --service api -- python -m scripts.seed
 ```
 
 `railway up` is run from `backend` with `--path-as-root`, so the image build matches `backend/Dockerfile`. The API start command is `sh -c "uvicorn app.main:app --host 0.0.0.0 --port $PORT"` because Railway does not expand `$PORT` otherwise.
-
-## Limits
-
-Shared high-impact publish fails without a retrieved source. The Decision Trees seed is labeled `source_pending` and is a fixture, not a fact-checked corpus. A personal overlay may activate while provisional and the client labels that preview. A missing Gemini key returns `503 GENERATION_UNAVAILABLE` and does not invent a lesson. Cached activities still open when generation is down. Free-text grading uses the model; with `LLM_PROVIDER=fake`, keyword and multiple-choice grading stay in the request. There is no chat tutor, payment, or social feed.
