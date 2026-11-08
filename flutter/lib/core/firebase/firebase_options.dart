@@ -1,8 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
-/// Replace this file with the output of `flutterfire configure` for a new
-/// Firebase project. These placeholder values are not copied from another app.
+/// Web and iOS both use this app's `learnfromai` Firebase project.
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) return web;
@@ -10,11 +9,12 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'demo-web-key',
-    appId: '1:000000000000:web:adaptivemastery',
-    messagingSenderId: '000000000000',
-    projectId: 'adaptive-mastery-dev',
-    authDomain: 'adaptive-mastery-dev.firebaseapp.com',
+    apiKey: 'AIzaSyBiV6IFtYTw9pr2EfHoUwaZ_F2rSTPwBgQ',
+    appId: '1:124258867891:web:fd961c4464c1bb0f962ec6',
+    messagingSenderId: '124258867891',
+    projectId: 'learnfromai',
+    authDomain: 'learnfromai.firebaseapp.com',
+    storageBucket: 'learnfromai.firebasestorage.app',
   );
 
   static const FirebaseOptions _native = FirebaseOptions(
