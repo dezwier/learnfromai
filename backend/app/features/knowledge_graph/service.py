@@ -40,3 +40,18 @@ def remove_concept(session: Session, concept_id: UUID) -> dict:
     session.exec(sql_delete(Concept).where(col(Concept.id) == concept_id))
     session.expunge(concept)
     return {"concept_id": str(concept_id), "removed_edges": removed_edges}
+
+
+def clear_graph(session: Session) -> dict:
+    """Delete every node and every edge. Past extend requests stay."""
+    graph = shared_graph(session)
+    session.exec(select(Graph).where(Graph.id == graph.id).with_for_update()).one()
+    concept_ids = select(Concept.id).where(Concept.origin_graph_id == graph.id)
+    session.exec(
+        sql_update(ExtendRequest).where(col(ExtendRequest.parent_concept_id).in_(concept_ids)).values(parent_concept_id=None)
+    )
+    removed_edges = session.exec(
+        sql_delete(Edge).where(or_(col(Edge.from_concept_id).in_(concept_ids), col(Edge.to_concept_id).in_(concept_ids)))
+    ).rowcount
+    removed_nodes = session.exec(sql_delete(Concept).where(col(Concept.origin_graph_id) == graph.id)).rowcount
+    return {"removed_nodes": removed_nodes, "removed_edges": removed_edges}
