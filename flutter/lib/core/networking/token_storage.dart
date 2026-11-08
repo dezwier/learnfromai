@@ -24,14 +24,22 @@ class SecureTokenStore implements TokenStore {
   static const _key = 'access_token';
 
   @override
-  Future<String?> read() => _storage.read(key: _key);
+  Future<String?> read() async {
+    try {
+      return await _storage.read(key: _key);
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   Future<void> write(String? token) async {
-    if (token == null || token.isEmpty) {
-      await _storage.delete(key: _key);
-      return;
-    }
-    await _storage.write(key: _key, value: token);
+    try {
+      if (token == null || token.isEmpty) {
+        await _storage.delete(key: _key);
+        return;
+      }
+      await _storage.write(key: _key, value: token);
+    } catch (_) {}
   }
 }
