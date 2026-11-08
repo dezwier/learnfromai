@@ -114,7 +114,7 @@ class _GraphScreenState extends State<GraphScreen> {
           else
             Positioned.fill(
               child: ColoredBox(
-                color: const Color(0xFF14161C),
+                color: Theme.of(context).scaffoldBackgroundColor,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final signature =
