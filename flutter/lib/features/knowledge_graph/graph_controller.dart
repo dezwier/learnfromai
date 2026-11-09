@@ -3,174 +3,115 @@ import 'package:flutter/foundation.dart';
 import '../../core/networking/api_client.dart';
 import '../../core/networking/api_exception.dart';
 
+class CategoryChoice {
+  const CategoryChoice({required this.id, required this.title});
+
+  final int id;
+  final String title;
+}
+
 class GraphController extends ChangeNotifier {
-  GraphController({this.api});
+  GraphController({this.api, this.loader});
 
   final ApiClient? api;
-  Map<String, dynamic>? workspace;
+  final Future<Map<String, dynamic>> Function(String path)? loader;
+
+  Map<String, dynamic>? categoryGraph;
   bool loading = false;
-  bool extending = false;
-  bool deleting = false;
+  bool refreshing = false;
+  int? pendingNodeId;
   String? error;
-  String? progressMessage;
-  double progressFraction = 0.2;
-  String? generationInstruction;
-  bool _following = false;
+  List<CategoryChoice> candidates = [];
+  final List<int> focusHistory = [];
 
-  bool get generationPending => extending || _pendingRequest() != null;
-
-  String get generationLabel {
-    if (progressMessage != null && progressMessage!.isNotEmpty) return progressMessage!;
-    final pending = _pendingRequest();
-    final message = pending?['progress_message']?.toString();
-    if (message != null && message.isNotEmpty) return message;
-    return 'Waiting to generate';
-  }
-
-  String get generationSubject {
-    final instruction = generationInstruction ?? _pendingRequest()?['instruction']?.toString();
-    if (instruction != null && instruction.isNotEmpty) return instruction;
-    return 'The graph';
-  }
-
-  double get generationFraction {
-    if (extending) return progressFraction;
-    final raw = _pendingRequest()?['progress_fraction'];
-    if (raw is num) return raw.toDouble();
-    return 0.2;
-  }
-
-  Map<String, dynamic>? _pendingRequest() {
-    for (final raw in (workspace?['extend_requests'] as List?) ?? const []) {
-      if (raw is! Map) continue;
-      final request = Map<String, dynamic>.from(raw);
-      final status = request['status']?.toString();
-      if (status == 'queued' || status == 'running') return request;
-    }
+  int? get focusId {
+    final raw = categoryGraph?['focus_node_id'];
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
     return null;
   }
 
-  Future<void> load() async {
-    final client = api;
-    if (client == null) return;
-    loading = true;
+  bool get canGoBack => focusHistory.length > 1 && !refreshing;
+
+  Future<void> search(String topic) async {
+    final trimmed = topic.trim();
+    if (trimmed.isEmpty || refreshing || loading) return;
+    final previous = List<int>.of(focusHistory);
+    focusHistory.clear();
+    await _load('/knowledge/graph?topic=${Uri.encodeQueryComponent(trimmed)}&up_depth=2&down_depth=2');
+    if (error != null || candidates.isNotEmpty) {
+      focusHistory
+        ..clear()
+        ..addAll(previous);
+    }
+  }
+
+  Future<void> openCategory(int id) async {
+    if (refreshing || loading) return;
+    if (focusId == id && categoryGraph != null) return;
+    pendingNodeId = id;
+    await _load('/knowledge/graph?category_id=$id&up_depth=2&down_depth=2');
+  }
+
+  Future<void> choose(CategoryChoice choice) async {
+    candidates = [];
+    notifyListeners();
+    await openCategory(choice.id);
+  }
+
+  Future<void> back() async {
+    if (!canGoBack) return;
+    final current = focusHistory.removeLast();
+    final previous = focusHistory.last;
+    await _load('/knowledge/graph?category_id=$previous&up_depth=2&down_depth=2', record: false);
+    if (error != null) focusHistory.add(current);
+  }
+
+  Future<void> _load(String path, {bool record = true}) async {
+    final first = categoryGraph == null;
+    loading = first;
+    refreshing = !first;
+    error = null;
+    candidates = [];
     notifyListeners();
     try {
-      workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
-      error = null;
+      categoryGraph = await _get(path);
+      final id = focusId;
+      if (record && id != null && (focusHistory.isEmpty || focusHistory.last != id)) {
+        focusHistory.add(id);
+      }
     } on ApiException catch (exc) {
-      error = exc.message;
+      if (exc.status == 409) {
+        candidates = _choices(exc.details);
+      } else {
+        error = exc.message;
+      }
     } finally {
       loading = false;
-      notifyListeners();
-    }
-    final pending = _pendingRequest();
-    final jobId = pending?['job_id']?.toString();
-    if (pending != null && jobId != null && !_following) {
-      generationInstruction = pending['instruction']?.toString();
-      progressMessage = pending['progress_message']?.toString() ?? 'Waiting to generate';
-      final fraction = pending['progress_fraction'];
-      progressFraction = fraction is num ? fraction.toDouble() : 0.2;
-      extending = true;
-      notifyListeners();
-      await _follow(jobId);
-    }
-  }
-
-  Future<void> extend(String instruction, {String? parentConceptId}) async {
-    final client = api;
-    if (client == null) return;
-    extending = true;
-    error = null;
-    generationInstruction = instruction;
-    progressMessage = 'Waiting to generate';
-    progressFraction = 0.2;
-    notifyListeners();
-    try {
-      final body = <String, dynamic>{'instruction': instruction};
-      if (parentConceptId != null) body['parent_concept_id'] = parentConceptId;
-      final queued = Map<String, dynamic>.from(await client.post('/graph/extend', body: body) as Map);
-      final jobId = queued['job_id']?.toString();
-      if (jobId != null) await _follow(jobId);
-      workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
-    } on ApiException catch (exc) {
-      error = exc.message;
-    } finally {
-      final stillPending = _pendingRequest() != null && error == null;
-      extending = stillPending;
-      if (!stillPending) {
-        generationInstruction = null;
-        progressMessage = null;
-      }
+      refreshing = false;
+      pendingNodeId = null;
       notifyListeners();
     }
   }
 
-  Future<void> _follow(String jobId) async {
+  Future<Map<String, dynamic>> _get(String path) async {
+    final fetch = loader;
+    if (fetch != null) return Map<String, dynamic>.from(await fetch(path));
     final client = api;
-    if (client == null || _following) return;
-    _following = true;
-    try {
-      for (var attempt = 0; attempt < 200; attempt++) {
-        final job = Map<String, dynamic>.from(await client.get('/jobs/$jobId') as Map);
-        final progress = job['progress'];
-        if (progress is Map) {
-          final message = progress['message']?.toString();
-          if (message != null && message.isNotEmpty) progressMessage = message;
-          final fraction = progress['fraction'];
-          if (fraction is num) progressFraction = fraction.toDouble();
-        }
-        final state = job['state']?.toString();
-        if (state == 'queued' && (progressMessage == null || progressMessage!.isEmpty)) {
-          progressMessage = 'Waiting to generate';
-        }
-        notifyListeners();
-        if (state == 'succeeded') return;
-        if (state == 'failed') {
-          final message = job['error_message']?.toString();
-          error = message != null && message.isNotEmpty ? message : 'The graph could not be generated';
-          return;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 700));
-      }
-    } on ApiException catch (exc) {
-      error = exc.message;
-    } finally {
-      _following = false;
-    }
+    if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
+    return Map<String, dynamic>.from(await client.get(path) as Map);
   }
 
-  Future<void> deleteRequest(String requestId) async {
-    final client = api;
-    if (client == null) return;
-    deleting = true;
-    error = null;
-    notifyListeners();
-    try {
-      await client.delete('/graph/extend/$requestId');
-      workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
-    } on ApiException catch (exc) {
-      error = exc.message;
-    } finally {
-      deleting = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> deleteNode(String conceptId) async {
-    final client = api;
-    if (client == null) return;
-    deleting = true;
-    error = null;
-    notifyListeners();
-    try {
-      await client.delete('/graph/nodes/$conceptId');
-      workspace = Map<String, dynamic>.from(await client.get('/workspace/graph') as Map);
-    } on ApiException catch (exc) {
-      error = exc.message;
-    } finally {
-      deleting = false;
-      notifyListeners();
-    }
+  List<CategoryChoice> _choices(Map<String, dynamic> details) {
+    final raw = details['candidates'];
+    if (raw is! List) return const [];
+    return [
+      for (final item in raw)
+        if (item is Map)
+          CategoryChoice(
+            id: (item['wikipedia_page_id'] as num).toInt(),
+            title: item['title']?.toString() ?? 'Category',
+          ),
+    ];
   }
 }

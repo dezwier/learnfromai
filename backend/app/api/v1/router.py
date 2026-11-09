@@ -11,12 +11,9 @@ from app.core.errors import AppError, forbidden, not_found
 from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
-from app.features.graph_extend.models import ExtendRequest
-from app.features.knowledge_graph.models import Concept
-from app.features.knowledge_graph.service import remove_concept, remove_request, shared_graph
+from app.features.knowledge_graph.categories import load_knowledge_graph
+from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
-from app.features.platform.jobs import enqueue
-from app.features.platform.llm import assert_user_quota
 from app.features.platform.models import GenerationJob
 
 router = APIRouter()
@@ -68,37 +65,37 @@ def workspace(user: User = Depends(get_current_user), session: Session = Depends
     return workspace_graph(session)
 
 
-@router.post("/graph/extend", status_code=202)
-def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    instruction = body.instruction.strip()
-    if not instruction:
-        raise AppError("VALIDATION_ERROR", "Instruction is empty", 422)
-    assert_user_quota(session, user.id)
-    graph = shared_graph(session)
-    parent_id = body.parent_concept_id
-    if parent_id is not None:
-        parent = session.get(Concept, parent_id)
-        if parent is None or parent.origin_graph_id != graph.id:
-            raise not_found("Parent concept not found")
-    request = ExtendRequest(
-        user_id=user.id,
-        graph_id=graph.id,
-        parent_concept_id=parent_id,
-        instruction=instruction,
-        status="queued",
-    )
-    session.add(request)
-    session.flush()
-    job = enqueue(
+@router.get("/knowledge/graph")
+def knowledge_graph(
+    topic: str | None = None,
+    category_id: int | None = None,
+    up_depth: int | None = None,
+    down_depth: int | None = None,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    if (topic is None or not topic.strip()) and category_id is None:
+        raise AppError("VALIDATION_ERROR", "Provide a topic or a category_id", 422)
+    payload = load_knowledge_graph(
         session,
-        job_type="expand_graph",
         user_id=user.id,
-        payload={"request_id": str(request.id)},
+        topic=topic,
+        category_id=category_id,
+        up_depth=up_depth,
+        down_depth=down_depth,
     )
-    job.progress = {"stage": "queued", "message": "Waiting to generate", "fraction": 0.2}
-    request.job_id = job.id
     session.commit()
-    return {"request_id": str(request.id), "job_id": str(job.id)}
+    return payload
+
+
+@router.post("/graph/extend", status_code=410)
+def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    _ = (body, user, session)
+    raise AppError(
+        "GONE",
+        "Graph generation has been removed. Search a Wikipedia category instead.",
+        410,
+    )
 
 
 @router.delete("/graph/extend/{request_id}")

@@ -37,6 +37,7 @@ class Concept(SQLModel, table=True):
     explanation: str = ""
     level: int = Field(default=0, index=True)
     extend_request_id: UUID | None = Field(default=None, foreign_key="extend_requests.id", index=True)
+    knowledge_category_id: UUID | None = Field(default=None, foreign_key="knowledge_categories.id", index=True)
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
