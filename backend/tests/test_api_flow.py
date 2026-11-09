@@ -1,5 +1,7 @@
 from app.features.accounts.firebase_auth import verify_firebase_id_token
-from app.workers.runner import process_until_idle
+from app.features.graph_extend.models import ExtendRequest
+from app.features.knowledge_graph.models import Concept, Edge, Graph
+from app.features.knowledge_graph.service import shared_graph
 
 
 def test_health(client):
@@ -21,82 +23,13 @@ def test_me_and_firebase_exchange(client, monkeypatch):
     assert client.get("/api/v1/me").status_code == 401
 
 
-def test_extend_stays_pending_with_progress_until_the_worker_finishes(client, auth):
+def test_extend_no_longer_generates_a_graph(client, auth):
     created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert created.status_code == 202
-    job_id = created.json()["job_id"]
-    queued = client.get(f"/api/v1/jobs/{job_id}", headers=auth)
-    assert queued.status_code == 200
-    assert queued.json()["state"] == "queued"
-    assert queued.json()["progress"]["message"] == "Waiting to generate"
-    assert queued.json()["progress"]["fraction"] == 0.2
+    assert created.status_code == 410
+    assert created.json()["code"] == "GONE"
     workspace = client.get("/api/v1/workspace/graph", headers=auth).json()
-    request = workspace["extend_requests"][0]
-    assert request["status"] == "queued"
-    assert request["progress_message"] == "Waiting to generate"
-    assert request["progress_fraction"] == 0.2
-    process_until_idle()
-    finished = client.get(f"/api/v1/jobs/{job_id}", headers=auth).json()
-    assert finished["state"] == "succeeded"
-    assert finished["progress"]["stage"] == "done"
-    done = client.get("/api/v1/workspace/graph", headers=auth).json()
-    assert done["extend_requests"][0]["status"] == "succeeded"
-    assert done["extend_requests"][0]["progress_message"] == "Generation finished"
-
-
-def test_extend_merges_into_the_shared_graph(client, auth, other_auth):
-    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert created.status_code == 202
-    job_id = created.json()["job_id"]
-    assert client.get(f"/api/v1/jobs/{job_id}", headers=other_auth).status_code == 403
-    process_until_idle()
-    first = client.get("/api/v1/workspace/graph", headers=other_auth)
-    assert first.status_code == 200
-    body = first.json()
-    titles = {node["title"]: node for node in body["nodes"]}
-    assert set(titles) == {"Life sciences", "Dinosaurs"}
-    dinosaur = titles["Dinosaurs"]
-    assert titles["Life sciences"]["level"] == 1
-    assert dinosaur["level"] == 2
-    assert any(
-        edge["from_concept_id"] == titles["Life sciences"]["concept_id"]
-        and edge["to_concept_id"] == dinosaur["concept_id"]
-        and edge["type"] == "contains"
-        for edge in body["edges"]
-    )
-    assert "dinosaurs" in dinosaur["explanation"].lower()
-    assert "foundations" not in dinosaur["title"].lower()
-    assert body["extend_requests"][0]["instruction"] == "Dinosaurs"
-    assert body["extend_requests"][0]["author"] == "Ada"
-    assert body["extend_requests"][0]["status"] == "succeeded"
-    assert "goal" not in body
-    assert all("status" not in edge for edge in body["edges"])
-
-    parent_id = dinosaur["concept_id"]
-    child = client.post(
-        "/api/v1/graph/extend",
-        headers=other_auth,
-        json={"instruction": "Birds", "parent_concept_id": parent_id},
-    )
-    assert child.status_code == 202
-    process_until_idle()
-    second = client.get("/api/v1/workspace/graph", headers=auth).json()
-    by_title = {node["title"]: node["concept_id"] for node in second["nodes"]}
-    assert "Birds" in by_title
-    birds_node = next(node for node in second["nodes"] if node["title"] == "Birds")
-    assert birds_node["level"] == 3
-    assert "birds" in birds_node["explanation"].lower()
-    assert any(
-        edge["from_concept_id"] == parent_id and edge["to_concept_id"] == by_title["Birds"] and edge["type"] == "contains"
-        for edge in second["edges"]
-    )
-    again = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert again.status_code == 202
-    process_until_idle()
-    third = client.get("/api/v1/workspace/graph", headers=other_auth).json()
-    assert len(third["nodes"]) == len(second["nodes"])
-    assert [item["instruction"] for item in third["extend_requests"][:3]] == ["Dinosaurs", "Birds", "Dinosaurs"]
-    assert {item["author"] for item in third["extend_requests"]} == {"Ada", "Grace"}
+    assert workspace["nodes"] == []
+    assert workspace["edges"] == []
 
 
 def test_openapi_is_auth_and_graph(client):
@@ -104,6 +37,7 @@ def test_openapi_is_auth_and_graph(client):
     assert "/api/v1/auth/firebase" in paths
     assert "/api/v1/me" in paths
     assert "/api/v1/workspace/graph" in paths
+    assert "/api/v1/knowledge/graph" in paths
     assert "/api/v1/graph/extend" in paths
     assert "/api/v1/graph/nodes/{concept_id}" in paths
     assert "delete" in paths["/api/v1/graph/extend/{request_id}"]
@@ -113,22 +47,11 @@ def test_openapi_is_auth_and_graph(client):
     assert "/api/v1/mastery/overview" not in paths
 
 
-def test_delete_node_removes_its_edges(client, auth, other_auth):
-    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert created.status_code == 202
-    process_until_idle()
-    before = client.get("/api/v1/workspace/graph", headers=auth).json()
-    titles = {node["title"]: node["concept_id"] for node in before["nodes"]}
-    parent_id = titles["Dinosaurs"]
-    child = client.post(
-        "/api/v1/graph/extend",
-        headers=other_auth,
-        json={"instruction": "Birds", "parent_concept_id": parent_id},
-    )
-    assert child.status_code == 202
-    process_until_idle()
+def test_delete_node_removes_its_edges(client, auth, other_auth, session, user, other_user):
+    _seed_legacy(session, user, other_user)
     with_child = client.get("/api/v1/workspace/graph", headers=auth).json()
     child_titles = {node["title"]: node["concept_id"] for node in with_child["nodes"]}
+    parent_id = child_titles["Dinosaurs"]
     target = child_titles["Birds"]
     edge_count = len(with_child["edges"])
 
@@ -158,21 +81,8 @@ def test_delete_node_removes_its_edges(client, auth, other_auth):
     assert client.delete(f"/api/v1/graph/nodes/{target}").status_code == 401
 
 
-def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, session):
-    from app.features.knowledge_graph.models import Concept, Edge, Graph
-
-    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert created.status_code == 202
-    process_until_idle()
-    body = client.get("/api/v1/workspace/graph", headers=auth).json()
-    titles = {node["title"]: node["concept_id"] for node in body["nodes"]}
-    child = client.post(
-        "/api/v1/graph/extend",
-        headers=auth,
-        json={"instruction": "Birds", "parent_concept_id": titles["Dinosaurs"]},
-    )
-    assert child.status_code == 202
-    process_until_idle()
+def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, session, user):
+    _seed_legacy(session, user, user)
     grown = client.get("/api/v1/workspace/graph", headers=auth).json()
     titles = {node["title"]: node["concept_id"] for node in grown["nodes"]}
     target = titles["Dinosaurs"]
@@ -197,19 +107,8 @@ def test_delete_node_removes_edges_recorded_on_another_graph(client, auth, sessi
     assert session.get(Concept, target) is None
 
 
-def test_delete_extend_removes_the_nodes_and_edges_it_added(client, auth, other_auth):
-    created = client.post("/api/v1/graph/extend", headers=auth, json={"instruction": "Dinosaurs"})
-    assert created.status_code == 202
-    process_until_idle()
-    first = client.get("/api/v1/workspace/graph", headers=auth).json()
-    parent_id = next(node["concept_id"] for node in first["nodes"] if node["title"] == "Dinosaurs")
-    child = client.post(
-        "/api/v1/graph/extend",
-        headers=other_auth,
-        json={"instruction": "Birds", "parent_concept_id": parent_id},
-    )
-    assert child.status_code == 202
-    process_until_idle()
+def test_delete_extend_removes_the_nodes_and_edges_it_added(client, auth, other_auth, session, user, other_user):
+    _seed_legacy(session, user, other_user)
     grown = client.get("/api/v1/workspace/graph", headers=auth).json()
     dinosaurs = next(item for item in grown["extend_requests"] if item["instruction"] == "Dinosaurs")
     removed = client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}", headers=auth)
@@ -227,6 +126,81 @@ def test_delete_extend_removes_the_nodes_and_edges_it_added(client, auth, other_
     missing = client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}", headers=auth)
     assert missing.status_code == 404
     assert client.delete(f"/api/v1/graph/extend/{dinosaurs['id']}").status_code == 401
+
+
+def _seed_legacy(session, user, other) -> None:
+    """Concept rows that used to come from an extend, kept so deletion still has something to remove."""
+    graph = shared_graph(session)
+    dinosaurs_request = ExtendRequest(
+        user_id=user.id,
+        graph_id=graph.id,
+        instruction="Dinosaurs",
+        status="succeeded",
+    )
+    session.add(dinosaurs_request)
+    session.flush()
+    life = Concept(
+        origin_graph_id=graph.id,
+        title="Life sciences",
+        summary="",
+        explanation="Covers the range of life sciences.",
+        level=1,
+        canonical_key="life-sciences",
+        extend_request_id=dinosaurs_request.id,
+    )
+    dinosaurs = Concept(
+        origin_graph_id=graph.id,
+        title="Dinosaurs",
+        summary="",
+        explanation="Covers the range of dinosaurs.",
+        level=2,
+        canonical_key="dinosaurs",
+        extend_request_id=dinosaurs_request.id,
+    )
+    session.add(life)
+    session.add(dinosaurs)
+    session.flush()
+    birds_request = ExtendRequest(
+        user_id=other.id,
+        graph_id=graph.id,
+        parent_concept_id=dinosaurs.id,
+        instruction="Birds",
+        status="succeeded",
+    )
+    session.add(birds_request)
+    session.flush()
+    birds = Concept(
+        origin_graph_id=graph.id,
+        title="Birds",
+        summary="",
+        explanation="Covers the range of birds.",
+        level=3,
+        canonical_key="birds",
+        extend_request_id=birds_request.id,
+    )
+    session.add(birds)
+    session.flush()
+    session.add(
+        Edge(
+            graph_id=graph.id,
+            from_concept_id=life.id,
+            to_concept_id=dinosaurs.id,
+            type="contains",
+            is_primary_parent=True,
+            extend_request_id=dinosaurs_request.id,
+        )
+    )
+    session.add(
+        Edge(
+            graph_id=graph.id,
+            from_concept_id=dinosaurs.id,
+            to_concept_id=birds.id,
+            type="contains",
+            is_primary_parent=True,
+            extend_request_id=birds_request.id,
+        )
+    )
+    session.commit()
 
 
 def _reachable(root: str, edges: list[dict]) -> set[str]:

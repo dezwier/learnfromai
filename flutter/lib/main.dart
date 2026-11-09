@@ -17,6 +17,5 @@ Future<void> main() async {
   api.refreshIdToken = auth.refreshSession;
   final graph = GraphController(api: api);
   await auth.loadMe();
-  if (auth.user != null) await graph.load();
   runApp(AdaptiveMasteryApp(auth: auth, graph: graph));
 }

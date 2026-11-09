@@ -1,30 +1,36 @@
 # Adaptive Mastery
 
-Sign in, then view and extend one shared knowledge graph.
+Sign in, then explore one shared knowledge graph built from Wikipedia categories.
 
 ## Product
 
 - Authentication uses Firebase. The API exchanges a Firebase ID token for its own JWT.
-- There is one graph, slug `knowledge`. It is a set of nodes and edges shared by every signed-in user.
-- A node is a concept: title, a short summary, a hierarchy level, a longer explanation of the range the topic covers, and a canonical key so the same idea is not stored twice. Level 1 is a broad domain, such as life sciences, physical health, social sciences, literature, life skills, psychology, mental wellbeing, mathematics, physical sciences, history, arts, technology, or language. A larger level is a more specific part. A broad topic such as parenting or dinosaurs is level 2.
-- An edge is `contains`, `prerequisite`, or `related`.
-- An extend request asks for more of the graph. The request stays pending while the worker asks the model, then while it adds the topics. The screen shows that pending generation and which of those steps is underway. The worker asks the model for an exhaustive graph of the real parts of that topic, several levels deep. It then places the request. A request that names a domain stays at level 1. Parenting sits under life skills, and dinosaurs sit under life sciences. A request that names a part of a topic already in the graph sits under that topic. Every other node from the request hangs under the requested topic, so the request adds one contains tree. Each node has a short title that names the subject, a level, and an explanation of the range it covers. Nothing is filled in from a fixed outline. An existing node is reused when its canonical key matches, or when its explanation already covers the requested idea and the new idea is not a more specific part. A longer explanation replaces a short placeholder. Contains and prerequisite edges that would cycle are dropped. Edges that do not connect two real nodes are dropped. After the merge, each node's level is one more than its depth in the contains tree, so a domain with no parent is level 1.
-- Every signed-in user can read past extend requests, including who asked and whether the request succeeded. Deleting a past extend removes the nodes and edges that extend added. A node that already existed and was only reused stays. An edge that touches a deleted node is removed with that node.
-- Any signed-in user can delete a node. The edges that touch that node are deleted with it. Other nodes stay. Past extend requests stay, with the parent cleared when it was the deleted node.
+- There is one category graph, shared by every signed-in user. A search does not create a private graph.
+- A category is a Wikipedia category: stable page id, title, and an optional short description. Identity is the page id, not the title.
+- An edge is `parent_child` and points from the parent category to the child category. A category may have several parents. The structure is a directed graph, not a tree.
+- Searching a topic resolves it to a Wikipedia category, then loads that category, its parents, and its subcategories. The default reach is 2 categories upstream and 2 downstream. Hidden categories are left out when Wikipedia marks them hidden. Cycles are not walked twice.
+- Categories and edges are stored in PostgreSQL. A direction that was fully fetched inside the last 30 days is reused. An unfinished or stale direction is fetched again. An unfinished fetch is not treated as the full set of relationships.
+- The same category row is reused when another topic reaches it. Repeated searches do not insert a second row for the same Wikipedia page id.
+- Graph structure is not generated, rearranged, or filtered by a model. `POST /api/v1/graph/extend` no longer adds nodes.
+- Older concept rows, and the edges between them, stay in the database. A concept is linked to a category only when the titles are the same idea. Its title, explanation, level, and any progress that points at the concept stay as they are. A concept that does not match a category stays, and it is not shown as a Wikipedia category.
 
 ## API
 
 - `POST /api/v1/auth/firebase`
 - `GET /api/v1/me`
+- `GET /api/v1/knowledge/graph?topic=Dinosaurs&up_depth=2&down_depth=2`
+- `GET /api/v1/knowledge/graph?category_id=123&up_depth=2&down_depth=2`
 - `GET /api/v1/workspace/graph`
-- `POST /api/v1/graph/extend`
+- `POST /api/v1/graph/extend` (retired; responds 410)
 - `DELETE /api/v1/graph/extend/{request_id}`
 - `DELETE /api/v1/graph/nodes/{concept_id}`
 - `GET /api/v1/jobs/{job_id}`
 - `GET /health`
 
-`GET /workspace/graph` returns `nodes`, `edges`, and `extend_requests`. Extend requests are newest first and include the author's display name.
+`GET /knowledge/graph` returns `focus_node_id`, `incomplete`, `nodes`, and `edges`. Node ids are Wikipedia page ids. `depth` is relative to the focus: negative above it, zero on it, positive below it. Edges run from parent to child. Several matches return 409 with `details.candidates`. No match returns 404.
+
+`GET /workspace/graph` still returns the older concept nodes, edges, and extend requests.
 
 ## Client
 
-The Flutter app has a sign-in screen and a graph screen. The graph is a fractal of hexagons. Level-1 domains are colored hexagons packed together into a larger hexagon. Zooming in splits each hexagon into the same kind of hexagons: its children, packed the same way inside it. Zooming further splits those the same way. Zoomed out, the domain labels are visible. Zooming in shows the labels of the level-2 hexagons, and zooming further shows the labels on the deeper hexagons. Tapping a label or a hexagon shows that node's explanation of the range it covers. While an extend is queued or running, the screen shows pending generation, the request, and the current step. A person can extend the whole graph or one node, delete a node and the edges connected to it, and open the list of past extends. Deleting one of those extends removes the nodes and edges it added.
+The Flutter app has a sign-in screen and a category graph. The person searches for a topic, picks a category when Wikipedia returns more than one match, and sees parents above the selected category and children below it. Tapping a category focuses it and loads its surroundings from the same shared graph. Pinch zooms and drag pans. A previous-category control returns to the prior focus. A dense category shows a limited number of children until the person chooses Show more. The full set of relationships stays in the response.

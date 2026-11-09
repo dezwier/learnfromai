@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"
     access_token_expire_minutes: int = 60 * 24 * 7
     api_v1_prefix: str = "/api/v1"
+    wikipedia_api_url: str = "https://en.wikipedia.org/w/api.php"
+    wikipedia_user_agent: str = "AdaptiveMastery/1.0 (https://github.com/dezwier/learnfromai; knowledge graph)"
+    wikipedia_timeout_seconds: float = 20.0
+    wikipedia_cache_ttl_days: int = 30
+    wikipedia_default_up_depth: int = 2
+    wikipedia_default_down_depth: int = 2
+    wikipedia_max_depth: int = 3
+    wikipedia_max_categories_per_request: int = 200
 
     @property
     def cors_origin_list(self) -> list[str]:

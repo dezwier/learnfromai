@@ -25,229 +25,87 @@ void main() {
     final tokens = MemoryTokenStore();
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
-    await tester.pumpWidget(
-      AdaptiveMasteryApp(auth: auth, graph: GraphController()),
-    );
+    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsWidgets);
     expect(find.text('Trajectories'), findsNothing);
     expect(find.text('Review'), findsNothing);
   });
 
-  testWidgets('graph shows nodes, summary, and solid extend history', (
-    tester,
-  ) async {
-    final graph = GraphController()
-      ..workspace = {
-        'nodes': [
-          {
-            'concept_id': 'dt',
-            'title': 'Decision Trees',
-            'summary': 'Partitions',
-          },
-          {
-            'concept_id': 'entropy',
-            'title': 'Entropy',
-            'summary': 'Uncertainty',
-          },
-        ],
-        'edges': [
-          {
-            'edge_id': 'e1',
-            'from_concept_id': 'dt',
-            'to_concept_id': 'entropy',
-            'type': 'prerequisite',
-          },
-        ],
-        'extend_requests': [
-          {
-            'id': 'r1',
-            'instruction': 'Add dinosaurs',
-            'status': 'succeeded',
-            'author': 'Ada',
-            'created_at': '2026-11-08T04:00:00Z',
-          },
-        ],
-      };
-    await tester.pumpWidget(_app(_signedIn(), graph));
+  testWidgets('an empty graph asks for a topic', (tester) async {
+    await tester.pumpWidget(_app(_signedIn(), GraphController()));
     await tester.pumpAndSettle();
-    expect(find.text('Entropy'), findsOneWidget);
-    expect(find.text('Decision Trees'), findsOneWidget);
-    expect(find.text('Trajectories'), findsNothing);
-    expect(find.text('Accept change'), findsNothing);
-    expect(find.byType(CustomPaint), findsWidgets);
-
-    await tester.tap(find.byTooltip('Past extends'));
-    await tester.pumpAndSettle();
-    expect(find.text('Add dinosaurs'), findsOneWidget);
-    expect(find.textContaining('Ada'), findsWidgets);
-    await tester.tapAt(const Offset(20, 40));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Decision Trees'));
-    await tester.pumpAndSettle();
-    expect(find.text('Partitions'), findsOneWidget);
-    expect(find.text('Extend this node'), findsOneWidget);
-    expect(find.text('Delete node'), findsOneWidget);
-
-    await tester.tap(find.text('Delete node'));
-    await tester.pumpAndSettle();
-    expect(find.text('Delete Decision Trees?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(find.text('Decision Trees'), findsWidgets);
-
-    await tester.tap(find.text('Delete node'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    expect(find.text('Extend this node'), findsNothing);
-    expect(find.text('Decision Trees'), findsOneWidget);
+    expect(find.text('Search a Wikipedia category'), findsOneWidget);
+    expect(find.text('Extend the graph'), findsNothing);
+    expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('zoomed out graph hides the next hierarchy level', (
-    tester,
-  ) async {
-    final graph = GraphController()
-      ..workspace = {
-        'nodes': [
-          {
-            'concept_id': 'birds',
-            'title': 'Birds',
-            'summary': 'Animals',
-            'explanation': 'Covers the range of birds.',
-            'level': 0,
-          },
-          {
-            'concept_id': 'flight',
-            'title': 'Flight',
-            'summary': 'Wings',
-            'explanation': 'Covers how birds fly.',
-            'level': 1,
-          },
-        ],
-        'edges': [
-          {
-            'edge_id': 'e1',
-            'from_concept_id': 'birds',
-            'to_concept_id': 'flight',
-            'type': 'contains',
-          },
-        ],
-        'extend_requests': [],
-      };
+  testWidgets('the hierarchy shows parents above the selected category', (tester) async {
+    final graph = GraphController()..categoryGraph = _dinosaurs();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    expect(find.text('Birds'), findsOneWidget);
-    expect(find.text('Flight'), findsNothing);
 
-    await tester.tap(find.byTooltip('Show more detail'));
-    await tester.pumpAndSettle();
-    expect(find.text('Flight'), findsOneWidget);
-    expect(find.text('Birds'), findsOneWidget);
-
-    await tester.tap(find.text('Birds'));
-    await tester.pumpAndSettle();
-    expect(find.text('Covers the range of birds.'), findsOneWidget);
-    await tester.tapAt(const Offset(20, 40));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Show less detail'));
-    await tester.pumpAndSettle();
-    expect(find.text('Flight'), findsNothing);
-    expect(find.text('Birds'), findsOneWidget);
-  });
-
-  testWidgets('zooming reveals level 2 groups and then level 3 hex labels', (
-    tester,
-  ) async {
-    final graph = GraphController()
-      ..workspace = {
-        'nodes': [
-          {'concept_id': 'life', 'title': 'Life sciences', 'level': 1},
-          {'concept_id': 'dinos', 'title': 'Dinosaurs', 'level': 2},
-          {'concept_id': 'teeth', 'title': 'Teeth of dinosaurs', 'level': 3},
-        ],
-        'edges': [
-          {
-            'edge_id': 'e1',
-            'from_concept_id': 'life',
-            'to_concept_id': 'dinos',
-            'type': 'contains',
-          },
-          {
-            'edge_id': 'e2',
-            'from_concept_id': 'dinos',
-            'to_concept_id': 'teeth',
-            'type': 'contains',
-          },
-        ],
-        'extend_requests': [],
-      };
-    await tester.pumpWidget(_app(_signedIn(), graph));
-    await tester.pumpAndSettle();
-    expect(find.text('Life sciences'), findsOneWidget);
-    expect(find.text('Dinosaurs'), findsNothing);
-    expect(find.text('Teeth of dinosaurs'), findsNothing);
-
-    await tester.tap(find.byTooltip('Show more detail'));
-    await tester.pumpAndSettle();
+    expect(find.text('Paleontology'), findsOneWidget);
     expect(find.text('Dinosaurs'), findsOneWidget);
-    expect(find.text('Teeth of dinosaurs'), findsNothing);
+    expect(find.text('Saurischia'), findsOneWidget);
+    expect(find.text('Zebra'), findsNothing);
+    expect(find.text('Show more'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Show more detail'));
+    final parent = tester.getTopLeft(find.text('Paleontology'));
+    final focus = tester.getTopLeft(find.text('Dinosaurs'));
+    final child = tester.getTopLeft(find.text('Saurischia'));
+    expect(parent.dy, lessThan(focus.dy));
+    expect(focus.dy, lessThan(child.dy));
+
+    await tester.tap(find.text('Show more'));
     await tester.pumpAndSettle();
-    expect(find.text('Teeth of dinosaurs'), findsOneWidget);
-    expect(find.text('Life sciences'), findsOneWidget);
+    expect(find.text('Zebra'), findsOneWidget);
   });
 
-  testWidgets('a queued extend shows pending generation and its step', (
-    tester,
-  ) async {
-    final graph = GraphController()
-      ..workspace = {
-        'nodes': [
-          {
-            'concept_id': 'birds',
-            'title': 'Birds',
-            'summary': 'Animals',
-            'level': 0,
-          },
-        ],
-        'edges': [],
-        'extend_requests': [
-          {
-            'id': 'r1',
-            'instruction': 'Dinosaurs',
-            'status': 'queued',
-            'progress_message': 'Waiting to generate',
-            'progress_fraction': 0.2,
-            'author': 'Ada',
-            'created_at': '2026-11-08T04:00:00Z',
-          },
-        ],
-      };
+  testWidgets('tapping a category focuses it and back returns', (tester) async {
+    final graph = GraphController(
+      loader: (path) async {
+        if (path.contains('category_id=3')) return _saurischia();
+        if (path.contains('category_id=2')) return _compact();
+        return _compact();
+      },
+    )
+      ..categoryGraph = _compact()
+      ..focusHistory.add(2);
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    expect(find.text('Pending generation'), findsOneWidget);
-    expect(find.text('Dinosaurs'), findsOneWidget);
-    expect(find.text('Waiting to generate'), findsOneWidget);
-    expect(find.text('GENERATION_UNAVAILABLE'), findsNothing);
 
-    await tester.tap(find.byTooltip('Past extends'));
+    await tester.tap(find.text('Saurischia'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Settings'), findsNothing);
-    await tester.tap(find.text('Delete').last);
+    expect(graph.focusId, 3);
+    expect(find.text('Genera'), findsOneWidget);
+    expect(find.byTooltip('Previous category'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Previous category'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete Dinosaurs?'), findsOneWidget);
-    expect(
-      find.text('This removes the extend and the nodes and edges it added.'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Cancel'));
+    expect(graph.focusId, 2);
+    expect(find.text('Paleontology'), findsOneWidget);
+  });
+
+  testWidgets('ambiguous results can be chosen', (tester) async {
+    final graph = GraphController(
+      loader: (path) async {
+        expect(path, contains('category_id=6'));
+        return _dinosaurs();
+      },
+    )..candidates = const [
+        CategoryChoice(id: 6, title: 'Dinosaur toys'),
+        CategoryChoice(id: 10, title: 'Dinosaur colors'),
+      ];
+    await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    expect(find.text('Birds'), findsOneWidget);
-    expect(find.text('Dinosaurs'), findsWidgets);
+    expect(find.text('Choose a category'), findsOneWidget);
+    expect(find.text('Dinosaur toys'), findsOneWidget);
+
+    await tester.tap(find.text('Dinosaur toys'));
+    await tester.pumpAndSettle();
+    expect(graph.focusId, 2);
+    expect(find.text('Dinosaurs'), findsOneWidget);
   });
 
   testWidgets('expired session surfaces the auth error', (tester) async {
@@ -255,9 +113,7 @@ void main() {
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
     auth.error = 'Session expired';
-    await tester.pumpWidget(
-      AdaptiveMasteryApp(auth: auth, graph: GraphController()),
-    );
+    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
     await tester.pumpAndSettle();
     expect(find.text('Session expired'), findsOneWidget);
     expect(find.text('Sign in'), findsWidgets);
@@ -266,20 +122,67 @@ void main() {
   testWidgets('loading slot uses a full-size pulse', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(
-          body: SizedBox(height: 120, width: 200, child: PulsePlaceholder()),
-        ),
+        home: Scaffold(body: SizedBox(height: 120, width: 200, child: PulsePlaceholder())),
       ),
     );
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
   test('api client maps the error envelope', () {
-    expect(
-      ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code,
-      'UNAUTHORIZED',
-    );
+    expect(ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code, 'UNAUTHORIZED');
   });
+}
+
+Map<String, dynamic> _dinosaurs() {
+  return {
+    'focus_node_id': 2,
+    'incomplete': false,
+    'nodes': [
+      {'id': 1, 'title': 'Paleontology', 'depth': -1},
+      {'id': 2, 'title': 'Dinosaurs', 'depth': 0},
+        {'id': 3, 'title': 'Saurischia', 'depth': 1},
+      for (var index = 0; index < 5; index++) {'id': 20 + index, 'title': 'Child $index', 'depth': 1},
+      {'id': 30, 'title': 'Zebra', 'depth': 1},
+    ],
+    'edges': [
+      {'source': 1, 'target': 2, 'type': 'parent_child'},
+      {'source': 2, 'target': 3, 'type': 'parent_child'},
+      for (var index = 0; index < 5; index++) {'source': 2, 'target': 20 + index, 'type': 'parent_child'},
+      {'source': 2, 'target': 30, 'type': 'parent_child'},
+    ],
+  };
+}
+
+Map<String, dynamic> _compact() {
+  return {
+    'focus_node_id': 2,
+    'incomplete': false,
+    'nodes': [
+      {'id': 1, 'title': 'Paleontology', 'depth': -1},
+      {'id': 2, 'title': 'Dinosaurs', 'depth': 0},
+      {'id': 3, 'title': 'Saurischia', 'depth': 1},
+    ],
+    'edges': [
+      {'source': 1, 'target': 2, 'type': 'parent_child'},
+      {'source': 2, 'target': 3, 'type': 'parent_child'},
+    ],
+  };
+}
+
+Map<String, dynamic> _saurischia() {
+  return {
+    'focus_node_id': 3,
+    'incomplete': false,
+    'nodes': [
+      {'id': 2, 'title': 'Dinosaurs', 'depth': -1},
+      {'id': 3, 'title': 'Saurischia', 'depth': 0},
+      {'id': 8, 'title': 'Genera', 'depth': 1},
+    ],
+    'edges': [
+      {'source': 2, 'target': 3, 'type': 'parent_child'},
+      {'source': 3, 'target': 8, 'type': 'parent_child'},
+    ],
+  };
 }
 
 AuthController _signedIn() {

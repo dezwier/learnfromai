@@ -1,264 +1,214 @@
-/// Places one shared graph so each connected piece is its own drawing.
-class GraphEdge {
-  const GraphEdge({required this.from, required this.to, required this.type});
+/// Hierarchical placement: parents above the focus, children below.
+class HierarchyNode {
+  const HierarchyNode({required this.id, required this.title, required this.depth});
 
-  final String from;
-  final String to;
-  final String type;
+  final int id;
+  final String title;
+  final int depth;
 }
 
-class GraphPoint {
-  const GraphPoint({required this.id, required this.dx, required this.dy, required this.component});
+class HierarchyEdge {
+  const HierarchyEdge({required this.source, required this.target});
 
-  final String id;
-  final double dx;
-  final double dy;
-  final int component;
+  final int source;
+  final int target;
 }
 
-class GraphFrame {
-  const GraphFrame({required this.left, required this.top, required this.width, required this.height});
+class PlacedCategory {
+  const PlacedCategory({required this.id, required this.title, required this.depth, required this.dx, required this.dy});
 
-  final double left;
-  final double top;
-  final double width;
-  final double height;
-}
-
-class GraphLayout {
-  const GraphLayout({required this.points, required this.frames, required this.width, required this.height});
-
-  final List<GraphPoint> points;
-  final List<GraphFrame> frames;
-  final double width;
-  final double height;
-}
-
-const graphNodeWidth = 168.0;
-const graphNodeHeight = 72.0;
-
-const _columnStride = 224.0;
-const _rowStride = 112.0;
-const _componentGap = 72.0;
-const _componentPad = 28.0;
-const _canvasMargin = 20.0;
-const _wrapWidth = 1280.0;
-
-GraphLayout layoutGraph(List<String> ids, List<GraphEdge> edges) {
-  if (ids.isEmpty) {
-    return const GraphLayout(points: [], frames: [], width: 360, height: 240);
-  }
-  final indexOf = <String, int>{};
-  for (var i = 0; i < ids.length; i++) {
-    indexOf.putIfAbsent(ids[i], () => i);
-  }
-  final unique = indexOf.keys.toList();
-  final parent = {for (final id in unique) id: id};
-
-  String find(String id) {
-    var root = id;
-    while (parent[root] != root) {
-      root = parent[root]!;
-    }
-    var cursor = id;
-    while (cursor != root) {
-      final next = parent[cursor]!;
-      parent[cursor] = root;
-      cursor = next;
-    }
-    return root;
-  }
-
-  void unite(String a, String b) {
-    var ra = find(a);
-    var rb = find(b);
-    if (ra == rb) return;
-    if (indexOf[rb]! < indexOf[ra]!) {
-      final swap = ra;
-      ra = rb;
-      rb = swap;
-    }
-    parent[rb] = ra;
-  }
-
-  for (final edge in edges) {
-    if (!indexOf.containsKey(edge.from) || !indexOf.containsKey(edge.to) || edge.from == edge.to) continue;
-    unite(edge.from, edge.to);
-  }
-
-  final groups = <String, List<String>>{};
-  for (final id in unique) {
-    groups.putIfAbsent(find(id), () => []).add(id);
-  }
-  final components = groups.values.toList()
-    ..sort((a, b) {
-      final bySize = b.length.compareTo(a.length);
-      if (bySize != 0) return bySize;
-      return indexOf[a.first]!.compareTo(indexOf[b.first]!);
-    });
-
-  final locals = [for (final component in components) _layoutComponent(component, edges, indexOf)];
-  final divided = components.length > 1;
-  final pad = divided ? _componentPad : 0.0;
-  final gap = divided ? _componentGap : 0.0;
-  var cursorX = _canvasMargin;
-  var cursorY = _canvasMargin;
-  var rowHeight = 0.0;
-  final points = <GraphPoint>[];
-  final frames = <GraphFrame>[];
-
-  for (var component = 0; component < locals.length; component++) {
-    final local = locals[component];
-    var maxX = graphNodeWidth;
-    var maxY = graphNodeHeight;
-    for (final item in local) {
-      final right = item.dx + graphNodeWidth;
-      final bottom = item.dy + graphNodeHeight;
-      if (right > maxX) maxX = right;
-      if (bottom > maxY) maxY = bottom;
-    }
-    final blockWidth = maxX + pad * 2;
-    final blockHeight = maxY + pad * 2;
-    if (cursorX > _canvasMargin && cursorX + blockWidth > _canvasMargin + _wrapWidth) {
-      cursorX = _canvasMargin;
-      cursorY += rowHeight + gap;
-      rowHeight = 0;
-    }
-    if (divided) {
-      frames.add(GraphFrame(left: cursorX, top: cursorY, width: blockWidth, height: blockHeight));
-    }
-    for (final item in local) {
-      points.add(GraphPoint(id: item.id, dx: cursorX + pad + item.dx, dy: cursorY + pad + item.dy, component: component));
-    }
-    cursorX += blockWidth + gap;
-    if (blockHeight > rowHeight) rowHeight = blockHeight;
-  }
-
-  var width = 360.0;
-  var height = 240.0;
-  for (final point in points) {
-    final right = point.dx + graphNodeWidth + _canvasMargin;
-    final bottom = point.dy + graphNodeHeight + _canvasMargin;
-    if (right > width) width = right;
-    if (bottom > height) height = bottom;
-  }
-  for (final frame in frames) {
-    final right = frame.left + frame.width + _canvasMargin;
-    final bottom = frame.top + frame.height + _canvasMargin;
-    if (right > width) width = right;
-    if (bottom > height) height = bottom;
-  }
-  return GraphLayout(points: points, frames: frames, width: width, height: height);
-}
-
-class _LocalPoint {
-  const _LocalPoint(this.id, this.dx, this.dy);
-
-  final String id;
+  final int id;
+  final String title;
+  final int depth;
   final double dx;
   final double dy;
 }
 
-List<_LocalPoint> _layoutComponent(List<String> ids, List<GraphEdge> edges, Map<String, int> indexOf) {
-  final members = ids.toSet();
-  final children = {for (final id in ids) id: <String>[]};
-  final parents = {for (final id in ids) id: <String>[]};
-  final related = {for (final id in ids) id: <String>[]};
-  final incoming = {for (final id in ids) id: 0};
-  final structured = {for (final id in ids) id: false};
-  var anyDirected = false;
+class ShowMoreAnchor {
+  const ShowMoreAnchor({required this.parentId, required this.dx, required this.dy, required this.hidden});
 
+  final int parentId;
+  final double dx;
+  final double dy;
+  final int hidden;
+}
+
+class HierarchyLayout {
+  const HierarchyLayout({
+    required this.nodes,
+    required this.edges,
+    required this.anchors,
+    required this.width,
+    required this.height,
+  });
+
+  final List<PlacedCategory> nodes;
+  final List<HierarchyEdge> edges;
+  final List<ShowMoreAnchor> anchors;
+  final double width;
+  final double height;
+}
+
+const hierarchyNodeWidth = 148.0;
+const hierarchyNodeHeight = 64.0;
+const hierarchyChildLimit = 6;
+
+const _gapX = 20.0;
+const _gapY = 56.0;
+const _margin = 28.0;
+
+HierarchyLayout layoutHierarchy(
+  List<HierarchyNode> nodes,
+  List<HierarchyEdge> edges, {
+  Set<int> expanded = const {},
+  int childLimit = hierarchyChildLimit,
+}) {
+  if (nodes.isEmpty) {
+    return const HierarchyLayout(nodes: [], edges: [], anchors: [], width: 0, height: 0);
+  }
+  final byId = {for (final node in nodes) node.id: node};
+  final children = <int, List<HierarchyNode>>{};
   for (final edge in edges) {
-    if (!members.contains(edge.from) || !members.contains(edge.to) || edge.from == edge.to) continue;
-    final directed = edge.type == 'contains' || edge.type == 'prerequisite';
-    if (directed) {
-      anyDirected = true;
-      structured[edge.from] = true;
-      structured[edge.to] = true;
-      children[edge.from]!.add(edge.to);
-      parents[edge.to]!.add(edge.from);
-      incoming[edge.to] = incoming[edge.to]! + 1;
-    } else {
-      related[edge.from]!.add(edge.to);
-      related[edge.to]!.add(edge.from);
-    }
+    final parent = byId[edge.source];
+    final child = byId[edge.target];
+    if (parent == null || child == null || child.depth != parent.depth + 1) continue;
+    children.putIfAbsent(parent.id, () => []).add(child);
+  }
+  for (final list in children.values) {
+    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   }
 
-  final ordered = [...ids]..sort((a, b) => indexOf[a]!.compareTo(indexOf[b]!));
-  if (!anyDirected) {
-    return [for (var i = 0; i < ordered.length; i++) _LocalPoint(ordered[i], i * _columnStride, 0)];
-  }
-
-  final depth = {for (final id in ids) id: 0};
-  final queue = <String>[for (final id in ordered) if (incoming[id] == 0) id];
-  final seen = <String>{};
-  while (queue.isNotEmpty) {
-    final id = queue.removeAt(0);
-    if (!seen.add(id)) continue;
-    for (final child in children[id]!) {
-      final next = depth[id]! + 1;
-      if (next > depth[child]!) depth[child] = next;
-      queue.add(child);
-    }
-  }
-
-  for (final id in ordered) {
-    if (structured[id]!) continue;
-    var best = depth[id]!;
-    var found = false;
-    for (final neighbor in related[id]!) {
-      if (!structured[neighbor]!) continue;
-      if (!found || depth[neighbor]! < best) {
-        best = depth[neighbor]!;
-        found = true;
+  final minDepth = nodes.map((node) => node.depth).reduce((a, b) => a < b ? a : b);
+  final maxDepth = nodes.map((node) => node.depth).reduce((a, b) => a > b ? a : b);
+  final visible = <int>{};
+  for (var depth = minDepth; depth <= maxDepth; depth++) {
+    for (final node in nodes.where((item) => item.depth == depth)) {
+      if (depth <= 0) {
+        visible.add(node.id);
+        continue;
+      }
+      final parents = edges.where((edge) => edge.target == node.id && visible.contains(edge.source));
+      for (final edge in parents) {
+        final siblings = children[edge.source] ?? const <HierarchyNode>[];
+        final index = siblings.indexWhere((sibling) => sibling.id == node.id);
+        if (index != -1 && (expanded.contains(edge.source) || index < childLimit)) {
+          visible.add(node.id);
+          break;
+        }
       }
     }
-    if (found) depth[id] = best;
   }
 
-  final columns = <int, List<String>>{};
-  for (final id in ordered) {
-    columns.putIfAbsent(depth[id]!, () => []).add(id);
+  final layers = <int, List<HierarchyNode>>{};
+  for (final node in nodes) {
+    if (!visible.contains(node.id)) continue;
+    layers.putIfAbsent(node.depth, () => []).add(node);
   }
-  final depths = columns.keys.toList()..sort();
-  final rowOf = <String, int>{};
-  for (final column in depths) {
-    final columnIds = columns[column]!;
-    columnIds.sort((a, b) {
-      final byAnchor = _anchor(a, parents, related, rowOf, indexOf).compareTo(_anchor(b, parents, related, rowOf, indexOf));
-      if (byAnchor != 0) return byAnchor;
-      return indexOf[a]!.compareTo(indexOf[b]!);
-    });
-    for (var row = 0; row < columnIds.length; row++) {
-      rowOf[columnIds[row]] = row;
+  for (final list in layers.values) {
+    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+  }
+  for (var pass = 0; pass < 4; pass++) {
+    for (var depth = minDepth + 1; depth <= maxDepth; depth++) {
+      _orderLayer(layers, edges, byId, depth, towardParent: true);
+    }
+    for (var depth = maxDepth - 1; depth >= minDepth; depth--) {
+      _orderLayer(layers, edges, byId, depth, towardParent: false);
     }
   }
 
-  final placed = <_LocalPoint>[];
-  for (final column in depths) {
-    final columnIds = columns[column]!;
-    for (var row = 0; row < columnIds.length; row++) {
-      placed.add(_LocalPoint(columnIds[row], column * _columnStride, row * _rowStride));
+  var widest = 0.0;
+  final widths = <int, double>{};
+  for (final entry in layers.entries) {
+    final count = entry.value.length;
+    final width = count * hierarchyNodeWidth + (count - 1) * _gapX;
+    widths[entry.key] = width;
+    if (width > widest) widest = width;
+  }
+  final placed = <PlacedCategory>[];
+  for (final depth in layers.keys.toList()..sort()) {
+    final row = layers[depth]!;
+    final rowWidth = widths[depth]!;
+    final left = _margin + (widest - rowWidth) / 2;
+    final top = _margin + (depth - minDepth) * (hierarchyNodeHeight + _gapY);
+    for (var index = 0; index < row.length; index++) {
+      final node = row[index];
+      placed.add(
+        PlacedCategory(
+          id: node.id,
+          title: node.title,
+          depth: node.depth,
+          dx: left + index * (hierarchyNodeWidth + _gapX),
+          dy: top,
+        ),
+      );
     }
   }
-  return placed;
+
+  final anchors = <ShowMoreAnchor>[];
+  for (final node in placed) {
+    final kids = children[node.id] ?? const <HierarchyNode>[];
+    if (kids.length <= childLimit || expanded.contains(node.id)) continue;
+    anchors.add(
+      ShowMoreAnchor(
+        parentId: node.id,
+        dx: node.dx + hierarchyNodeWidth / 2 - 40,
+        dy: node.dy + hierarchyNodeHeight + 6,
+        hidden: kids.length - childLimit,
+      ),
+    );
+  }
+  final visibleIds = {for (final node in placed) node.id};
+  final visibleEdges = [
+    for (final edge in edges)
+      if (visibleIds.contains(edge.source) && visibleIds.contains(edge.target)) edge,
+  ];
+  var height = placed.isEmpty
+      ? 0.0
+      : placed.map((node) => node.dy).reduce((a, b) => a > b ? a : b) + hierarchyNodeHeight + _margin;
+  for (final anchor in anchors) {
+    final bottom = anchor.dy + 36;
+    if (bottom > height) height = bottom;
+  }
+  return HierarchyLayout(
+    nodes: placed,
+    edges: visibleEdges,
+    anchors: anchors,
+    width: widest + _margin * 2,
+    height: height,
+  );
 }
 
-double _anchor(
-  String id,
-  Map<String, List<String>> parents,
-  Map<String, List<String>> related,
-  Map<String, int> rowOf,
-  Map<String, int> indexOf,
-) {
-  var sum = 0.0;
-  var count = 0;
-  for (final other in [...parents[id]!, ...related[id]!]) {
-    final row = rowOf[other];
-    if (row == null) continue;
-    sum += row;
-    count += 1;
+void _orderLayer(
+  Map<int, List<HierarchyNode>> layers,
+  List<HierarchyEdge> edges,
+  Map<int, HierarchyNode> byId,
+  int depth, {
+  required bool towardParent,
+}) {
+  final list = layers[depth];
+  if (list == null || list.length < 2) return;
+  final neighborDepth = towardParent ? depth - 1 : depth + 1;
+  final neighbors = layers[neighborDepth];
+  if (neighbors == null) return;
+  final indexOf = {for (var index = 0; index < neighbors.length; index++) neighbors[index].id: index};
+  double barycenter(HierarchyNode node) {
+    final related = towardParent
+        ? edges.where((edge) => edge.target == node.id && indexOf.containsKey(edge.source))
+        : edges.where((edge) => edge.source == node.id && indexOf.containsKey(edge.target) && byId[edge.target]?.depth == neighborDepth);
+    final values = [
+      for (final edge in related) indexOf[towardParent ? edge.source : edge.target]!,
+    ];
+    if (values.isEmpty) {
+      return list.indexWhere((item) => item.id == node.id).toDouble();
+    }
+    return values.reduce((a, b) => a + b) / values.length;
   }
-  if (count == 0) return indexOf[id]!.toDouble();
-  return sum / count;
+
+  final keyed = [for (final node in list) (barycenter(node), node.title.toLowerCase(), node)];
+  keyed.sort((a, b) {
+    final byCenter = a.$1.compareTo(b.$1);
+    if (byCenter != 0) return byCenter;
+    return a.$2.compareTo(b.$2);
+  });
+  layers[depth] = [for (final item in keyed) item.$3];
 }
