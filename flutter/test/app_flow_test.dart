@@ -47,13 +47,14 @@ void main() {
     expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('hierarchy shows parents, focus, children, and related strip', (tester) async {
+  testWidgets('graph shows parents, children, related neighbors, and legend', (tester) async {
     final graph = GraphController(loader: (path) async => _compact())..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
     expect(find.text('Saurischia'), findsOneWidget);
     expect(find.text('Mesozoic'), findsOneWidget);
+    expect(find.text('Related'), findsOneWidget);
     expect(find.text('Show more'), findsNothing);
   });
 
@@ -122,8 +123,8 @@ void main() {
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
-  test('hierarchy places parents above and children below', () {
-    final layout = layoutHierarchy(
+  test('graph places parents above, children below, related beside', () {
+    final layout = layoutGraph(
       const [
         GraphNode(id: 1, title: 'Reptile', depth: -1, kind: 'parent'),
         GraphNode(id: 2, title: 'Dinosaur', depth: 0, kind: 'focus'),
@@ -140,8 +141,8 @@ void main() {
     final byId = {for (final node in layout.nodes) node.id: node};
     expect(byId[1]!.y < byId[2]!.y, isTrue);
     expect(byId[2]!.y < byId[3]!.y, isTrue);
-    expect(layout.related.map((node) => node.id), [4]);
-    expect(layout.edges.any((edge) => edge.type == 'related_to'), isFalse);
+    expect(byId[4]!.role, NodeRole.related);
+    expect(layout.edges.any((edge) => edge.type == 'related_to'), isTrue);
   });
 
   test('api client maps the error envelope', () {

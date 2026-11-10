@@ -33,4 +33,4 @@ Sign in, then explore one shared knowledge graph: Wikidata for hierarchy, Wikipe
 
 ## Client
 
-The Flutter app has a sign-in screen and a hierarchy canvas: parents above the focus, children below, pinch-pan only. Related topics sit in a horizontal strip under the map. Opening the app resumes the person's latest focus. Searching or tapping a node loads that qid. Loading uses `PulsePlaceholder` at map size.
+The Flutter app has a sign-in screen and a neighborhood graph: parents above, focus center, children below, related Wikipedia neighbors on the sides. Node borders and edges are colored by role (parent / focus / child / related). Pinch-pan zooms from 0.25×. Opening the app resumes the person's latest focus. Searching or tapping a node loads that qid. Loading uses `PulsePlaceholder` at map size.
