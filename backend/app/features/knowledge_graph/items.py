@@ -65,6 +65,8 @@ def load_knowledge_graph(
     settings = get_settings()
     up = _clamp(up_depth, settings.wikidata_default_up_depth, settings.wikidata_max_depth)
     down = _clamp(down_depth, settings.wikidata_default_down_depth, settings.wikidata_max_depth)
+    if (topic is None or not str(topic).strip()) and category_id is None:
+        return _resume_latest(session, user_id=user_id, up=up, down=down, api=api)
     owned = api is None
     client = api or WikidataClient()
     try:
@@ -96,6 +98,35 @@ def load_knowledge_graph(
         close = getattr(client, "close", None) if owned else None
         if close is not None:
             close()
+
+
+def _resume_latest(
+    session: Session,
+    *,
+    user_id: UUID,
+    up: int,
+    down: int,
+    api: WikidataClient | None,
+) -> dict:
+    latest = session.exec(
+        select(KnowledgeGraphRequest)
+        .where(KnowledgeGraphRequest.user_id == user_id)
+        .order_by(col(KnowledgeGraphRequest.created_at).desc())
+    ).first()
+    if latest is None:
+        return {"focus_node_id": None, "incomplete": False, "nodes": [], "edges": []}
+    focus = session.get(KnowledgeItem, latest.focus_item_id)
+    if focus is None:
+        return {"focus_node_id": None, "incomplete": False, "nodes": [], "edges": []}
+    return load_knowledge_graph(
+        session,
+        user_id=user_id,
+        topic=None,
+        category_id=focus.wikidata_qid,
+        up_depth=up,
+        down_depth=down,
+        api=api,
+    )
 
 
 def _resolve(session: Session, api: WikidataClient, *, topic: str | None, item_id: int | None) -> KnowledgeItem:

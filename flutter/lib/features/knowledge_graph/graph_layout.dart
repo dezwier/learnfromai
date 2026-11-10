@@ -54,13 +54,24 @@ class HexLayout {
   final double height;
 }
 
+class ZoomWindow {
+  const ZoomWindow({required this.climb, required this.expand});
+
+  final int climb;
+  final int expand;
+}
+
 const hexLabelFontSize = 13.0;
 const hexRootRadius = 180.0;
 
-int splitLevelsFor(double scale) {
-  if (scale < 0.8) return 0;
-  if (scale > 1.6) return 2;
-  return 1;
+/// Zoom out climbs to parents. Default shows the parent split into siblings.
+/// Zoom in focuses the topic and splits it into children.
+ZoomWindow zoomWindowFor(double scale) {
+  if (scale < 0.55) return const ZoomWindow(climb: 2, expand: 0);
+  if (scale < 0.85) return const ZoomWindow(climb: 1, expand: 0);
+  if (scale < 1.35) return const ZoomWindow(climb: 1, expand: 1);
+  if (scale < 2.0) return const ZoomWindow(climb: 0, expand: 1);
+  return const ZoomWindow(climb: 0, expand: 2);
 }
 
 List<(int, int)> flowerAxial(int count, {bool includeCenter = false}) {
@@ -119,7 +130,7 @@ HexLayout layoutHexMap(
   List<GraphNode> nodes,
   List<GraphEdge> edges, {
   required int focusId,
-  int? splitLevels,
+  ZoomWindow? window,
   double rootRadius = hexRootRadius,
   double scale = 1,
   double fontSize = hexLabelFontSize,
@@ -129,17 +140,29 @@ HexLayout layoutHexMap(
   }
   final byId = {for (final node in nodes) node.id: node};
   final children = <int, List<GraphNode>>{};
+  final parents = <int, List<GraphNode>>{};
   for (final edge in edges) {
     final parent = byId[edge.source];
     final child = byId[edge.target];
     if (parent == null || child == null) continue;
     children.putIfAbsent(parent.id, () => []).add(child);
+    parents.putIfAbsent(child.id, () => []).add(parent);
   }
   for (final list in children.values) {
     list.sort((a, b) => a.id.compareTo(b.id));
   }
-  final levels = splitLevels ?? splitLevelsFor(scale);
+  for (final list in parents.values) {
+    list.sort((a, b) => a.depth.compareTo(b.depth));
+  }
+
+  final zoom = window ?? zoomWindowFor(scale);
   final focus = byId[focusId] ?? nodes.first;
+  var root = focus;
+  for (var step = 0; step < zoom.climb; step++) {
+    final above = parents[root.id];
+    if (above == null || above.isEmpty) break;
+    root = above.first;
+  }
 
   final placed = <_RawHex>[];
   void place(GraphNode node, Offset center, double radius, int remaining) {
@@ -162,11 +185,7 @@ HexLayout layoutHexMap(
     }
   }
 
-  if (levels <= 0) {
-    place(focus, Offset.zero, rootRadius, 0);
-  } else {
-    place(focus, Offset.zero, rootRadius, levels);
-  }
+  place(root, Offset.zero, rootRadius, zoom.expand);
 
   if (placed.isEmpty) {
     return const HexLayout(cells: [], width: 0, height: 0);

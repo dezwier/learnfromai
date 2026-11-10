@@ -34,6 +34,11 @@ class GraphController extends ChangeNotifier {
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
+  Future<void> resume() async {
+    if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing) return;
+    await _load('/knowledge/graph?up_depth=2&down_depth=2');
+  }
+
   Future<void> search(String topic) async {
     final trimmed = topic.trim();
     if (trimmed.isEmpty || refreshing || loading) return;

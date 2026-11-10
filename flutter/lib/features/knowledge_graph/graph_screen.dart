@@ -22,6 +22,17 @@ class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
   final _transform = TransformationController();
   int? _focusedFor;
+  var _resumed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _resumed) return;
+      _resumed = true;
+      context.read<GraphController>().resume();
+    });
+  }
 
   @override
   void dispose() {
@@ -180,7 +191,8 @@ class _GraphScreenState extends State<GraphScreen> {
           GraphEdge(source: (raw['source'] as num).toInt(), target: (raw['target'] as num).toInt()),
     ];
     final scale = _transform.value.getMaxScaleOnAxis();
-    return layoutHexMap(nodes, edges, focusId: graph.focusId ?? 0, scale: scale);
+    final focus = graph.focusId ?? (nodes.isEmpty ? 0 : nodes.first.id);
+    return layoutHexMap(nodes, edges, focusId: focus, scale: scale);
   }
 }
 

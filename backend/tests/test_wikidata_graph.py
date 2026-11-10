@@ -280,13 +280,21 @@ def test_clear_winner_skips_chooser_and_ambiguous_shows_descriptions(client, aut
     assert organism.domain_qid == LIFE
 
 
-def test_missing_topic_and_item_budget(client, auth, monkeypatch):
+def test_resume_latest_and_item_budget(client, auth, monkeypatch):
     fake = _dinosaurs()
     _install(monkeypatch, fake)
     missing = _graph(client, auth, topic="No such item")
     assert missing.status_code == 404
     empty = client.get("/api/v1/knowledge/graph", headers=auth)
-    assert empty.status_code == 422
+    assert empty.status_code == 200
+    assert empty.json() == {"focus_node_id": None, "incomplete": False, "nodes": [], "edges": []}
+
+    opened = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=1)
+    assert opened.status_code == 200
+    resumed = client.get("/api/v1/knowledge/graph", headers=auth, params={"up_depth": 1, "down_depth": 1})
+    assert resumed.status_code == 200
+    assert resumed.json()["focus_node_id"] == DINOSAURS
+    assert {node["id"] for node in resumed.json()["nodes"]} == {node["id"] for node in opened.json()["nodes"]}
 
     settings = get_settings()
     monkeypatch.setattr(settings, "wikidata_max_items_per_request", 1)

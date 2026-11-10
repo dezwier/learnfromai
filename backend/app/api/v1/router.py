@@ -74,8 +74,6 @@ def knowledge_graph(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    if (topic is None or not topic.strip()) and category_id is None:
-        raise AppError("VALIDATION_ERROR", "Provide a topic or a category_id", 422)
     payload = load_knowledge_graph(
         session,
         user_id=user.id,

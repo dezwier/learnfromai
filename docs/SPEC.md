@@ -19,6 +19,7 @@ Sign in, then explore one shared knowledge graph built from Wikidata classes.
 
 - `POST /api/v1/auth/firebase`
 - `GET /api/v1/me`
+- `GET /api/v1/knowledge/graph` (resume the signed-in user's latest focus)
 - `GET /api/v1/knowledge/graph?topic=Dinosaurs&up_depth=2&down_depth=2`
 - `GET /api/v1/knowledge/graph?category_id=430&up_depth=2&down_depth=2`
 - `GET /api/v1/workspace/graph`
@@ -34,4 +35,4 @@ Sign in, then explore one shared knowledge graph built from Wikidata classes.
 
 ## Client
 
-The Flutter app has a sign-in screen and a hex map. The person searches for a topic, picks an item when Wikidata returns more than one match, and sees the focus neighborhood as hexes. Zooming in splits a hex into its children. Zooming out merges children into the parent. Labels stay a fixed screen size and appear only when a hex has room. Tapping a hex focuses it and loads its surroundings from the same shared graph. A previous-topic control returns to the prior focus.
+The Flutter app has a sign-in screen and a hex map. Opening the app resumes the person's latest focus from the shared graph. The person searches for a topic, picks an item when Wikidata returns more than one match, and sees the focus neighborhood as hexes. Zooming out climbs to parents and shows siblings. Zooming in splits a hex into its children. Labels stay a fixed screen size and appear only when a hex has room. Tapping a hex focuses it and loads its surroundings from the same shared graph. A previous-topic control returns to the prior focus.
