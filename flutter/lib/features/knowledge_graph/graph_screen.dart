@@ -19,8 +19,6 @@ class GraphScreen extends StatefulWidget {
 class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
-  final _transform = TransformationController();
-  String? _focusedFor;
   var _resumed = false;
   var _searchOpen = false;
 
@@ -38,7 +36,6 @@ class _GraphScreenState extends State<GraphScreen> {
   void dispose() {
     _search.dispose();
     _searchFocus.dispose();
-    _transform.dispose();
     super.dispose();
   }
 
@@ -135,8 +132,6 @@ class _GraphScreenState extends State<GraphScreen> {
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
-    _resetView(graph);
-    final layout = _layoutFor(graph);
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: GradientTopBar(
@@ -178,7 +173,7 @@ class _GraphScreenState extends State<GraphScreen> {
           : FloatingActionButton(
               heroTag: 'graph-search',
               tooltip: 'Search',
-              onPressed: graph.working ? null : _openSearch,
+              onPressed: _openSearch,
               child: const Icon(Icons.search),
             ),
       bottomSheet: _searchOpen
@@ -208,55 +203,27 @@ class _GraphScreenState extends State<GraphScreen> {
                     subtitle: 'Try another topic.',
                   ),
                 ),
-              if (layout.nodes.isNotEmpty) const _Legend(),
-              Expanded(child: _body(context, graph, layout)),
+              if (_hasNodes(graph)) const _Legend(),
+              Expanded(child: _body(context, graph)),
             ],
           ),
           if (graph.working)
-            Positioned.fill(
-              child: Material(
-                color: Colors.black54,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(strokeWidth: 2.5),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              graph.progressMessage ?? 'Working…',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            Positioned(
+              left: 16,
+              bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
+              child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
             ),
         ],
       ),
     );
   }
 
-  void _resetView(GraphController graph) {
-    final focus = graph.focusId;
-    if (_focusedFor == focus) return;
-    _focusedFor = focus;
-    _transform.value = Matrix4.identity();
+  bool _hasNodes(GraphController graph) {
+    final nodes = graph.categoryGraph?['nodes'];
+    return nodes is List && nodes.isNotEmpty;
   }
 
-  Widget _body(BuildContext context, GraphController graph, GraphLayout layout) {
+  Widget _body(BuildContext context, GraphController graph) {
     if (graph.loading && graph.categoryGraph == null) {
       return const Padding(padding: studyPagePadding, child: PulsePlaceholder.map());
     }
@@ -281,7 +248,7 @@ class _GraphScreenState extends State<GraphScreen> {
         ],
       );
     }
-    if (layout.nodes.isEmpty) {
+    if (!_hasNodes(graph)) {
       return ListView(
         padding: studyPagePadding,
         children: const [
@@ -293,19 +260,23 @@ class _GraphScreenState extends State<GraphScreen> {
         ],
       );
     }
-    return _GraphView(
-      layout: layout,
-      focusId: graph.focusId,
-      pendingId: graph.refreshing ? graph.pendingNodeId : null,
-      transform: _transform,
-      onOpen: graph.openNode,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final layout = _layoutFor(graph, Size(constraints.maxWidth, constraints.maxHeight));
+        return _GraphView(
+          layout: layout,
+          focusId: graph.focusId,
+          pendingId: graph.refreshing ? graph.pendingNodeId : null,
+          onOpen: graph.openNode,
+        );
+      },
     );
   }
 
-  GraphLayout _layoutFor(GraphController graph) {
+  GraphLayout _layoutFor(GraphController graph, Size viewport) {
     final payload = graph.categoryGraph;
     if (payload == null) {
-      return const GraphLayout(nodes: [], edges: [], width: 0, height: 0);
+      return GraphLayout(nodes: const [], width: viewport.width, height: viewport.height);
     }
     final nodes = [
       for (final raw in (payload['nodes'] as List?) ?? const [])
@@ -316,6 +287,7 @@ class _GraphScreenState extends State<GraphScreen> {
             depth: (raw['depth'] as num?)?.toInt() ?? 0,
             distance: (raw['distance'] as num?)?.toInt() ?? 0,
             kind: raw['kind']?.toString() ?? 'focus',
+            description: raw['description']?.toString(),
           ),
     ];
     final edges = [
@@ -328,7 +300,49 @@ class _GraphScreenState extends State<GraphScreen> {
           ),
     ];
     final focus = graph.focusId ?? (nodes.isEmpty ? '' : nodes.first.id);
-    return layoutGraph(nodes, edges, focusId: focus);
+    return layoutGraph(nodes, edges, focusId: focus, viewport: viewport);
+  }
+}
+
+class _ProgressChip extends StatelessWidget {
+  const _ProgressChip({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 3,
+      color: scheme.surface.withValues(alpha: 0.94),
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: scheme.primary.withValues(alpha: 0.8),
+              ),
+            ),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -436,53 +450,34 @@ class _GraphView extends StatelessWidget {
     required this.layout,
     required this.focusId,
     required this.pendingId,
-    required this.transform,
     required this.onOpen,
   });
 
   final GraphLayout layout;
   final String? focusId;
   final String? pendingId;
-  final TransformationController transform;
   final ValueChanged<String> onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: InteractiveViewer(
-        transformationController: transform,
-        constrained: false,
-        minScale: 0.25,
-        maxScale: 3.0,
-        boundaryMargin: const EdgeInsets.all(400),
-        child: SizedBox(
-          width: layout.width < 420 ? 420 : layout.width,
-          height: layout.height < 280 ? 280 : layout.height,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _EdgePainter(layout: layout, scheme: scheme),
-                ),
+      child: Stack(
+        children: [
+          for (final node in layout.nodes)
+            Positioned(
+              left: node.x,
+              top: node.y,
+              width: node.width,
+              height: node.height,
+              child: _NodeCard(
+                node: node,
+                focused: node.id == focusId,
+                pending: node.id == pendingId,
+                onTap: () => onOpen(node.id),
               ),
-              for (final node in layout.nodes)
-                Positioned(
-                  left: node.x,
-                  top: node.y,
-                  width: node.width,
-                  height: node.height,
-                  child: _NodeCard(
-                    node: node,
-                    focused: node.id == focusId,
-                    pending: node.id == pendingId,
-                    onTap: () => onOpen(node.id),
-                  ),
-                ),
-            ],
-          ),
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -504,76 +499,67 @@ class _NodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accent = roleColor(node.role, scheme);
+    final fill = roleFill(node.role, scheme);
+    final showDescription = focused && (node.description ?? '').trim().isNotEmpty;
     return Material(
-      color: pending ? accent.withValues(alpha: 0.14) : scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: accent, width: focused ? 2.6 : 1.5),
-      ),
+      color: pending ? const Color(0xFFDDE7F4) : fill,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Center(
-            child: Text(
-              node.title,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.15,
-                fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
+          padding: EdgeInsets.symmetric(horizontal: focused ? 14 : 8, vertical: focused ? 12 : 8),
+          child: focused
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      node.title,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.15,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    if (showDescription) ...[
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: Text(
+                          node.description!.trim(),
+                          textAlign: TextAlign.center,
+                          maxLines: 6,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.3,
+                            fontWeight: FontWeight.w400,
+                            color: scheme.onSurface.withValues(alpha: 0.72),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                )
+              : Center(
+                  child: Text(
+                    node.title,
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.2,
+                      fontWeight: FontWeight.w500,
+                      color: scheme.onSurface.withValues(alpha: 0.88),
+                    ),
+                  ),
+                ),
         ),
       ),
     );
-  }
-}
-
-class _EdgePainter extends CustomPainter {
-  _EdgePainter({required this.layout, required this.scheme});
-
-  final GraphLayout layout;
-  final ColorScheme scheme;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final byId = {for (final node in layout.nodes) node.id: node};
-    for (final edge in layout.edges) {
-      final from = byId[edge.source];
-      final to = byId[edge.target];
-      if (from == null || to == null) continue;
-      final paint = Paint()
-        ..color = edgeColor(edge, scheme)
-        ..strokeWidth = edge.isRelated || edge.isSibling ? 1.2 : 1.8
-        ..style = PaintingStyle.stroke;
-      if (edge.isRelated || edge.isSibling) {
-        final path = Path()
-          ..moveTo(from.center.dx, from.center.dy)
-          ..quadraticBezierTo(
-            (from.center.dx + to.center.dx) / 2,
-            (from.center.dy + to.center.dy) / 2 - 24,
-            to.center.dx,
-            to.center.dy,
-          );
-        canvas.drawPath(path, paint);
-      } else {
-        canvas.drawLine(
-          Offset(from.x + from.width / 2, from.y + from.height),
-          Offset(to.x + to.width / 2, to.y),
-          paint,
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _EdgePainter oldDelegate) {
-    return oldDelegate.layout != layout || oldDelegate.scheme != scheme;
   }
 }

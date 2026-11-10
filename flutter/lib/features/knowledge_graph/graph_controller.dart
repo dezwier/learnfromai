@@ -77,7 +77,7 @@ class GraphController extends ChangeNotifier {
     return raw.toString();
   }
 
-  bool get canGoBack => focusHistory.length > 1 && !refreshing && !working;
+  bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
   Future<void> resume() async {
     if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing || working) return;
@@ -99,7 +99,7 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<void> openNode(String id) async {
-    if (refreshing || loading || working) return;
+    if (refreshing || loading || working) return; // one expand at a time; graph stays pannable
     if (focusId == id && categoryGraph != null) return;
     pendingNodeId = id;
     await _focus(body: {'node_id': id});

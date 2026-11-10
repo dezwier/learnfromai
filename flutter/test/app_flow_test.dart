@@ -62,6 +62,7 @@ void main() {
     expect(find.text('Saurischia'), findsOneWidget);
     expect(find.text('Mammals'), findsOneWidget);
     expect(find.text('Mesozoic'), findsOneWidget);
+    expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
     expect(find.text('Sibling'), findsOneWidget);
     expect(find.byTooltip('Search'), findsOneWidget);
   });
@@ -114,6 +115,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(graph.working, isTrue);
     expect(find.textContaining('Merging Reptiles'), findsOneWidget);
+    // Progress is a non-blocking lower-left chip, not a full-screen barrier.
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
     await tester.pump(const Duration(milliseconds: 800));
     await pending;
     await tester.pumpAndSettle();
@@ -176,12 +179,9 @@ void main() {
         GraphNode(id: '3', title: 'Saurischia', depth: 1, kind: 'child'),
         GraphNode(id: '4', title: 'Mammals', depth: 0, kind: 'sibling'),
       ],
-      const [
-        GraphEdge(source: '2', target: '1', type: 'parent'),
-        GraphEdge(source: '2', target: '3', type: 'child'),
-        GraphEdge(source: '2', target: '4', type: 'sibling'),
-      ],
+      const [],
       focusId: '2',
+      viewport: const Size(390, 700),
     );
     final byId = {for (final node in layout.nodes) node.id: node};
     expect(byId['1']!.y < byId['2']!.y, isTrue);
@@ -200,7 +200,14 @@ Map<String, dynamic> _compact() {
     'incomplete': false,
     'nodes': [
       {'id': '1', 'title': 'Reptiles', 'depth': -1, 'distance': 1, 'kind': 'parent'},
-      {'id': '2', 'title': 'Dinosaurs', 'depth': 0, 'distance': 0, 'kind': 'focus'},
+      {
+        'id': '2',
+        'title': 'Dinosaurs',
+        'depth': 0,
+        'distance': 0,
+        'kind': 'focus',
+        'description': 'Extinct Mesozoic reptiles known from fossils worldwide.',
+      },
       {'id': '3', 'title': 'Saurischia', 'depth': 1, 'distance': 1, 'kind': 'child'},
       {'id': '4', 'title': 'Mammals', 'depth': 0, 'distance': 1, 'kind': 'sibling'},
       {'id': '5', 'title': 'Mesozoic', 'depth': 0, 'distance': 1, 'kind': 'related'},

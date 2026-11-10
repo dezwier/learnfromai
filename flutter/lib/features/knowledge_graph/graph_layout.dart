@@ -11,6 +11,7 @@ class GraphNode {
     required this.depth,
     this.distance = 0,
     this.kind = 'focus',
+    this.description,
   });
 
   final String id;
@@ -18,6 +19,7 @@ class GraphNode {
   final int depth;
   final int distance;
   final String kind;
+  final String? description;
 
   NodeRole get role {
     switch (kind) {
@@ -43,9 +45,6 @@ class GraphEdge {
   final String source;
   final String target;
   final String type;
-
-  bool get isRelated => type == 'acquaintance' || type == 'related_to' || type == 'related';
-  bool get isSibling => type == 'sibling';
 }
 
 class PlacedNode {
@@ -60,6 +59,7 @@ class PlacedNode {
     required this.y,
     required this.width,
     required this.height,
+    this.description,
   });
 
   final String id;
@@ -72,6 +72,7 @@ class PlacedNode {
   final double y;
   final double width;
   final double height;
+  final String? description;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -83,31 +84,48 @@ class PlacedNode {
 class GraphLayout {
   const GraphLayout({
     required this.nodes,
-    required this.edges,
     required this.width,
     required this.height,
   });
 
   final List<PlacedNode> nodes;
-  final List<GraphEdge> edges;
   final double width;
   final double height;
 }
 
-const graphCardWidth = 148.0;
-const graphCardHeight = 52.0;
-const graphGapX = 20.0;
-const graphGapY = 88.0;
-const graphSideGap = 40.0;
-const graphPadding = 64.0;
+const mosaicGap = 3.0;
+const graphFocusWidth = 168.0; // kept for older test imports
+const graphFocusHeight = 96.0;
+const graphCardWidth = 118.0;
+const graphSideGap = 8.0;
 
-/// Parents above, siblings near focus sides, related farther out, children below.
+/// Tile pastel boxes into the viewport. Focus center, parents above, children below,
+/// siblings on the sides, related filling the remaining perimeter.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
-  List<GraphEdge> edges, {
+  List<GraphEdge> _, {
   required String focusId,
+  Size viewport = const Size(390, 720),
 }) {
+  final width = math.max(viewport.width, 280.0);
+  final height = math.max(viewport.height, 360.0);
+  if (nodes.isEmpty) {
+    return GraphLayout(nodes: const [], width: width, height: height);
+  }
+
   final byId = {for (final node in nodes) node.id: node};
+  GraphNode? focus = byId[focusId];
+  if (focus == null) {
+    for (final node in nodes) {
+      if (node.role == NodeRole.focus) {
+        focus = node;
+        break;
+      }
+    }
+  }
+  focus ??= nodes.first;
+  final focusNode = focus;
+
   final parents = [
     for (final node in nodes)
       if (node.role == NodeRole.parent) node,
@@ -122,139 +140,107 @@ GraphLayout layoutGraph(
   ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   final related = [
     for (final node in nodes)
-      if (node.role == NodeRole.related) node,
+      if (node.role == NodeRole.related && node.id != focusNode.id) node,
   ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  GraphNode? focus = byId[focusId];
-  if (focus == null) {
-    for (final node in nodes) {
-      if (node.role == NodeRole.focus) {
-        focus = node;
-        break;
-      }
-    }
-  }
-  focus ??= nodes.isEmpty ? null : nodes.first;
+  final hasTop = parents.isNotEmpty || related.isNotEmpty;
+  final hasBottom = children.isNotEmpty || related.length > 2;
+  final hasSides = siblings.isNotEmpty || related.isNotEmpty;
 
-  final leftSiblings = [for (var i = 0; i < siblings.length; i += 2) siblings[i]];
-  final rightSiblings = [for (var i = 1; i < siblings.length; i += 2) siblings[i]];
-  final leftRelated = [for (var i = 0; i < related.length; i += 2) related[i]];
-  final rightRelated = [for (var i = 1; i < related.length; i += 2) related[i]];
+  final topH = hasTop ? height * (parents.isEmpty ? 0.16 : 0.20) : 0.0;
+  final bottomH = hasBottom ? height * (children.isEmpty ? 0.16 : 0.22) : 0.0;
+  final midH = height - topH - bottomH - (hasTop ? mosaicGap : 0) - (hasBottom ? mosaicGap : 0);
+  final sideW = hasSides ? width * 0.27 : 0.0;
+  final centerW = width - (hasSides ? sideW * 2 + mosaicGap * 2 : 0);
 
-  final parentWidth = _rowWidth(parents.length);
-  final childWidth = _rowWidth(children.length);
-  final sideInner = math.max(_columnWidth(leftSiblings.length), _columnWidth(rightSiblings.length));
-  final sideOuter = math.max(_columnWidth(leftRelated.length), _columnWidth(rightRelated.length));
-  final centerBand = math.max(graphCardWidth, math.max(parentWidth, childWidth));
-  final width = math.max(
-    graphPadding * 2 +
-        sideOuter +
-        graphSideGap +
-        sideInner +
-        graphSideGap +
-        centerBand +
-        graphSideGap +
-        sideInner +
-        graphSideGap +
-        sideOuter,
-    420.0,
-  );
+  final midY = hasTop ? topH + mosaicGap : 0.0;
+  final bottomY = midY + midH + (hasBottom ? mosaicGap : 0);
+  final centerX = hasSides ? sideW + mosaicGap : 0.0;
 
   final placed = <PlacedNode>[];
-  var y = graphPadding;
+  final relatedPool = List<GraphNode>.of(related);
 
-  if (parents.isNotEmpty) {
-    placed.addAll(_placeRow(parents, y: y, canvasWidth: width));
-    y += graphCardHeight + graphGapY;
+  // Top band: parents across the middle; related in leftover top cells.
+  if (hasTop) {
+    if (parents.isNotEmpty) {
+      placed.addAll(_splitRow(parents, x: 0, y: 0, width: width, height: topH));
+    } else {
+      final take = math.min(relatedPool.length, 3);
+      placed.addAll(_splitRow(relatedPool.sublist(0, take), x: 0, y: 0, width: width, height: topH));
+      relatedPool.removeRange(0, take);
+    }
   }
 
-  final focusY = y;
-  if (focus != null) {
-    placed.add(_card(focus, x: (width - graphCardWidth) / 2, y: focusY));
-  }
-
-  final siblingLeftX = graphPadding + sideOuter + graphSideGap;
-  final siblingRightX = width - graphPadding - sideOuter - graphSideGap - graphCardWidth;
-  final relatedLeftX = graphPadding.toDouble();
-  final relatedRightX = width - graphPadding - graphCardWidth;
-
-  if (leftSiblings.isNotEmpty) {
-    final top = focusY + (graphCardHeight - _columnHeight(leftSiblings.length)) / 2;
-    placed.addAll(_placeColumn(leftSiblings, x: siblingLeftX, top: top));
-  }
-  if (rightSiblings.isNotEmpty) {
-    final top = focusY + (graphCardHeight - _columnHeight(rightSiblings.length)) / 2;
-    placed.addAll(_placeColumn(rightSiblings, x: siblingRightX, top: top));
-  }
-  if (leftRelated.isNotEmpty) {
-    final top = focusY + (graphCardHeight - _columnHeight(leftRelated.length)) / 2;
-    placed.addAll(_placeColumn(leftRelated, x: relatedLeftX, top: top));
-  }
-  if (rightRelated.isNotEmpty) {
-    final top = focusY + (graphCardHeight - _columnHeight(rightRelated.length)) / 2;
-    placed.addAll(_placeColumn(rightRelated, x: relatedRightX, top: top));
-  }
-
-  y = focusY + graphCardHeight + graphGapY;
-  if (children.isNotEmpty) {
-    placed.addAll(_placeRow(children, y: y, canvasWidth: width));
-    y += graphCardHeight;
-  } else {
-    y = focusY + graphCardHeight;
-  }
-
-  final visibleIds = {for (final node in placed) node.id};
-  final visibleEdges = [
-    for (final edge in edges)
-      if (visibleIds.contains(edge.source) && visibleIds.contains(edge.target)) edge,
-  ];
-
-  return GraphLayout(
-    nodes: placed,
-    edges: visibleEdges,
-    width: width,
-    height: math.max(y + graphPadding, 280.0),
+  // Focus center.
+  placed.add(
+    _box(focusNode, x: centerX, y: midY, width: centerW, height: midH),
   );
+
+  // Side columns: siblings first, then related leftovers.
+  final leftSiblings = [for (var i = 0; i < siblings.length; i += 2) siblings[i]];
+  final rightSiblings = [for (var i = 1; i < siblings.length; i += 2) siblings[i]];
+
+  if (hasSides) {
+    final leftItems = <GraphNode>[...leftSiblings];
+    final rightItems = <GraphNode>[...rightSiblings];
+    while (relatedPool.isNotEmpty && leftItems.length <= rightItems.length) {
+      leftItems.add(relatedPool.removeAt(0));
+      if (relatedPool.isEmpty) break;
+      rightItems.add(relatedPool.removeAt(0));
+    }
+    while (relatedPool.isNotEmpty) {
+      (leftItems.length <= rightItems.length ? leftItems : rightItems).add(relatedPool.removeAt(0));
+    }
+    if (leftItems.isNotEmpty) {
+      placed.addAll(_splitColumn(leftItems, x: 0, y: midY, width: sideW, height: midH));
+    }
+    if (rightItems.isNotEmpty) {
+      placed.addAll(
+        _splitColumn(rightItems, x: centerX + centerW + mosaicGap, y: midY, width: sideW, height: midH),
+      );
+    }
+  }
+
+  // Bottom band: children, then any remaining related.
+  if (hasBottom) {
+    final bottomItems = <GraphNode>[...children, ...relatedPool];
+    if (bottomItems.isNotEmpty) {
+      placed.addAll(_splitRow(bottomItems, x: 0, y: bottomY, width: width, height: bottomH));
+    }
+  } else if (relatedPool.isNotEmpty && midH > 0) {
+    // Rare: only related left and no bottom band — fold into sides already handled.
+  }
+
+  return GraphLayout(nodes: placed, width: width, height: height);
 }
 
-double _rowWidth(int count) {
-  if (count <= 0) return 0;
-  return count * graphCardWidth + math.max(0, count - 1) * graphGapX;
-}
-
-double _columnWidth(int count) => count <= 0 ? 0 : graphCardWidth;
-
-double _columnHeight(int count) {
-  if (count <= 0) return 0;
-  return count * graphCardHeight + math.max(0, count - 1) * (graphGapX * 0.8);
-}
-
-List<PlacedNode> _placeRow(List<GraphNode> row, {required double y, required double canvasWidth}) {
-  final bandWidth = _rowWidth(row.length);
-  var x = (canvasWidth - bandWidth) / 2;
+List<PlacedNode> _splitRow(List<GraphNode> items, {required double x, required double y, required double width, required double height}) {
+  if (items.isEmpty || width <= 0 || height <= 0) return const [];
+  final gaps = mosaicGap * math.max(0, items.length - 1);
+  final cell = (width - gaps) / items.length;
   return [
-    for (final node in row)
-      () {
-        final card = _card(node, x: x, y: y);
-        x += graphCardWidth + graphGapX;
-        return card;
-      }(),
+    for (var i = 0; i < items.length; i++)
+      _box(items[i], x: x + i * (cell + mosaicGap), y: y, width: cell, height: height),
   ];
 }
 
-List<PlacedNode> _placeColumn(List<GraphNode> column, {required double x, required double top}) {
-  var y = top;
+List<PlacedNode> _splitColumn(
+  List<GraphNode> items, {
+  required double x,
+  required double y,
+  required double width,
+  required double height,
+}) {
+  if (items.isEmpty || width <= 0 || height <= 0) return const [];
+  final gaps = mosaicGap * math.max(0, items.length - 1);
+  final cell = (height - gaps) / items.length;
   return [
-    for (final node in column)
-      () {
-        final card = _card(node, x: x, y: y);
-        y += graphCardHeight + graphGapX * 0.8;
-        return card;
-      }(),
+    for (var i = 0; i < items.length; i++)
+      _box(items[i], x: x, y: y + i * (cell + mosaicGap), width: width, height: cell),
   ];
 }
 
-PlacedNode _card(GraphNode node, {required double x, required double y}) {
+PlacedNode _box(GraphNode node, {required double x, required double y, required double width, required double height}) {
   return PlacedNode(
     id: node.id,
     title: node.title,
@@ -262,10 +248,11 @@ PlacedNode _card(GraphNode node, {required double x, required double y}) {
     distance: node.distance,
     kind: node.kind,
     role: node.role,
+    description: node.description,
     x: x,
     y: y,
-    width: graphCardWidth,
-    height: graphCardHeight,
+    width: width,
+    height: height,
   );
 }
 
@@ -276,18 +263,16 @@ String? hitTestNode(GraphLayout layout, Offset point) {
   return null;
 }
 
-Color roleColor(NodeRole role, ColorScheme scheme) {
+/// Soft opaque pastel fills for node roles.
+Color roleFill(NodeRole role, ColorScheme scheme) {
+  final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
-    NodeRole.parent => const Color(0xFF2F6FED),
-    NodeRole.focus => scheme.primary,
-    NodeRole.sibling => const Color(0xFF7A3FF2),
-    NodeRole.child => const Color(0xFF0F8A5F),
-    NodeRole.related => const Color(0xFFB05C1B),
+    NodeRole.parent => dark ? const Color(0xFF2A3F5C) : const Color(0xFFD7E6F8),
+    NodeRole.focus => dark ? const Color(0xFF3D4A5C) : const Color(0xFFE8EEF5),
+    NodeRole.sibling => dark ? const Color(0xFF3A2F55) : const Color(0xFFE8DDF8),
+    NodeRole.child => dark ? const Color(0xFF243F36) : const Color(0xFFD5EEE3),
+    NodeRole.related => dark ? const Color(0xFF4A3A2A) : const Color(0xFFF3E4D4),
   };
 }
 
-Color edgeColor(GraphEdge edge, ColorScheme scheme) {
-  if (edge.isRelated) return roleColor(NodeRole.related, scheme).withValues(alpha: 0.55);
-  if (edge.isSibling) return roleColor(NodeRole.sibling, scheme).withValues(alpha: 0.5);
-  return roleColor(NodeRole.parent, scheme).withValues(alpha: 0.45);
-}
+Color roleColor(NodeRole role, ColorScheme scheme) => roleFill(role, scheme);
