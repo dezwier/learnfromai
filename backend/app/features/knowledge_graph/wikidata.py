@@ -183,7 +183,6 @@ class WikidataClient:
                     "props": "labels|descriptions|claims|sitelinks",
                     "languages": "en",
                     "languagefallback": "1",
-                    "redirects": "1",
                 }
             )
             entities = payload.get("entities") or {}
@@ -192,27 +191,22 @@ class WikidataClient:
             for key, raw in entities.items():
                 if not isinstance(raw, dict):
                     continue
-                redirect = parse_qid(raw.get("redirects")) if "redirects" in raw else None
-                if redirect is None and isinstance(raw.get("redirects"), dict):
-                    redirect = parse_qid(raw["redirects"].get("to"))
-                # wbgetentities with redirects=1 may return the target under the target id,
-                # or a stub that points elsewhere. Follow stubs once.
                 if raw.get("missing") is not None:
                     continue
-                if "labels" not in raw and "claims" not in raw:
-                    target = parse_qid(raw.get("id")) or parse_qid(key)
-                    if target is not None and target not in seen_redirects:
-                        seen_redirects.add(target)
-                        pending.append(target)
-                    continue
-                # Some responses nest redirects as {"from": "Q1", "to": "Q2"} on the entity.
+                # Follow redirect stubs so merged items share one qid.
                 nested = raw.get("redirects")
                 if isinstance(nested, dict):
                     target = parse_qid(nested.get("to"))
                     if target is not None and target not in seen_redirects:
                         seen_redirects.add(target)
                         pending.append(target)
-                        continue
+                    continue
+                if "labels" not in raw and "claims" not in raw:
+                    target = parse_qid(raw.get("id")) or parse_qid(key)
+                    if target is not None and target not in seen_redirects and target not in {parse_qid(key)}:
+                        seen_redirects.add(target)
+                        pending.append(target)
+                    continue
                 item = parse_entity(raw)
                 if item is not None:
                     found.append(item)
