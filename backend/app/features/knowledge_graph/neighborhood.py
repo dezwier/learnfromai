@@ -334,7 +334,8 @@ def _persist_request(
     return request
 
 
-def build_subgraph(session: Session, focus: KnowledgeNode) -> dict:
+def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int = 36) -> dict:
+    """Direct neighborhood first, then unique neighbors-of-neighbors as `extended`."""
     kinds: dict[UUID, str] = {focus.id: "focus"}
     depths: dict[UUID, int] = {focus.id: 0}
     nodes: dict[UUID, KnowledgeNode] = {focus.id: focus}
@@ -353,6 +354,28 @@ def build_subgraph(session: Session, focus: KnowledgeNode) -> dict:
         else:
             depths.setdefault(other.id, 0)
 
+    direct_ids = [node_id for node_id in nodes if node_id != focus.id]
+    extended: list[KnowledgeNode] = []
+    seen_extended: set[UUID] = set()
+    for direct_id in direct_ids:
+        for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == direct_id)).all():
+            if edge.to_id in nodes or edge.to_id in seen_extended:
+                continue
+            other = session.get(KnowledgeNode, edge.to_id)
+            if other is None:
+                continue
+            seen_extended.add(other.id)
+            extended.append(other)
+            if len(extended) >= max_extended:
+                break
+        if len(extended) >= max_extended:
+            break
+
+    for other in extended:
+        nodes[other.id] = other
+        kinds[other.id] = "extended"
+        depths.setdefault(other.id, 0)
+
     ids = list(nodes.keys())
     edges = list(
         session.exec(
@@ -360,8 +383,19 @@ def build_subgraph(session: Session, focus: KnowledgeNode) -> dict:
         ).all()
     ) if ids else []
     distances = _distances(focus.id, edges)
+    # Direct first, then extended; stable within each band.
+    kind_rank = {"focus": 0, "parent": 1, "sibling": 2, "child": 3, "related": 4, "extended": 5}
+
+    def sort_key(node_id: UUID) -> tuple:
+        return (
+            kind_rank.get(kinds.get(node_id, "related"), 9),
+            depths.get(node_id, 0),
+            nodes[node_id].name.lower(),
+            str(node_id),
+        )
+
     node_payload = []
-    for node_id in sorted(ids, key=lambda value: (depths.get(value, 0), nodes[value].name.lower(), str(value))):
+    for node_id in sorted(ids, key=sort_key):
         node = nodes[node_id]
         node_payload.append(
             {
@@ -369,17 +403,17 @@ def build_subgraph(session: Session, focus: KnowledgeNode) -> dict:
                 "title": node.name,
                 "description": node.description,
                 "depth": depths.get(node_id, 0),
-                "distance": distances.get(node_id, 0),
+                "distance": distances.get(node_id, 0 if node_id == focus.id else 2 if kinds.get(node_id) == "extended" else 1),
                 "kind": kinds.get(node_id, "related"),
             }
         )
+    # Outbound from focus + links from directs into extended (for client context).
     edge_payload = [
         {"source": str(edge.from_id), "target": str(edge.to_id), "type": edge.relation}
         for edge in sorted(edges, key=lambda row: (str(row.from_id), row.relation, str(row.to_id)))
-        if edge.from_id == focus.id or edge.to_id == focus.id
+        if edge.from_id == focus.id
+        or (edge.from_id in set(direct_ids) and kinds.get(edge.to_id) == "extended")
     ]
-    # Prefer outbound edges from focus for a clean neighborhood drawing.
-    edge_payload = [edge for edge in edge_payload if edge["source"] == str(focus.id)]
     return {
         "focus_node_id": str(focus.id),
         "incomplete": False,

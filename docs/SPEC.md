@@ -26,7 +26,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `POST /api/v1/graph/extend` (410)
 - `GET /health`
 
-Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `related`, or `focus`. Edge `type` uses the stored relation names.
+Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `related`, `extended` (neighbors of neighbors), or `focus`. Edge `type` uses the stored relation names. The canvas places direct neighbors first, then fills remaining tiles with unique `extended` nodes beside the direct neighbor they hang off.
 
 ## Client
 

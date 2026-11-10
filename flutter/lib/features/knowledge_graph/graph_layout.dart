@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum NodeRole { parent, focus, sibling, child, related }
+enum NodeRole { parent, focus, sibling, child, related, extended }
 
 class GraphNode {
   const GraphNode({
@@ -31,6 +31,8 @@ class GraphNode {
         return NodeRole.child;
       case 'related':
         return NodeRole.related;
+      case 'extended':
+        return NodeRole.extended;
       default:
         if (depth < 0) return NodeRole.parent;
         if (depth > 0) return NodeRole.child;
@@ -349,10 +351,11 @@ Size hexFlowerBounds(double unitRadius) {
 }
 
 /// Tight honeycomb on a flat-top axial lattice.
-/// Focus is one solid 7-hex flower; neighbors are unit hexes from ring 2.
+/// Focus is one solid 7-hex flower; direct neighbors on ring 2+;
+/// neighbors-of-neighbors sit next to the direct neighbor they hang off.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
-  List<GraphEdge> _, {
+  List<GraphEdge> edges, {
   required String focusId,
   Size viewport = const Size(390, 720),
 }) {
@@ -391,19 +394,46 @@ GraphLayout layoutGraph(
     for (final node in nodes)
       if (node.role == NodeRole.related && node.id != focusNode.id) node,
   ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+  final extended = [
+    for (final node in nodes)
+      if (node.role == NodeRole.extended) node,
+  ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  final queue = <(GraphNode, NodeRole)>[
+  final directs = <(GraphNode, NodeRole)>[
     for (final node in parents) (node, NodeRole.parent),
     for (final node in children) (node, NodeRole.child),
     for (final node in siblings) (node, NodeRole.sibling),
     for (final node in related) (node, NodeRole.related),
   ];
+  final directIds = {for (final item in directs) item.$1.id};
+  // extended id → preferred direct neighbor it hangs off.
+  final viaDirect = <String, String>{};
+  for (final edge in edges) {
+    if (directIds.contains(edge.source) &&
+        byId[edge.target]?.role == NodeRole.extended) {
+      viaDirect.putIfAbsent(edge.target, () => edge.source);
+    } else if (directIds.contains(edge.target) &&
+        byId[edge.source]?.role == NodeRole.extended) {
+      viaDirect.putIfAbsent(edge.source, () => edge.target);
+    }
+  }
 
-  final cells = _ringCells(fromRing: 2, count: math.max(queue.length, 1));
+  final slotBudget = _viewportSlotBudget(width, height, minDirect: directs.length);
+  final fillers = extended.take(math.max(0, slotBudget - directs.length)).toList();
+
+  // Include at least one outer ring beyond the directs so extended can sit
+  // beside their anchors instead of only competing for leftover ring-2 cells.
+  final cellPool = math.max(
+    directs.length + fillers.length + 18,
+    fillers.isEmpty ? directs.length : 30,
+  );
+  final cells = _ringCells(fromRing: 2, count: math.max(cellPool, 1));
   final used = <int>{};
   final assignments = <(GraphNode, _HexCell)>[];
+  final cellByNodeId = <String, _HexCell>{};
 
-  for (final item in queue) {
+  // 1) Place direct neighbors by role compass.
+  for (final item in directs) {
     var best = -1;
     var bestScore = -9999.0;
     for (var i = 0; i < cells.length; i++) {
@@ -417,6 +447,33 @@ GraphLayout layoutGraph(
     if (best < 0) break;
     used.add(best);
     assignments.add((item.$1, cells[best]));
+    cellByNodeId[item.$1.id] = cells[best];
+  }
+
+  // 2) Place extended nodes next to their via-direct neighbor.
+  final directCells = {
+    for (final id in directIds)
+      if (cellByNodeId.containsKey(id)) id: cellByNodeId[id]!,
+  };
+  for (final node in fillers) {
+    final anchorId = viaDirect[node.id];
+    final anchor = anchorId == null ? null : cellByNodeId[anchorId];
+    var best = -1;
+    var bestScore = -9999.0;
+    for (var i = 0; i < cells.length; i++) {
+      if (used.contains(i)) continue;
+      final score = anchor == null
+          ? _cellScore(cells[i], NodeRole.extended)
+          : _nearAnchorScore(cells[i], anchor, directCells);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    if (best < 0) break;
+    used.add(best);
+    assignments.add((node, cells[best]));
+    cellByNodeId[node.id] = cells[best];
   }
 
   // Unit lattice size = 1. Focus flower bounds use the 7-cell footprint.
@@ -517,15 +574,62 @@ double _cellScore(_HexCell cell, NodeRole role) {
   final south = _angleDist(angle, math.pi / 2);
   final east = _angleDist(angle, 0);
   final west = _angleDist(angle, math.pi);
-  final ringPenalty = (cell.ring - 2) * 0.45;
+  // Keep directs on ring 2 whenever a free cell remains there.
+  final ringPenalty = (cell.ring - 2) * 1.8;
 
   return switch (role) {
     NodeRole.parent => 4.0 - north - ringPenalty,
     NodeRole.child => 4.0 - south - ringPenalty,
     NodeRole.sibling => 4.0 - math.min(east, west) - ringPenalty,
     NodeRole.related => 2.0 - ringPenalty * 0.5,
+    NodeRole.extended => 1.0 - ringPenalty * 0.35,
     NodeRole.focus => 0,
   };
+}
+
+int _cubeDist(_HexCell a, _HexCell b) {
+  final dq = a.q - b.q;
+  final dr = a.r - b.r;
+  final ds = a.s - b.s;
+  return (dq.abs() + dr.abs() + ds.abs()) ~/ 2;
+}
+
+/// Prefer hexes adjacent to [anchor], outward, and uniquely closer to that via.
+double _nearAnchorScore(
+  _HexCell cell,
+  _HexCell anchor,
+  Map<String, _HexCell> directCells,
+) {
+  final dist = _cubeDist(cell, anchor);
+  final outwardBoost = cell.ring >= anchor.ring ? 1.2 : -1.0;
+  var score = 12.0 - dist * 3.0 + outwardBoost - (cell.ring - 2) * 0.15;
+  for (final other in directCells.values) {
+    if (other.q == anchor.q && other.r == anchor.r) continue;
+    final dOther = _cubeDist(cell, other);
+    if (dOther < dist) {
+      score -= 5.0;
+    } else if (dOther == dist) {
+      score -= 2.0;
+    }
+  }
+  return score;
+}
+
+/// How many surround hexes can stay readable in the viewport.
+int _viewportSlotBudget(double width, double height, {required int minDirect}) {
+  const minUnit = 26.0;
+  const pad = 8.0;
+  var ring = 2;
+  var total = 0;
+  while (ring <= 5) {
+    final halfExtent = 2.5 + ring * math.sqrt(3);
+    final unit = math.min((width - 2 * pad) / (2 * halfExtent), (height - 2 * pad) / (2 * halfExtent));
+    if (unit < minUnit && total >= minDirect) break;
+    total += ring * 6;
+    if (unit < minUnit) break;
+    ring++;
+  }
+  return math.max(total, minDirect);
 }
 
 double _angleDist(double a, double b) {
@@ -581,13 +685,14 @@ String? hitTestNode(GraphLayout layout, Offset point) {
 Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
-    // Soft pastel blue / green / red / yellow-orange; grey center.
-    // Light theme a bit richer so roles read clearly on paper.
+    // Soft pastel blue / green / red / yellow-orange;
+    // lighter grey focus; mid grey for neighbors-of-neighbors.
     NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFFB9D4F0),
-    NodeRole.focus => dark ? const Color(0xFF3C4046) : const Color(0xFFD8DCE2),
+    NodeRole.focus => dark ? const Color(0xFF4A4E55) : const Color(0xFFE8EAEE),
     NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFEBB8C0),
     NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFFB6E2D2),
     NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFF0C99A),
+    NodeRole.extended => dark ? const Color(0xFF3C4046) : const Color(0xFFD8DCE2),
   };
 }
 

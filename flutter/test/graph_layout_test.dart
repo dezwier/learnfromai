@@ -83,4 +83,51 @@ void main() {
       expect((c - mean).abs(), lessThan(0.35));
     }
   });
+
+  test('extended nodes sit next to their via direct neighbor', () {
+    const viewport = Size(390, 700);
+    final layout = layoutGraph(
+      const [
+        GraphNode(
+          id: 'focus',
+          title: 'Dinosaur',
+          depth: 0,
+          kind: 'focus',
+          description: 'Focus',
+        ),
+        GraphNode(id: 'child-a', title: 'Saurischia', depth: 1, kind: 'child'),
+        GraphNode(id: 'child-b', title: 'Ornithischia', depth: 1, kind: 'child'),
+        GraphNode(id: 'ext-a1', title: 'Theropoda', depth: 2, kind: 'extended'),
+        GraphNode(id: 'ext-a2', title: 'Sauropoda', depth: 2, kind: 'extended'),
+        GraphNode(id: 'ext-b1', title: 'Thyreophora', depth: 2, kind: 'extended'),
+      ],
+      const [
+        GraphEdge(source: 'focus', target: 'child-a', type: 'child'),
+        GraphEdge(source: 'focus', target: 'child-b', type: 'child'),
+        GraphEdge(source: 'child-a', target: 'ext-a1', type: 'child'),
+        GraphEdge(source: 'child-a', target: 'ext-a2', type: 'child'),
+        GraphEdge(source: 'child-b', target: 'ext-b1', type: 'child'),
+      ],
+      focusId: 'focus',
+      viewport: viewport,
+    );
+
+    final byId = {for (final node in layout.nodes) node.id: node};
+    expect(byId.containsKey('ext-a1'), isTrue);
+    expect(byId.containsKey('ext-a2'), isTrue);
+    expect(byId.containsKey('ext-b1'), isTrue);
+
+    double dist(PlacedNode a, PlacedNode b) => (a.center - b.center).distance;
+
+    final childA = byId['child-a']!;
+    final childB = byId['child-b']!;
+    final step = childA.radius * math.sqrt(3); // flat-top adjacent-center distance
+    // Each extended sits next to its via (within ~one hex step), not the other child.
+    expect(dist(byId['ext-a1']!, childA), lessThan(step * 1.15));
+    expect(dist(byId['ext-a2']!, childA), lessThan(step * 1.15));
+    expect(dist(byId['ext-b1']!, childB), lessThan(step * 1.15));
+    expect(dist(byId['ext-a1']!, childA), lessThan(dist(byId['ext-a1']!, childB)));
+    expect(dist(byId['ext-a2']!, childA), lessThan(dist(byId['ext-a2']!, childB)));
+    expect(dist(byId['ext-b1']!, childB), lessThan(dist(byId['ext-b1']!, childA)));
+  });
 }
