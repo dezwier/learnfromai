@@ -582,11 +582,12 @@ Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
     // Soft pastel blue / green / red / yellow-orange; grey center.
-    NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFFD7E6F8),
-    NodeRole.focus => dark ? const Color(0xFF3C4046) : const Color(0xFFE6E8EC),
-    NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFF3D6DB),
-    NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFFD5EEE3),
-    NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFF6E0C4),
+    // Light theme a bit richer so roles read clearly on paper.
+    NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFFB9D4F0),
+    NodeRole.focus => dark ? const Color(0xFF3C4046) : const Color(0xFFD8DCE2),
+    NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFEBB8C0),
+    NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFFB6E2D2),
+    NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFF0C99A),
   };
 }
 
