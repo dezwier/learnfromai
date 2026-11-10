@@ -21,6 +21,8 @@ class GraphScreen extends StatefulWidget {
 class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
+  final _transform = TransformationController();
+  String? _transformFocusId;
   var _resumed = false;
   var _searchOpen = false;
 
@@ -38,7 +40,14 @@ class _GraphScreenState extends State<GraphScreen> {
   void dispose() {
     _search.dispose();
     _searchFocus.dispose();
+    _transform.dispose();
     super.dispose();
+  }
+
+  void _resetTransformIfFocusChanged(String? focusId) {
+    if (_transformFocusId == focusId) return;
+    _transformFocusId = focusId;
+    _transform.value = Matrix4.identity();
   }
 
   void _openSearch() {
@@ -263,12 +272,24 @@ class _GraphScreenState extends State<GraphScreen> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        _resetTransformIfFocusChanged(graph.focusId);
         final layout = _layoutFor(graph, Size(constraints.maxWidth, constraints.maxHeight));
-        return _GraphView(
-          layout: layout,
-          focusId: graph.focusId,
-          pendingId: graph.refreshing ? graph.pendingNodeId : null,
-          onOpen: graph.openNode,
+        return InteractiveViewer(
+          transformationController: _transform,
+          constrained: false,
+          minScale: 0.45,
+          maxScale: 3.5,
+          boundaryMargin: const EdgeInsets.all(300),
+          child: SizedBox(
+            width: layout.width,
+            height: layout.height,
+            child: _GraphView(
+              layout: layout,
+              focusId: graph.focusId,
+              pendingId: graph.refreshing ? graph.pendingNodeId : null,
+              onOpen: graph.openNode,
+            ),
+          ),
         );
       },
     );
@@ -468,43 +489,54 @@ class _NodeCard extends StatelessWidget {
           painter: _HexFlowerPainter(color: fill),
           child: Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: node.radius * 1.15,
-              vertical: node.radius * 0.9,
+              horizontal: node.radius * 0.55,
+              vertical: node.radius * 0.7,
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  node.title,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: (node.radius * 0.48).clamp(17.0, 26.0),
-                    height: 1.1,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurface,
-                  ),
-                ),
-                if (showDescription) ...[
-                  const SizedBox(height: 8),
-                  Flexible(
-                    child: Text(
-                      node.description!.trim(),
-                      textAlign: TextAlign.center,
-                      maxLines: 7,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: (node.radius * 0.26).clamp(12.0, 15.0),
-                        height: 1.3,
-                        fontWeight: FontWeight.w400,
-                        color: scheme.onSurface.withValues(alpha: 0.72),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final titleBudget =
+                    showDescription ? constraints.maxHeight * 0.26 : constraints.maxHeight;
+                final descBudget = constraints.maxHeight * 0.64;
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: titleBudget,
+                      child: _FittingLabel(
+                        text: node.title,
+                        maxLines: 3,
+                        minFontSize: 12,
+                        maxFontSize: (node.radius * 0.5).clamp(18.0, 30.0),
+                        align: Alignment.bottomCenter,
+                        style: TextStyle(
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurface,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ],
+                    if (showDescription) ...[
+                      SizedBox(height: node.radius * 0.03),
+                      SizedBox(
+                        height: descBudget,
+                        child: _FittingLabel(
+                          text: node.description!.trim(),
+                          maxLines: 12,
+                          minFontSize: 10,
+                          maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
+                          align: Alignment.topCenter,
+                          style: TextStyle(
+                            height: 1.28,
+                            fontWeight: FontWeight.w400,
+                            color: scheme.onSurface.withValues(alpha: 0.72),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -517,20 +549,19 @@ class _NodeCard extends StatelessWidget {
         painter: _HexTilePainter(color: fill),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: node.radius * 0.22,
-            vertical: node.radius * 0.18,
+            horizontal: node.radius * 0.34,
+            vertical: node.radius * 0.24,
           ),
           child: Center(
-            child: Text(
-              node.title,
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+            child: _FittingLabel(
+              text: node.title,
+              maxLines: 4,
+              minFontSize: 8,
+              maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
               style: TextStyle(
-                fontSize: (node.radius * 0.28).clamp(11.0, 15.0),
-                height: 1.2,
+                height: 1.15,
                 fontWeight: FontWeight.w500,
-                color: scheme.onSurface.withValues(alpha: 0.88),
+                color: scheme.onSurface.withValues(alpha: 0.9),
               ),
             ),
           ),
@@ -538,6 +569,140 @@ class _NodeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Scales font to the tile. Wraps only between words; never mid-word.
+class _FittingLabel extends StatelessWidget {
+  const _FittingLabel({
+    required this.text,
+    required this.style,
+    required this.maxLines,
+    required this.minFontSize,
+    required this.maxFontSize,
+    this.align = Alignment.center,
+  });
+
+  final String text;
+  final TextStyle style;
+  final int maxLines;
+  final double minFontSize;
+  final double maxFontSize;
+  final Alignment align;
+
+  @override
+  Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Keep a margin so painted glyphs never force a mid-word break.
+        final maxWidth = (constraints.maxWidth - 2).clamp(0.0, double.infinity);
+        final maxHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : maxWidth * 2;
+        if (maxWidth <= 1 || text.trim().isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final fontSize = _fitFontSize(
+          text: text,
+          style: style,
+          maxWidth: maxWidth,
+          maxHeight: maxHeight,
+          maxLines: maxLines,
+          minSize: minFontSize,
+          maxSize: maxFontSize,
+          textScaler: scaler,
+        );
+        return SizedBox.expand(
+          child: Align(
+            alignment: align,
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              softWrap: true,
+              maxLines: maxLines,
+              overflow: TextOverflow.clip,
+              style: style.copyWith(fontSize: fontSize),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+double _fitFontSize({
+  required String text,
+  required TextStyle style,
+  required double maxWidth,
+  required double maxHeight,
+  required int maxLines,
+  required double minSize,
+  required double maxSize,
+  required TextScaler textScaler,
+}) {
+  final words = [
+    for (final w in text.split(RegExp(r'\s+')))
+      if (w.isNotEmpty) w,
+  ];
+  if (words.isEmpty) return minSize;
+
+  var lo = minSize;
+  var hi = maxSize;
+  var best = minSize;
+  for (var i = 0; i < 16; i++) {
+    final mid = (lo + hi) / 2;
+    if (_textFits(
+      text: text,
+      words: words,
+      style: style.copyWith(fontSize: mid),
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      maxLines: maxLines,
+      textScaler: textScaler,
+    )) {
+      best = mid;
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return best;
+}
+
+bool _textFits({
+  required String text,
+  required List<String> words,
+  required TextStyle style,
+  required double maxWidth,
+  required double maxHeight,
+  required int maxLines,
+  required TextScaler textScaler,
+}) {
+  // Safety margin vs measurement vs paint differences (esp. with custom fonts).
+  final wordLimit = maxWidth * 0.96;
+  for (final word in words) {
+    final wordPainter = TextPainter(
+      text: TextSpan(text: word, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout();
+    if (wordPainter.width > wordLimit) return false;
+  }
+
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    textAlign: TextAlign.center,
+    textScaler: textScaler,
+    maxLines: maxLines,
+  )..layout(maxWidth: maxWidth);
+  if (painter.didExceedMaxLines) return false;
+  if (painter.height > maxHeight + 0.5) return false;
+  for (final metric in painter.computeLineMetrics()) {
+    if (metric.width > maxWidth + 0.5) return false;
+  }
+  return true;
 }
 
 void _paintHexDepth(Canvas canvas, Path path, Color color) {
