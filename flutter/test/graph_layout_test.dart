@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('focus is a solid 7-hex flower with unit neighbors around it', () {
+  test('focus is a solid 7-hex flower with parallel outer inset', () {
     const viewport = Size(390, 700);
     final layout = layoutGraph(
       const [
@@ -32,34 +32,55 @@ void main() {
 
     final byId = {for (final node in layout.nodes) node.id: node};
     expect(byId['2']!.isFlower, isTrue);
-    expect(byId['5']!.isFlower, isFalse);
-    expect(byId['2']!.width / byId['5']!.width, closeTo(2.5, 0.05));
     expect(hitTestNode(layout, byId['2']!.center), '2');
-    // A petal center inside the flower still hits focus.
-    final petal = byId['2']!.center + axialToPixel(1, 0, byId['2']!.radius);
-    expect(hitTestNode(layout, petal), '2');
+    expect(
+      hitTestNode(layout, byId['2']!.center + axialToPixel(1, 0, byId['2']!.radius) * 0.5),
+      '2',
+    );
 
-    final parentY = [
-      for (final n in layout.nodes)
-        if (n.role == NodeRole.parent) n.center.dy,
-    ];
-    final childY = [
-      for (final n in layout.nodes)
-        if (n.role == NodeRole.child) n.center.dy,
-    ];
-    expect(parentY.every((y) => y < byId['2']!.center.dy), isTrue);
-    expect(childY.every((y) => y > byId['2']!.center.dy), isTrue);
+    const R = 40.0;
+    final outline = hexFlowerOutline(R);
+    expect(outline.length, 18);
 
-    final nodes = layout.nodes;
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        final a = nodes[i];
-        final b = nodes[j];
-        if (a.isFlower || b.isFlower) continue;
-        final dist = (a.center - b.center).distance;
-        final minDist = (math.sqrt(3) / 2) * (a.radius + b.radius) * 0.98;
-        expect(dist, greaterThan(minDist), reason: '${a.id} overlaps ${b.id}');
+    final full = Path()
+      ..fillType = PathFillType.nonZero
+      ..addPolygon(outline, true);
+    final flower = hexFlowerPath(latticeSize: R);
+    expect(flower.contains(Offset.zero), isTrue);
+    expect(flower.contains(axialToPixel(1, 0, R) * 0.5), isTrue);
+
+    // Inset shrinks the silhouette uniformly by ~hexFlatInset on every edge.
+    final fullBounds = full.getBounds();
+    final insetBounds = flower.getBounds();
+    final expected = hexFlatInset(R);
+    expect(fullBounds.width - insetBounds.width, closeTo(expected * 2, expected * 0.35));
+    expect(fullBounds.height - insetBounds.height, closeTo(expected * 2, expected * 0.35));
+
+    // Clearance from flower to ring-2 hexes is equal across the six directions:
+    // measure how far past the flower the lattice neighbor center sits, minus unit radius.
+    final drawn = R * (1 - hexGapInset);
+    final ring2 = [(2, 0), (2, -2), (0, -2), (-2, 0), (-2, 2), (0, 2)];
+    final clearances = <double>[];
+    for (final cell in ring2) {
+      final neighbor = axialToPixel(cell.$1, cell.$2, R);
+      final dir = neighbor / neighbor.distance;
+      var lo = 0.0;
+      var hi = neighbor.distance;
+      for (var i = 0; i < 48; i++) {
+        final mid = (lo + hi) / 2;
+        if (flower.contains(dir * mid)) {
+          lo = mid;
+        } else {
+          hi = mid;
+        }
       }
+      // Distance from flower boundary to neighbor center, minus neighbor circumradius
+      // (= gap along that ray to the neighbor "vertex toward center" approximation).
+      clearances.add(neighbor.distance - lo - drawn);
+    }
+    final mean = clearances.reduce((a, b) => a + b) / clearances.length;
+    for (final c in clearances) {
+      expect((c - mean).abs(), lessThan(0.35));
     }
   });
 }

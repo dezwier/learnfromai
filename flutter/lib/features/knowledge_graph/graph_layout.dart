@@ -74,7 +74,7 @@ class PlacedNode {
   final double y;
   final double width;
   final double height;
-  /// Unit hex circumradius used to draw this node (flower uses same unit).
+  /// Lattice unit circumradius (centers sit on the full grid; drawing insets).
   final double radius;
   /// Focus is the solid union of 7 unit hexes (no internal gaps).
   final bool isFlower;
@@ -82,10 +82,12 @@ class PlacedNode {
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
+  double get drawnRadius => radius * (1 - hexGapInset);
+
   bool contains(Offset point) {
     final local = point - center;
-    if (!isFlower) return pointInFlatHex(local, radius);
-    return pointInHexFlower(local, radius);
+    if (!isFlower) return pointInFlatHex(local, drawnRadius);
+    return pointInHexFlower(local, latticeSize: radius);
   }
 }
 
@@ -138,15 +140,166 @@ Path flatHexPath(double radius, {Offset center = Offset.zero}) {
   return path;
 }
 
-/// Solid union of center + 6 neighbors — one continuous focus region.
-Path hexFlowerPath(double unitRadius, {Offset center = Offset.zero}) {
-  Path? path;
-  for (final cell in flowerCells) {
-    final c = center + axialToPixel(cell.$1, cell.$2, unitRadius);
-    final hex = flatHexPath(unitRadius, center: c);
-    path = path == null ? hex : Path.combine(PathOperation.union, path, hex);
+/// Same distance a unit-hex flat retreats when radius *= (1 - hexGapInset).
+double hexFlatInset(double latticeSize) =>
+    (math.sqrt(3) / 2) * latticeSize * hexGapInset;
+
+Offset _snap(Offset p) => Offset(
+      (p.dx * 10000).round() / 10000,
+      (p.dy * 10000).round() / 10000,
+    );
+
+String _pointKey(Offset p) => '${p.dx},${p.dy}';
+
+/// Outer boundary of the 7-hex flower (18 verts), origin-centered.
+List<Offset> hexFlowerOutline(double R) {
+  final counts = <String, int>{};
+  final ends = <String, (Offset, Offset)>{};
+
+  String edgeKey(Offset a, Offset b) {
+    final ka = _pointKey(a);
+    final kb = _pointKey(b);
+    return ka.compareTo(kb) <= 0 ? '$ka|$kb' : '$kb|$ka';
   }
-  return path!;
+
+  for (final cell in flowerCells) {
+    final c = axialToPixel(cell.$1, cell.$2, R);
+    final verts = [
+      for (var i = 0; i < 6; i++)
+        _snap(Offset(
+          c.dx + R * math.cos(i * math.pi / 3),
+          c.dy + R * math.sin(i * math.pi / 3),
+        )),
+    ];
+    for (var i = 0; i < 6; i++) {
+      final a = verts[i];
+      final b = verts[(i + 1) % 6];
+      final k = edgeKey(a, b);
+      counts[k] = (counts[k] ?? 0) + 1;
+      ends[k] = (a, b);
+    }
+  }
+
+  final outlineEdges = [
+    for (final e in counts.entries)
+      if (e.value == 1) ends[e.key]!,
+  ];
+  if (outlineEdges.isEmpty) {
+    return const [Offset(1, 0), Offset(0.5, 0.866), Offset(-0.5, 0.866), Offset(-1, 0), Offset(-0.5, -0.866), Offset(0.5, -0.866)]
+        .map((o) => o * R)
+        .toList();
+  }
+
+  final adj = <String, List<Offset>>{};
+  for (final e in outlineEdges) {
+    adj.putIfAbsent(_pointKey(e.$1), () => []).add(e.$2);
+    adj.putIfAbsent(_pointKey(e.$2), () => []).add(e.$1);
+  }
+
+  final start = outlineEdges.first.$1;
+  final loop = <Offset>[start];
+  var prevKey = '';
+  var cur = start;
+  while (loop.length <= outlineEdges.length) {
+    final options = adj[_pointKey(cur)]!;
+    final next = options.firstWhere(
+      (p) => _pointKey(p) != prevKey,
+      orElse: () => options.first,
+    );
+    if (_pointKey(next) == _pointKey(start)) break;
+    prevKey = _pointKey(cur);
+    cur = next;
+    loop.add(cur);
+  }
+  return loop;
+}
+
+double _polygonWidth(List<Offset> verts) {
+  var minX = double.infinity;
+  var maxX = -double.infinity;
+  for (final v in verts) {
+    minX = math.min(minX, v.dx);
+    maxX = math.max(maxX, v.dx);
+  }
+  return maxX - minX;
+}
+
+List<Offset> _offsetPolygon(List<Offset> pts, double dist, {required bool leftNormal}) {
+  Offset normal(Offset from, Offset to) {
+    final dx = to.dx - from.dx;
+    final dy = to.dy - from.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-12) return Offset.zero;
+    final n = Offset(-dy / len, dx / len); // left of edge
+    return leftNormal ? n : -n;
+  }
+
+  Offset intersect(Offset p1, Offset d1, Offset p2, Offset d2) {
+    final cross = d1.dx * d2.dy - d1.dy * d2.dx;
+    if (cross.abs() < 1e-12) return Offset(p1.dx + d1.dx, p1.dy + d1.dy);
+    final t = ((p2.dx - p1.dx) * d2.dy - (p2.dy - p1.dy) * d2.dx) / cross;
+    return Offset(p1.dx + d1.dx * t, p1.dy + d1.dy * t);
+  }
+
+  final n = pts.length;
+  final out = <Offset>[];
+  for (var i = 0; i < n; i++) {
+    final prev = pts[(i - 1 + n) % n];
+    final cur = pts[i];
+    final next = pts[(i + 1) % n];
+    final n1 = normal(prev, cur);
+    final n2 = normal(cur, next);
+    final o1 = Offset(prev.dx + n1.dx * dist, prev.dy + n1.dy * dist);
+    final o2 = Offset(cur.dx + n2.dx * dist, cur.dy + n2.dy * dist);
+    out.add(intersect(o1, cur - prev, o2, next - cur));
+  }
+  return out;
+}
+
+/// Constant-distance inward inset for the flower outline.
+List<Offset> _insetPolygon(List<Offset> verts, double dist) {
+  if (verts.length < 3 || dist <= 0) return verts;
+  final pts = List<Offset>.of(verts);
+  final candidate = _offsetPolygon(pts, dist, leftNormal: true);
+  // Pick the offset that shrinks the shape (inward).
+  if (_polygonWidth(candidate) < _polygonWidth(pts)) return candidate;
+  return _offsetPolygon(pts, dist, leftNormal: false);
+}
+
+Path _pathFromVerts(List<Offset> verts, Offset center) {
+  final path = Path()..fillType = PathFillType.nonZero;
+  for (var i = 0; i < verts.length; i++) {
+    final p = verts[i] + center;
+    if (i == 0) {
+      path.moveTo(p.dx, p.dy);
+    } else {
+      path.lineTo(p.dx, p.dy);
+    }
+  }
+  path.close();
+  return path;
+}
+
+/// Solid 7-cell focus: full lattice outline, parallel-inset by the unit-hex flat
+/// inset so every side has the same strip as neighboring hexes.
+Path hexFlowerPath({
+  required double latticeSize,
+  Offset center = Offset.zero,
+}) {
+  final outline = hexFlowerOutline(latticeSize);
+  final inset = _insetPolygon(outline, hexFlatInset(latticeSize));
+  final path = _pathFromVerts(inset, center);
+  final ok = path.contains(center) && _polygonWidth(inset) < _polygonWidth(outline);
+  if (!ok) {
+    Path? solid;
+    for (final cell in flowerCells) {
+      final c = center + axialToPixel(cell.$1, cell.$2, latticeSize);
+      final hex = flatHexPath(latticeSize * 1.02, center: c);
+      solid = solid == null ? hex : Path.combine(PathOperation.union, solid, hex);
+    }
+    return solid!..fillType = PathFillType.nonZero;
+  }
+  return path;
 }
 
 bool pointInFlatHex(Offset local, double radius) {
@@ -156,12 +309,8 @@ bool pointInFlatHex(Offset local, double radius) {
   return radius * math.sqrt(3) - math.sqrt(3) * ax - ay >= -1e-6;
 }
 
-bool pointInHexFlower(Offset local, double unitRadius) {
-  for (final cell in flowerCells) {
-    final c = axialToPixel(cell.$1, cell.$2, unitRadius);
-    if (pointInFlatHex(local - c, unitRadius)) return true;
-  }
-  return false;
+bool pointInHexFlower(Offset local, {required double latticeSize}) {
+  return hexFlowerPath(latticeSize: latticeSize).contains(local);
 }
 
 Size flatHexBounds(double radius) => Size(radius * 2, radius * math.sqrt(3));
@@ -268,16 +417,15 @@ GraphLayout layoutGraph(
   final scale = math.min((width - 2 * pad) / contentW, (height - 2 * pad) / contentH);
   final ox = (width - contentW * scale) / 2 - minX * scale;
   final oy = (height - contentH * scale) / 2 - minY * scale;
-  final unit = scale * (1 - hexGapInset);
 
   final placed = <PlacedNode>[];
   for (final c in centers) {
     final cx = c.$2.dx * scale + ox;
     final cy = c.$2.dy * scale + oy;
     if (c.$3) {
-      placed.add(_flower(c.$1, cx: cx, cy: cy, unitRadius: unit));
+      placed.add(_flower(c.$1, cx: cx, cy: cy, latticeSize: scale));
     } else {
-      placed.add(_hex(c.$1, cx: cx, cy: cy, radius: unit));
+      placed.add(_hex(c.$1, cx: cx, cy: cy, radius: scale));
     }
   }
 
@@ -376,8 +524,8 @@ PlacedNode _hex(GraphNode node, {required double cx, required double cy, require
   );
 }
 
-PlacedNode _flower(GraphNode node, {required double cx, required double cy, required double unitRadius}) {
-  final bounds = hexFlowerBounds(unitRadius);
+PlacedNode _flower(GraphNode node, {required double cx, required double cy, required double latticeSize}) {
+  final bounds = hexFlowerBounds(latticeSize);
   return PlacedNode(
     id: node.id,
     title: node.title,
@@ -386,7 +534,7 @@ PlacedNode _flower(GraphNode node, {required double cx, required double cy, requ
     kind: node.kind,
     role: node.role,
     description: node.description,
-    radius: unitRadius,
+    radius: latticeSize,
     isFlower: true,
     x: cx - bounds.width / 2,
     y: cy - bounds.height / 2,
@@ -426,8 +574,8 @@ class HexagonBorder extends ShapeBorder {
 
   @override
   Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    final radius = math.min(rect.width / 2, rect.height / math.sqrt(3));
-    return flatHexPath(radius, center: rect.center);
+    final lattice = math.min(rect.width / 2, rect.height / math.sqrt(3));
+    return flatHexPath(lattice * (1 - hexGapInset), center: rect.center);
   }
 
   @override
@@ -449,8 +597,8 @@ class HexFlowerBorder extends ShapeBorder {
 
   @override
   Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    final unit = math.min(rect.width / 5, rect.height / (3 * math.sqrt(3)));
-    return hexFlowerPath(unit, center: rect.center);
+    final lattice = math.min(rect.width / 5, rect.height / (3 * math.sqrt(3)));
+    return hexFlowerPath(latticeSize: lattice, center: rect.center);
   }
 
   @override

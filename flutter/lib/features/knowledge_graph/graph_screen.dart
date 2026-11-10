@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -454,7 +456,57 @@ class _NodeCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final fill = pending ? const Color(0xFFDDE7F4) : roleFill(node.role, scheme);
     final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
-    final ShapeBorder shape = node.isFlower ? const HexFlowerBorder() : const HexagonBorder();
+    if (node.isFlower) {
+      return GestureDetector(
+        onTap: onTap,
+        child: CustomPaint(
+          painter: _HexFlowerPainter(color: fill),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: node.radius * 1.15,
+              vertical: node.radius * 0.9,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  node.title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: (node.radius * 0.48).clamp(17.0, 26.0),
+                    height: 1.1,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                if (showDescription) ...[
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: Text(
+                      node.description!.trim(),
+                      textAlign: TextAlign.center,
+                      maxLines: 7,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: (node.radius * 0.26).clamp(12.0, 15.0),
+                        height: 1.3,
+                        fontWeight: FontWeight.w400,
+                        color: scheme.onSurface.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    const shape = HexagonBorder();
     return Material(
       color: fill,
       shape: shape,
@@ -464,61 +516,50 @@ class _NodeCard extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: node.isFlower ? node.radius * 1.1 : node.radius * 0.22,
-            vertical: node.isFlower ? node.radius * 0.85 : node.radius * 0.18,
+            horizontal: node.radius * 0.22,
+            vertical: node.radius * 0.18,
           ),
-          child: node.isFlower
-              ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      node.title,
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: (node.radius * 0.55).clamp(18.0, 28.0),
-                        height: 1.15,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    if (showDescription) ...[
-                      const SizedBox(height: 10),
-                      Flexible(
-                        child: Text(
-                          node.description!.trim(),
-                          textAlign: TextAlign.center,
-                          maxLines: 8,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: (node.radius * 0.28).clamp(12.0, 16.0),
-                            height: 1.3,
-                            fontWeight: FontWeight.w400,
-                            color: scheme.onSurface.withValues(alpha: 0.72),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                )
-              : Center(
-                  child: Text(
-                    node.title,
-                    textAlign: TextAlign.center,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: (node.radius * 0.28).clamp(11.0, 15.0),
-                      height: 1.2,
-                      fontWeight: FontWeight.w500,
-                      color: scheme.onSurface.withValues(alpha: 0.88),
-                    ),
-                  ),
-                ),
+          child: Center(
+            child: Text(
+              node.title,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: (node.radius * 0.28).clamp(11.0, 15.0),
+                height: 1.2,
+                fontWeight: FontWeight.w500,
+                color: scheme.onSurface.withValues(alpha: 0.88),
+              ),
+            ),
+          ),
         ),
       ),
     );
+  }
+}
+
+class _HexFlowerPainter extends CustomPainter {
+  _HexFlowerPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final lattice = math.min(size.width / 5, size.height / (3 * math.sqrt(3)));
+    final path = hexFlowerPath(
+      latticeSize: lattice,
+      center: Offset(size.width / 2, size.height / 2),
+    );
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HexFlowerPainter oldDelegate) => oldDelegate.color != color;
+
+  @override
+  bool hitTest(Offset position) {
+    // Size is unknown here; defer to parent GestureDetector bounds.
+    return true;
   }
 }

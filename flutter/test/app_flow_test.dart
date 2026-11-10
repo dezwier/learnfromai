@@ -51,7 +51,7 @@ void main() {
     expect(find.text('Explore the graph'), findsOneWidget);
   });
 
-  testWidgets('graph shows parents, siblings, children, related, and legend', (tester) async {
+  testWidgets('graph shows parents, siblings, children, related', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
       loader: (path) async => _compact(),
@@ -63,7 +63,6 @@ void main() {
     expect(find.text('Mammals'), findsOneWidget);
     expect(find.text('Mesozoic'), findsOneWidget);
     expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
-    expect(find.text('Sibling'), findsOneWidget);
     expect(find.byTooltip('Search'), findsOneWidget);
   });
 
