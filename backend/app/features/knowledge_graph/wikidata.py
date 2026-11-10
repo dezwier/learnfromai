@@ -186,10 +186,10 @@ class WikidataClient:
         return found
 
     def children(self, qid: int) -> list[int]:
+        # Property paths only. A VALUES ?rel pattern returns unrelated property rows.
         query = (
             "SELECT DISTINCT ?child WHERE {"
-            " VALUES ?rel { wdt:P279 wdt:P171 }"
-            f" ?child ?rel wd:Q{qid} ."
+            f" ?child wdt:P279|wdt:P171 wd:Q{qid} ."
             " }"
             f" LIMIT {_CHILD_LIMIT}"
         )
@@ -201,7 +201,7 @@ class WikidataClient:
                 continue
             child = row.get("child") or {}
             qid_value = parse_qid(child.get("value") if isinstance(child, dict) else None)
-            if qid_value is not None:
+            if qid_value is not None and qid_value != qid:
                 qids.append(qid_value)
         return list(dict.fromkeys(qids))
 
@@ -246,9 +246,8 @@ def parse_entity(raw: object) -> WikiEntity | None:
 def preferred_parent_qids(entity: WikiEntity) -> list[int]:
     if entity.qid in DOMAIN_ROOT_QIDS:
         return []
-    if entity.parent_taxon:
-        return [qid for qid in entity.parent_taxon if qid != entity.qid]
-    return [qid for qid in entity.subclass_of if qid != entity.qid]
+    # Consider both class and taxon parents. An obscure P171 should not hide Reptilia.
+    return [qid for qid in (*entity.subclass_of, *entity.parent_taxon) if qid != entity.qid]
 
 
 def pick_parent(entity: WikiEntity, parents: list[WikiEntity]) -> WikiEntity | None:
@@ -258,9 +257,17 @@ def pick_parent(entity: WikiEntity, parents: list[WikiEntity]) -> WikiEntity | N
     preferred = set(preferred_parent_qids(entity))
     if preferred:
         usable = [item for item in usable if item.qid in preferred] or usable
-    roots = [item for item in usable if item.qid in DOMAIN_ROOT_QIDS]
-    pool = roots or usable
-    return max(pool, key=lambda item: (item.qid in DOMAIN_ROOT_QIDS, item.sitelinks, -item.qid))
+    subclass_ids = set(entity.subclass_of)
+    popular = [item for item in usable if item.sitelinks >= 40]
+    pool = popular or usable
+    # Prefer a well-known class parent (reptile) over a rare taxon (Dracohors).
+    class_parents = [item for item in pool if item.qid in subclass_ids]
+    if class_parents:
+        # More specific first: among major classes, the smaller sitelink count wins.
+        return min(class_parents, key=lambda item: (item.sitelinks, item.qid))
+    roots = [item for item in pool if item.qid in DOMAIN_ROOT_QIDS]
+    chosen = roots or pool
+    return max(chosen, key=lambda item: (item.sitelinks, -item.qid))
 
 
 def _label(raw: dict) -> str | None:

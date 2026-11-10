@@ -28,6 +28,7 @@ GENERA = 8
 TOYS = 11
 COLORS = 10
 LIZARDS = 12
+DRACOHORS = 99
 
 
 def _item(qid, title, *, subclass=(), taxon=(), instance=(), sitelinks=1, description=None):
@@ -89,15 +90,23 @@ def _dinosaurs():
     return FakeWikidata(
         [
             _item(LIFE, "organism", sitelinks=40),
-            _item(ANIMALS, "animal", taxon=(LIFE,), sitelinks=30),
-            _item(REPTILES, "reptile", taxon=(ANIMALS,), sitelinks=20),
-            _item(DINOSAURS, "dinosaur", taxon=(REPTILES,), subclass=(COLORS,), sitelinks=50, description="clade of reptiles"),
+            _item(ANIMALS, "animal", taxon=(LIFE,), subclass=(LIFE,), sitelinks=80),
+            _item(REPTILES, "reptile", taxon=(ANIMALS,), subclass=(ANIMALS,), sitelinks=60),
+            _item(
+                DINOSAURS,
+                "dinosaur",
+                taxon=(DRACOHORS,),
+                subclass=(REPTILES, ANIMALS),
+                sitelinks=50,
+                description="clade of reptiles",
+            ),
+            _item(DRACOHORS, "Dracohors", taxon=(ANIMALS,), sitelinks=5),
             _item(SAURISCHIA, "Saurischia", taxon=(DINOSAURS,), sitelinks=12),
             _item(ORNITHISCHIA, "Ornithischia", taxon=(DINOSAURS,), sitelinks=11),
             _item(GENERA, "dinosaur genera", taxon=(SAURISCHIA,), sitelinks=4),
             _item(TOYS, "dinosaur toys", subclass=(DINOSAURS,), sitelinks=2),
             _item(COLORS, "dinosaur colors", subclass=(DINOSAURS,), sitelinks=2),
-            _item(LIZARDS, "lizard", taxon=(REPTILES,), sitelinks=8),
+            _item(LIZARDS, "lizard", taxon=(REPTILES,), subclass=(REPTILES,), sitelinks=8),
             _item(4167836, "Wikimedia category", instance=(4167836,), sitelinks=0),
         ],
         children={
@@ -107,6 +116,7 @@ def _dinosaurs():
             DINOSAURS: [SAURISCHIA, ORNITHISCHIA, 4167836],
             SAURISCHIA: [GENERA],
             ORNITHISCHIA: [],
+            DRACOHORS: [DINOSAURS],
         },
     )
 
