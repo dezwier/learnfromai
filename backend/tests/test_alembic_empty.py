@@ -40,7 +40,10 @@ def test_alembic_upgrade_on_empty_database():
     assert "extend_requests" in tables
     assert "knowledge_categories" in tables
     assert "knowledge_category_edges" in tables
+    assert "knowledge_items" in tables
+    assert "knowledge_item_edges" in tables
     assert "knowledge_graph_requests" in tables
+    assert "knowledge_graph_request_nodes" in tables
     assert "users" in tables
     assert "generation_jobs" in tables
     assert "learning_goals" not in tables

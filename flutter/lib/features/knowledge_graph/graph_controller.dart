@@ -109,8 +109,8 @@ class GraphController extends ChangeNotifier {
       for (final item in raw)
         if (item is Map)
           CategoryChoice(
-            id: (item['wikipedia_page_id'] as num).toInt(),
-            title: item['title']?.toString() ?? 'Category',
+            id: ((item['wikidata_qid'] ?? item['id']) as num).toInt(),
+            title: item['title']?.toString() ?? 'Topic',
           ),
     ];
   }

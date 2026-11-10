@@ -1,68 +1,53 @@
 import 'package:adaptive_mastery/features/knowledge_graph/graph_layout.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('parents sit above the focus and children sit below', () {
-    final layout = layoutHierarchy(
-      const [
-        HierarchyNode(id: 1, title: 'Paleontology', depth: -1),
-        HierarchyNode(id: 2, title: 'Dinosaurs', depth: 0),
-        HierarchyNode(id: 3, title: 'Saurischia', depth: 1),
-        HierarchyNode(id: 4, title: 'Ornithischia', depth: 1),
-      ],
-      const [
-        HierarchyEdge(source: 1, target: 2),
-        HierarchyEdge(source: 2, target: 3),
-        HierarchyEdge(source: 2, target: 4),
-      ],
-    );
-    final point = {for (final node in layout.nodes) node.id: node};
+  const nodes = [
+    GraphNode(id: 1, title: 'reptile', depth: -1, distance: 1),
+    GraphNode(id: 2, title: 'dinosaur', depth: 0, distance: 0),
+    GraphNode(id: 3, title: 'Saurischia', depth: 1, distance: 1),
+    GraphNode(id: 4, title: 'Ornithischia', depth: 1, distance: 1),
+  ];
+  const edges = [
+    GraphEdge(source: 1, target: 2),
+    GraphEdge(source: 2, target: 3),
+    GraphEdge(source: 2, target: 4),
+  ];
 
-    expect(point[1]!.dy, lessThan(point[2]!.dy));
-    expect(point[2]!.dy, lessThan(point[3]!.dy));
-    expect(point[3]!.dy, point[4]!.dy);
-    expect(point[3]!.dx, isNot(point[4]!.dx));
-    final focusCenter = point[2]!.dx + hierarchyNodeWidth / 2;
-    final left = point[3]!.dx < point[4]!.dx ? point[3]!.dx : point[4]!.dx;
-    final right = (point[3]!.dx > point[4]!.dx ? point[3]!.dx : point[4]!.dx) + hierarchyNodeWidth;
-    expect(focusCenter, closeTo((left + right) / 2, 1));
-    expect(layout.edges, hasLength(3));
+  test('zooming in splits a parent hex into its children', () {
+    final merged = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 0);
+    final split = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 1);
+    final mergedIds = merged.cells.map((cell) => cell.id).toSet();
+    final splitIds = split.cells.map((cell) => cell.id).toSet();
+
+    expect(mergedIds, {2});
+    expect(mergedIds, isNot(contains(3)));
+    expect(splitIds, containsAll({3, 4}));
+    expect(splitIds, isNot(contains(2)));
+    expect(split.cells.length, greaterThan(merged.cells.length));
   });
 
-  test('two parents share the row above the focus', () {
-    final layout = layoutHierarchy(
-      const [
-        HierarchyNode(id: 1, title: 'Biology', depth: -1),
-        HierarchyNode(id: 2, title: 'Paleontology', depth: -1),
-        HierarchyNode(id: 3, title: 'Dinosaurs', depth: 0),
-      ],
-      const [
-        HierarchyEdge(source: 1, target: 3),
-        HierarchyEdge(source: 2, target: 3),
-      ],
-    );
-    final point = {for (final node in layout.nodes) node.id: node};
-
-    expect(point[1]!.dy, point[2]!.dy);
-    expect(point[1]!.dy, lessThan(point[3]!.dy));
-    expect(layout.edges, hasLength(2));
+  test('zooming out merges children back into the parent', () {
+    final split = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 1);
+    final merged = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 0);
+    expect(split.cells.map((cell) => cell.id), containsAll({3, 4}));
+    expect(merged.cells.single.id, 2);
+    expect(merged.cells.single.radius, greaterThan(split.cells.first.radius));
   });
 
-  test('show more keeps extra children out until the parent is expanded', () {
-    final nodes = [
-      const HierarchyNode(id: 1, title: 'Dinosaurs', depth: 0),
-      for (var index = 0; index < 7; index++) HierarchyNode(id: 10 + index, title: 'Child $index', depth: 1),
-    ];
-    final edges = [for (var index = 0; index < 7; index++) HierarchyEdge(source: 1, target: 10 + index)];
-    final collapsed = layoutHierarchy(nodes, edges);
-    final expanded = layoutHierarchy(nodes, edges, expanded: {1});
+  test('labels stay a fixed size and hide when a hex is too small', () {
+    final roomy = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 1, scale: 3, rootRadius: 240);
+    final cramped = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 1, scale: 0.2, rootRadius: 40);
 
-    expect(collapsed.nodes, hasLength(1 + hierarchyChildLimit));
-    expect(collapsed.anchors, hasLength(1));
-    expect(collapsed.anchors.single.hidden, 1);
-    expect(collapsed.nodes.map((node) => node.id), isNot(contains(16)));
-    expect(expanded.nodes, hasLength(8));
-    expect(expanded.anchors, isEmpty);
-    expect(expanded.edges, hasLength(7));
+    expect(roomy.cells.any((cell) => cell.showLabel), isTrue);
+    expect(cramped.cells.every((cell) => !cell.showLabel), isTrue);
+    expect(hexLabelFontSize, 13);
+  });
+
+  test('hit testing returns the smallest hex under a point', () {
+    final layout = layoutHexMap(nodes, edges, focusId: 2, splitLevels: 1);
+    final child = layout.cells.firstWhere((cell) => cell.id == 3);
+    expect(hitTestHex(layout, Offset(child.x, child.y)), 3);
   });
 }

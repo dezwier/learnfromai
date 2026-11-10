@@ -2,10 +2,12 @@
 
 from app.features.accounts.models import User
 from app.features.graph_extend.models import ExtendRequest
-from app.features.knowledge_graph.category_models import (
-    KnowledgeCategory,
-    KnowledgeCategoryEdge,
+from app.features.knowledge_graph.category_models import KnowledgeCategory, KnowledgeCategoryEdge
+from app.features.knowledge_graph.item_models import (
     KnowledgeGraphRequest,
+    KnowledgeGraphRequestNode,
+    KnowledgeItem,
+    KnowledgeItemEdge,
 )
 from app.features.knowledge_graph.models import Concept, Edge, Graph
 from app.features.platform.models import GenerationJob, LlmUsage, WorkerHeartbeat
@@ -23,5 +25,8 @@ def register_models() -> None:
         ExtendRequest,
         KnowledgeCategory,
         KnowledgeCategoryEdge,
+        KnowledgeItem,
+        KnowledgeItemEdge,
         KnowledgeGraphRequest,
+        KnowledgeGraphRequestNode,
     )

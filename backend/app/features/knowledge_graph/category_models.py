@@ -6,8 +6,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import BigInteger, Column, DateTime
 from sqlmodel import Field, SQLModel
 
-from app.core.time import utcnow
-
 
 class KnowledgeCategory(SQLModel, table=True):
     """One Wikipedia category, shared by every topic that reaches it."""
@@ -37,14 +35,3 @@ class KnowledgeCategoryEdge(SQLModel, table=True):
 
     parent_category_id: UUID = Field(foreign_key="knowledge_categories.id", primary_key=True)
     child_category_id: UUID = Field(foreign_key="knowledge_categories.id", primary_key=True)
-
-
-class KnowledgeGraphRequest(SQLModel, table=True):
-    """A signed-in user focused the shared graph on one category."""
-
-    __tablename__ = "knowledge_graph_requests"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="users.id", index=True)
-    focus_category_id: UUID = Field(foreign_key="knowledge_categories.id", index=True)
-    created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))

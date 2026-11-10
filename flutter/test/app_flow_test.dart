@@ -35,31 +35,18 @@ void main() {
   testWidgets('an empty graph asks for a topic', (tester) async {
     await tester.pumpWidget(_app(_signedIn(), GraphController()));
     await tester.pumpAndSettle();
-    expect(find.text('Search a Wikipedia category'), findsOneWidget);
+    expect(find.text('Explore the graph'), findsOneWidget);
     expect(find.text('Extend the graph'), findsNothing);
     expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('the hierarchy shows parents above the selected category', (tester) async {
-    final graph = GraphController()..categoryGraph = _dinosaurs();
+  testWidgets('the hex map shows children of the focus', (tester) async {
+    final graph = GraphController()..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    expect(find.text('Paleontology'), findsOneWidget);
-    expect(find.text('Dinosaurs'), findsOneWidget);
     expect(find.text('Saurischia'), findsOneWidget);
-    expect(find.text('Zebra'), findsNothing);
-    expect(find.text('Show more'), findsOneWidget);
-
-    final parent = tester.getTopLeft(find.text('Paleontology'));
-    final focus = tester.getTopLeft(find.text('Dinosaurs'));
-    final child = tester.getTopLeft(find.text('Saurischia'));
-    expect(parent.dy, lessThan(focus.dy));
-    expect(focus.dy, lessThan(child.dy));
-
-    await tester.tap(find.text('Show more'));
-    await tester.pumpAndSettle();
-    expect(find.text('Zebra'), findsOneWidget);
+    expect(find.text('Show more'), findsNothing);
   });
 
   testWidgets('tapping a category focuses it and back returns', (tester) async {
@@ -79,19 +66,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(graph.focusId, 3);
     expect(find.text('Genera'), findsOneWidget);
-    expect(find.byTooltip('Previous category'), findsOneWidget);
+    expect(find.byTooltip('Previous topic'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Previous category'));
+    await tester.tap(find.byTooltip('Previous topic'));
     await tester.pumpAndSettle();
     expect(graph.focusId, 2);
-    expect(find.text('Paleontology'), findsOneWidget);
+    expect(find.text('Saurischia'), findsOneWidget);
   });
 
   testWidgets('ambiguous results can be chosen', (tester) async {
     final graph = GraphController(
       loader: (path) async {
         expect(path, contains('category_id=6'));
-        return _dinosaurs();
+        return _compact();
       },
     )..candidates = const [
         CategoryChoice(id: 6, title: 'Dinosaur toys'),
@@ -99,13 +86,13 @@ void main() {
       ];
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    expect(find.text('Choose a category'), findsOneWidget);
+    expect(find.text('Choose a topic'), findsOneWidget);
     expect(find.text('Dinosaur toys'), findsOneWidget);
 
     await tester.tap(find.text('Dinosaur toys'));
     await tester.pumpAndSettle();
     expect(graph.focusId, 2);
-    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Saurischia'), findsOneWidget);
   });
 
   testWidgets('expired session surfaces the auth error', (tester) async {

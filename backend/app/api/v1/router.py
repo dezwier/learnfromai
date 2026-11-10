@@ -11,7 +11,7 @@ from app.core.errors import AppError, forbidden, not_found
 from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
-from app.features.knowledge_graph.categories import load_knowledge_graph
+from app.features.knowledge_graph.items import load_knowledge_graph
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.platform.models import GenerationJob
@@ -93,7 +93,7 @@ def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Se
     _ = (body, user, session)
     raise AppError(
         "GONE",
-        "Graph generation has been removed. Search a Wikipedia category instead.",
+        "Graph generation has been removed. Search a topic instead.",
         410,
     )
 

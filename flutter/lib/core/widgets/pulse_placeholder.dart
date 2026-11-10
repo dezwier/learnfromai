@@ -6,6 +6,8 @@ class PulsePlaceholder extends StatefulWidget {
 
   const PulsePlaceholder.image({super.key, this.borderRadius});
 
+  const PulsePlaceholder.map({super.key, this.borderRadius});
+
   final BorderRadius? borderRadius;
 
   @override

@@ -1,214 +1,231 @@
-/// Hierarchical placement: parents above the focus, children below.
-class HierarchyNode {
-  const HierarchyNode({required this.id, required this.title, required this.depth});
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+class GraphNode {
+  const GraphNode({required this.id, required this.title, required this.depth, this.distance = 0});
 
   final int id;
   final String title;
   final int depth;
+  final int distance;
 }
 
-class HierarchyEdge {
-  const HierarchyEdge({required this.source, required this.target});
+class GraphEdge {
+  const GraphEdge({required this.source, required this.target});
 
   final int source;
   final int target;
 }
 
-class PlacedCategory {
-  const PlacedCategory({required this.id, required this.title, required this.depth, required this.dx, required this.dy});
+class PlacedHex {
+  const PlacedHex({
+    required this.id,
+    required this.title,
+    required this.depth,
+    required this.distance,
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.showLabel,
+  });
 
   final int id;
   final String title;
   final int depth;
-  final double dx;
-  final double dy;
+  final int distance;
+  final double x;
+  final double y;
+  final double radius;
+  final bool showLabel;
+
+  bool contains(Offset point) {
+    final dx = point.dx - x;
+    final dy = point.dy - y;
+    return dx * dx + dy * dy <= radius * radius;
+  }
 }
 
-class ShowMoreAnchor {
-  const ShowMoreAnchor({required this.parentId, required this.dx, required this.dy, required this.hidden});
+class HexLayout {
+  const HexLayout({required this.cells, required this.width, required this.height});
 
-  final int parentId;
-  final double dx;
-  final double dy;
-  final int hidden;
-}
-
-class HierarchyLayout {
-  const HierarchyLayout({
-    required this.nodes,
-    required this.edges,
-    required this.anchors,
-    required this.width,
-    required this.height,
-  });
-
-  final List<PlacedCategory> nodes;
-  final List<HierarchyEdge> edges;
-  final List<ShowMoreAnchor> anchors;
+  final List<PlacedHex> cells;
   final double width;
   final double height;
 }
 
-const hierarchyNodeWidth = 148.0;
-const hierarchyNodeHeight = 64.0;
-const hierarchyChildLimit = 6;
+const hexLabelFontSize = 13.0;
+const hexRootRadius = 180.0;
 
-const _gapX = 20.0;
-const _gapY = 56.0;
-const _margin = 28.0;
+int splitLevelsFor(double scale) {
+  if (scale < 0.8) return 0;
+  if (scale > 1.6) return 2;
+  return 1;
+}
 
-HierarchyLayout layoutHierarchy(
-  List<HierarchyNode> nodes,
-  List<HierarchyEdge> edges, {
-  Set<int> expanded = const {},
-  int childLimit = hierarchyChildLimit,
+List<(int, int)> flowerAxial(int count, {bool includeCenter = false}) {
+  if (count <= 0) return const [];
+  const dirs = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
+  final result = <(int, int)>[];
+  if (includeCenter || count == 1) {
+    result.add((0, 0));
+    if (result.length >= count) return result;
+  }
+  var ring = 1;
+  while (result.length < count) {
+    var q = dirs[4].$1 * ring;
+    var r = dirs[4].$2 * ring;
+    for (var side = 0; side < 6; side++) {
+      for (var step = 0; step < ring; step++) {
+        result.add((q, r));
+        if (result.length >= count) return result;
+        q += dirs[side].$1;
+        r += dirs[side].$2;
+      }
+    }
+    ring += 1;
+  }
+  return result;
+}
+
+int ringsFor(int count) {
+  if (count <= 1) return 0;
+  var ring = 1;
+  var capacity = 6;
+  while (capacity < count) {
+    ring += 1;
+    capacity += 6 * ring;
+  }
+  return ring;
+}
+
+Offset axialToPixel(int q, int r, double hexRadius) {
+  final width = math.sqrt(3) * hexRadius;
+  final height = 1.5 * hexRadius;
+  return Offset(width * (q + r / 2), height * r);
+}
+
+double estimateLabelWidth(String title, double fontSize) => title.length * fontSize * 0.62;
+
+class _RawHex {
+  const _RawHex(this.node, this.center, this.radius);
+
+  final GraphNode node;
+  final Offset center;
+  final double radius;
+}
+
+HexLayout layoutHexMap(
+  List<GraphNode> nodes,
+  List<GraphEdge> edges, {
+  required int focusId,
+  int? splitLevels,
+  double rootRadius = hexRootRadius,
+  double scale = 1,
+  double fontSize = hexLabelFontSize,
 }) {
   if (nodes.isEmpty) {
-    return const HierarchyLayout(nodes: [], edges: [], anchors: [], width: 0, height: 0);
+    return const HexLayout(cells: [], width: 0, height: 0);
   }
   final byId = {for (final node in nodes) node.id: node};
-  final children = <int, List<HierarchyNode>>{};
+  final children = <int, List<GraphNode>>{};
   for (final edge in edges) {
     final parent = byId[edge.source];
     final child = byId[edge.target];
-    if (parent == null || child == null || child.depth != parent.depth + 1) continue;
+    if (parent == null || child == null) continue;
     children.putIfAbsent(parent.id, () => []).add(child);
   }
   for (final list in children.values) {
-    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    list.sort((a, b) => a.id.compareTo(b.id));
   }
+  final levels = splitLevels ?? splitLevelsFor(scale);
+  final focus = byId[focusId] ?? nodes.first;
 
-  final minDepth = nodes.map((node) => node.depth).reduce((a, b) => a < b ? a : b);
-  final maxDepth = nodes.map((node) => node.depth).reduce((a, b) => a > b ? a : b);
-  final visible = <int>{};
-  for (var depth = minDepth; depth <= maxDepth; depth++) {
-    for (final node in nodes.where((item) => item.depth == depth)) {
-      if (depth <= 0) {
-        visible.add(node.id);
-        continue;
-      }
-      final parents = edges.where((edge) => edge.target == node.id && visible.contains(edge.source));
-      for (final edge in parents) {
-        final siblings = children[edge.source] ?? const <HierarchyNode>[];
-        final index = siblings.indexWhere((sibling) => sibling.id == node.id);
-        if (index != -1 && (expanded.contains(edge.source) || index < childLimit)) {
-          visible.add(node.id);
-          break;
-        }
-      }
+  final placed = <_RawHex>[];
+  void place(GraphNode node, Offset center, double radius, int remaining) {
+    final kids = [...(children[node.id] ?? const <GraphNode>[])];
+    if (kids.isEmpty || remaining <= 0) {
+      placed.add(_RawHex(node, center, radius));
+      return;
+    }
+    kids.sort((a, b) {
+      if (a.id == focusId) return -1;
+      if (b.id == focusId) return 1;
+      return a.id.compareTo(b.id);
+    });
+    final coords = flowerAxial(kids.length, includeCenter: kids.first.id == focusId);
+    final rings = math.max(1, ringsFor(kids.length));
+    final childRadius = radius / (2 * rings + 1);
+    for (var index = 0; index < kids.length; index++) {
+      final pixel = axialToPixel(coords[index].$1, coords[index].$2, childRadius);
+      place(kids[index], center + pixel, childRadius, remaining - 1);
     }
   }
 
-  final layers = <int, List<HierarchyNode>>{};
-  for (final node in nodes) {
-    if (!visible.contains(node.id)) continue;
-    layers.putIfAbsent(node.depth, () => []).add(node);
-  }
-  for (final list in layers.values) {
-    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-  }
-  for (var pass = 0; pass < 4; pass++) {
-    for (var depth = minDepth + 1; depth <= maxDepth; depth++) {
-      _orderLayer(layers, edges, byId, depth, towardParent: true);
-    }
-    for (var depth = maxDepth - 1; depth >= minDepth; depth--) {
-      _orderLayer(layers, edges, byId, depth, towardParent: false);
-    }
+  if (levels <= 0) {
+    place(focus, Offset.zero, rootRadius, 0);
+  } else {
+    place(focus, Offset.zero, rootRadius, levels);
   }
 
-  var widest = 0.0;
-  final widths = <int, double>{};
-  for (final entry in layers.entries) {
-    final count = entry.value.length;
-    final width = count * hierarchyNodeWidth + (count - 1) * _gapX;
-    widths[entry.key] = width;
-    if (width > widest) widest = width;
+  if (placed.isEmpty) {
+    return const HexLayout(cells: [], width: 0, height: 0);
   }
-  final placed = <PlacedCategory>[];
-  for (final depth in layers.keys.toList()..sort()) {
-    final row = layers[depth]!;
-    final rowWidth = widths[depth]!;
-    final left = _margin + (widest - rowWidth) / 2;
-    final top = _margin + (depth - minDepth) * (hierarchyNodeHeight + _gapY);
-    for (var index = 0; index < row.length; index++) {
-      final node = row[index];
-      placed.add(
-        PlacedCategory(
-          id: node.id,
-          title: node.title,
-          depth: node.depth,
-          dx: left + index * (hierarchyNodeWidth + _gapX),
-          dy: top,
-        ),
-      );
-    }
+  var minX = placed.first.center.dx - placed.first.radius;
+  var maxX = placed.first.center.dx + placed.first.radius;
+  var minY = placed.first.center.dy - placed.first.radius;
+  var maxY = placed.first.center.dy + placed.first.radius;
+  for (final cell in placed) {
+    minX = math.min(minX, cell.center.dx - cell.radius);
+    maxX = math.max(maxX, cell.center.dx + cell.radius);
+    minY = math.min(minY, cell.center.dy - cell.radius);
+    maxY = math.max(maxY, cell.center.dy + cell.radius);
   }
-
-  final anchors = <ShowMoreAnchor>[];
-  for (final node in placed) {
-    final kids = children[node.id] ?? const <HierarchyNode>[];
-    if (kids.length <= childLimit || expanded.contains(node.id)) continue;
-    anchors.add(
-      ShowMoreAnchor(
-        parentId: node.id,
-        dx: node.dx + hierarchyNodeWidth / 2 - 40,
-        dy: node.dy + hierarchyNodeHeight + 6,
-        hidden: kids.length - childLimit,
+  const margin = 28.0;
+  final shift = Offset(margin - minX, margin - minY);
+  final ranked = [...placed]
+    ..sort((a, b) {
+      final byDistance = a.node.distance.compareTo(b.node.distance);
+      if (byDistance != 0) return byDistance;
+      return b.radius.compareTo(a.radius);
+    });
+  final occupied = <Rect>[];
+  final labeled = <int>{};
+  for (final cell in ranked) {
+    final width = estimateLabelWidth(cell.node.title, fontSize);
+    final hexWidth = 2 * cell.radius * scale;
+    if (hexWidth < width + 12) continue;
+    final center = cell.center + shift;
+    final rect = Rect.fromCenter(center: center, width: width, height: fontSize + 6);
+    if (occupied.any((other) => other.overlaps(rect))) continue;
+    occupied.add(rect);
+    labeled.add(cell.node.id);
+  }
+  final cells = [
+    for (final cell in placed)
+      PlacedHex(
+        id: cell.node.id,
+        title: cell.node.title,
+        depth: cell.node.depth,
+        distance: cell.node.distance,
+        x: cell.center.dx + shift.dx,
+        y: cell.center.dy + shift.dy,
+        radius: cell.radius,
+        showLabel: labeled.contains(cell.node.id),
       ),
-    );
-  }
-  final visibleIds = {for (final node in placed) node.id};
-  final visibleEdges = [
-    for (final edge in edges)
-      if (visibleIds.contains(edge.source) && visibleIds.contains(edge.target)) edge,
   ];
-  var height = placed.isEmpty
-      ? 0.0
-      : placed.map((node) => node.dy).reduce((a, b) => a > b ? a : b) + hierarchyNodeHeight + _margin;
-  for (final anchor in anchors) {
-    final bottom = anchor.dy + 36;
-    if (bottom > height) height = bottom;
-  }
-  return HierarchyLayout(
-    nodes: placed,
-    edges: visibleEdges,
-    anchors: anchors,
-    width: widest + _margin * 2,
-    height: height,
+  return HexLayout(
+    cells: cells,
+    width: maxX - minX + margin * 2,
+    height: maxY - minY + margin * 2,
   );
 }
 
-void _orderLayer(
-  Map<int, List<HierarchyNode>> layers,
-  List<HierarchyEdge> edges,
-  Map<int, HierarchyNode> byId,
-  int depth, {
-  required bool towardParent,
-}) {
-  final list = layers[depth];
-  if (list == null || list.length < 2) return;
-  final neighborDepth = towardParent ? depth - 1 : depth + 1;
-  final neighbors = layers[neighborDepth];
-  if (neighbors == null) return;
-  final indexOf = {for (var index = 0; index < neighbors.length; index++) neighbors[index].id: index};
-  double barycenter(HierarchyNode node) {
-    final related = towardParent
-        ? edges.where((edge) => edge.target == node.id && indexOf.containsKey(edge.source))
-        : edges.where((edge) => edge.source == node.id && indexOf.containsKey(edge.target) && byId[edge.target]?.depth == neighborDepth);
-    final values = [
-      for (final edge in related) indexOf[towardParent ? edge.source : edge.target]!,
-    ];
-    if (values.isEmpty) {
-      return list.indexWhere((item) => item.id == node.id).toDouble();
-    }
-    return values.reduce((a, b) => a + b) / values.length;
+int? hitTestHex(HexLayout layout, Offset point) {
+  PlacedHex? best;
+  for (final cell in layout.cells) {
+    if (!cell.contains(point)) continue;
+    if (best == null || cell.radius < best.radius) best = cell;
   }
-
-  final keyed = [for (final node in list) (barycenter(node), node.title.toLowerCase(), node)];
-  keyed.sort((a, b) {
-    final byCenter = a.$1.compareTo(b.$1);
-    if (byCenter != 0) return byCenter;
-    return a.$2.compareTo(b.$2);
-  });
-  layers[depth] = [for (final item in keyed) item.$3];
+  return best?.id;
 }
