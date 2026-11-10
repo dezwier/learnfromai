@@ -133,7 +133,7 @@ def _parent_fetches(fake: FakeWikidata, qid: int) -> list[tuple]:
     return [call for call in fake.calls if call[0] == "entities" and call[1] == (qid,)]
 
 
-def test_dinosaurs_walks_taxon_parents_children_and_siblings(client, auth, monkeypatch):
+def test_dinosaurs_walks_parents_and_top_children_only(client, auth, monkeypatch):
     fake = _dinosaurs()
     _install(monkeypatch, fake)
 
@@ -150,10 +150,8 @@ def test_dinosaurs_walks_taxon_parents_children_and_siblings(client, auth, monke
     assert titles["reptile"]["distance"] == 1
     assert titles["animal"]["distance"] == 2
     assert titles["Saurischia"]["depth"] == 1
-    assert titles["Saurischia"]["distance"] == 1
     assert titles["Ornithischia"]["depth"] == 1
-    assert titles["lizard"]["depth"] == 0
-    assert titles["lizard"]["distance"] == 2
+    assert "lizard" not in titles
     assert "organism" not in titles
     assert "Wikimedia category" not in titles
     assert "dinosaur genera" not in titles
@@ -161,7 +159,7 @@ def test_dinosaurs_walks_taxon_parents_children_and_siblings(client, auth, monke
     assert (REPTILES, DINOSAURS, "parent_child") in edges
     assert (ANIMALS, REPTILES, "parent_child") in edges
     assert (DINOSAURS, SAURISCHIA, "parent_child") in edges
-    assert (REPTILES, LIZARDS, "parent_child") in edges
+    assert (REPTILES, LIZARDS, "parent_child") not in edges
     assert COLORS not in {edge[0] for edge in edges} | {edge[1] for edge in edges}
 
 
@@ -185,13 +183,18 @@ def test_cycles_stop_and_a_second_search_reuses_the_same_rows(client, auth, othe
     second = _graph(client, other_auth, topic="beta", up_depth=2, down_depth=2)
     assert second.status_code == 200
     assert second.json()["focus_node_id"] == 2
-    assert fake.calls == []
+    # Beta's own children are fetched once when it becomes the focus.
+    assert any(call[0] == "children" and call[1] == 2 for call in fake.calls)
     assert recorded > 0
+    fake.calls.clear()
+    again = _graph(client, other_auth, topic="beta", up_depth=2, down_depth=2)
+    assert again.status_code == 200
+    assert fake.calls == []
     count = session.exec(select(func.count()).select_from(KnowledgeItem)).one()
     distinct_ids = session.exec(select(func.count(distinct(KnowledgeItem.wikidata_qid)))).one()
     assert count == distinct_ids == 2
     requests = session.exec(select(KnowledgeGraphRequest)).all()
-    assert len(requests) == 2
+    assert len(requests) == 3
     distances = session.exec(select(KnowledgeGraphRequestNode)).all()
     assert len(distances) >= 2
 

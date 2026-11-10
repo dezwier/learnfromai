@@ -46,14 +46,14 @@ void main() {
     expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('the hex map shows the focus among its siblings', (tester) async {
+  testWidgets('the hex map shows children of the focus', (tester) async {
     final graph = GraphController(
       loader: (path) async => _compact(),
     )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Saurischia'), findsOneWidget);
     expect(find.text('Show more'), findsNothing);
   });
 
@@ -71,13 +71,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(graph.focusId, 3);
-    expect(find.text('Saurischia'), findsOneWidget);
+    expect(find.text('Genera'), findsOneWidget);
     expect(find.byTooltip('Previous topic'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Previous topic'));
     await tester.pumpAndSettle();
     expect(graph.focusId, 2);
-    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Saurischia'), findsOneWidget);
   });
 
   testWidgets('ambiguous results can be chosen', (tester) async {
@@ -98,7 +98,7 @@ void main() {
     await tester.tap(find.text('Dinosaur toys'));
     await tester.pumpAndSettle();
     expect(graph.focusId, 2);
-    expect(find.text('Dinosaurs'), findsOneWidget);
+    expect(find.text('Saurischia'), findsOneWidget);
   });
 
   testWidgets('expired session surfaces the auth error', (tester) async {

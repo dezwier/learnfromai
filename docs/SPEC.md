@@ -8,7 +8,7 @@ Sign in, then explore one shared knowledge graph built from Wikidata classes.
 - There is one item graph, shared by every signed-in user. A search does not create a private graph.
 - An item is a Wikidata entity: stable Q number, title, and an optional short description. Identity is the Qid, not the title.
 - An edge is `parent_child` and points from the preferred parent to the child. Taxa use `P171`; other items use `P279`. The walk stops at these domain roots: Life (organism Q7239), physical world (Q223557), places (Q2221906), people (Q215627), organizations (Q43229), events (Q1190554), works (Q386724), knowledge (Q11862829), technology (Q11016), languages (Q34770), ideas (Q21484471).
-- Searching a topic resolves it to a Wikidata item, then loads that item, its preferred parents, its children, and some siblings. The default reach is 2 items upstream and 2 downstream. Wikimedia maintenance items are left out. Cycles are not walked twice.
+- Searching a topic resolves it to a Wikidata item, then loads that item, its preferred parents, and a short list of direct children (about eight, by Wikipedia coverage). Siblings are not auto-fetched; they appear when those topics are searched later. Wikimedia maintenance items and unlabeled rows are left out. Cycles are not walked twice.
 - Items and edges are stored in PostgreSQL. A direction that was fully fetched inside the last 30 days is reused. An unfinished or stale direction is fetched again. An unfinished fetch is not treated as the full set of relationships.
 - The same item row is reused when another topic reaches it. Repeated searches do not insert a second row for the same Qid.
 - Each request stores the shortest-path hop distance of every returned node to the resolved focus. Distances belong to that request; they are not overwritten on the item.
@@ -35,4 +35,4 @@ Sign in, then explore one shared knowledge graph built from Wikidata classes.
 
 ## Client
 
-The Flutter app has a sign-in screen and a hex map. Opening the app resumes the person's latest focus from the shared graph. The person searches for a topic, picks an item when Wikidata returns more than one match, and sees the focus neighborhood as hexes. Zooming out climbs to parents and shows siblings. Zooming in splits a hex into its children. Labels stay a fixed screen size and appear only when a hex has room. Tapping a hex focuses it and loads its surroundings from the same shared graph. A previous-topic control returns to the prior focus.
+The Flutter app has a sign-in screen and a hex map. Opening the app resumes the person's latest focus from the shared graph. Searching a topic shows that topic split into its main children. Zooming out collapses into the parent hex. Tapping a child focuses it and loads its own children. Labels stay a fixed screen size and appear only when a hex has room.

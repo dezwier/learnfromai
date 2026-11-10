@@ -64,14 +64,13 @@ class ZoomWindow {
 const hexLabelFontSize = 13.0;
 const hexRootRadius = 180.0;
 
-/// Zoom out climbs to parents. Default shows the parent split into siblings.
-/// Zoom in focuses the topic and splits it into children.
+/// Default: the focus hex, split into its children.
+/// Zoom out: climb to the parent (still only the explored path).
+/// Zoom in: same children, larger.
 ZoomWindow zoomWindowFor(double scale) {
-  if (scale < 0.55) return const ZoomWindow(climb: 2, expand: 0);
-  if (scale < 0.85) return const ZoomWindow(climb: 1, expand: 0);
-  if (scale < 1.35) return const ZoomWindow(climb: 1, expand: 1);
-  if (scale < 2.0) return const ZoomWindow(climb: 0, expand: 1);
-  return const ZoomWindow(climb: 0, expand: 2);
+  if (scale < 0.7) return const ZoomWindow(climb: 1, expand: 0);
+  if (scale < 1.1) return const ZoomWindow(climb: 0, expand: 1);
+  return const ZoomWindow(climb: 0, expand: 1);
 }
 
 List<(int, int)> flowerAxial(int count, {bool includeCenter = false}) {

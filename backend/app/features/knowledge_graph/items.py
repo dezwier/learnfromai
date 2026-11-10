@@ -76,12 +76,10 @@ def load_knowledge_graph(
         ttl = timedelta(days=settings.wikidata_cache_ttl_days)
         if up > 0:
             _ensure_upstream(session, client, focus, up, budget, ttl, state, set())
+        # Only the focus gets children. Siblings appear later when those topics are searched.
         if down > 0:
-            _ensure_downstream(session, client, focus, down, budget, ttl, state, set())
-        parent = _preferred_parent(session, focus)
-        if parent is not None:
-            _ensure_downstream(session, client, parent, 1, budget, ttl, state, set())
-        payload = _subgraph(session, focus, up, down, incomplete=state.incomplete or budget.exhausted)
+            _ensure_downstream(session, client, focus, budget, ttl, state)
+        payload = _subgraph(session, focus, up, down=1, incomplete=state.incomplete or budget.exhausted)
         request = KnowledgeGraphRequest(user_id=user_id, focus_item_id=focus.id)
         session.add(request)
         session.flush()
@@ -264,39 +262,48 @@ def _ensure_upstream(
             session.flush()
 
 
+_MAX_CHILDREN = 8
+
+
 def _ensure_downstream(
     session: Session,
     api: WikidataClient,
     item: KnowledgeItem,
-    depth_left: int,
     budget: _Budget,
     ttl: timedelta,
     state: _FetchState,
-    seen: set[UUID],
 ) -> None:
-    if item.id in seen:
+    """Fetch a short list of direct children for one item. No recursive fan-out."""
+    if _fresh(item.downstream_fetched_at, item.downstream_complete, ttl):
         return
-    seen.add(item.id)
-    if depth_left <= 0:
-        return
-    if not _fresh(item.downstream_fetched_at, item.downstream_complete, ttl):
-        if not budget.take():
-            state.incomplete = True
-            return
-        try:
-            child_ids = api.children(item.wikidata_qid)
-            entities = [row for row in api.entities(child_ids) if not row.skipped]
-        except WikiDataError:
-            state.incomplete = True
-            return
-        children = [_upsert(session, entity) for entity in sorted(entities, key=lambda row: (-row.sitelinks, row.title.lower(), row.qid))]
-        relation = "parent_taxon" if any(entity.parent_taxon and item.wikidata_qid in entity.parent_taxon for entity in entities) else "subclass_of"
-        _replace_children(session, item, children, relation)
-    if not item.downstream_complete:
+    if not budget.take():
         state.incomplete = True
         return
-    for child in _children(session, item):
-        _ensure_downstream(session, api, child, depth_left - 1, budget, ttl, state, seen)
+    try:
+        child_ids = api.children(item.wikidata_qid)
+        entities = [
+            row
+            for row in api.entities(child_ids)
+            if not row.skipped and _usable_label(row)
+        ]
+    except WikiDataError:
+        state.incomplete = True
+        return
+    ranked = sorted(entities, key=lambda row: (-row.sitelinks, row.title.lower(), row.qid))[:_MAX_CHILDREN]
+    children = [_upsert(session, entity) for entity in ranked]
+    relation = (
+        "parent_taxon"
+        if any(entity.parent_taxon and item.wikidata_qid in entity.parent_taxon for entity in ranked)
+        else "subclass_of"
+    )
+    _replace_children(session, item, children, relation)
+
+
+def _usable_label(entity: WikiEntity) -> bool:
+    title = entity.title.strip()
+    if not title or title.upper() == f"Q{entity.qid}":
+        return False
+    return entity.sitelinks > 0 or bool(entity.description)
 
 
 def _entity(api: WikidataClient, qid: int) -> WikiEntity:
@@ -372,11 +379,6 @@ def _parents(session: Session, item: KnowledgeItem) -> list[KnowledgeItem]:
     return _items(session, [edge.parent_item_id for edge in edges])
 
 
-def _preferred_parent(session: Session, item: KnowledgeItem) -> KnowledgeItem | None:
-    parents = _parents(session, item)
-    return parents[0] if parents else None
-
-
 def _children(session: Session, item: KnowledgeItem) -> list[KnowledgeItem]:
     edges = list(session.exec(select(KnowledgeItemEdge).where(KnowledgeItemEdge.parent_item_id == item.id)).all())
     return _items(session, [edge.child_item_id for edge in edges])
@@ -410,11 +412,7 @@ def _subgraph(session: Session, focus: KnowledgeItem, up: int, down: int, *, inc
                 depths[child.id] = step
                 nxt.append(child)
         frontier = nxt
-    parent = _preferred_parent(session, focus)
-    if parent is not None:
-        for sibling in _children(session, parent):
-            if sibling.id not in depths:
-                depths[sibling.id] = 0
+    # Keep only the path above the focus and its direct children.
     ids = list(depths)
     rows = _items(session, ids)
     by_id = {row.id: row for row in rows}
