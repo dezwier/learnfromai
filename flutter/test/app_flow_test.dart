@@ -55,7 +55,24 @@ void main() {
     expect(find.text('Saurischia'), findsOneWidget);
     expect(find.text('Mesozoic'), findsOneWidget);
     expect(find.text('Related'), findsOneWidget);
+    expect(find.byTooltip('Search'), findsOneWidget);
     expect(find.text('Show more'), findsNothing);
+  });
+
+  testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
+    final graph = GraphController(loader: (path) async => _compact())..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.tapAt(const Offset(24, 180));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.byTooltip('Search'), findsOneWidget);
   });
 
   testWidgets('tapping back returns to the previous focus', (tester) async {

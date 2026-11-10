@@ -18,9 +18,11 @@ class GraphScreen extends StatefulWidget {
 
 class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
   final _transform = TransformationController();
   int? _focusedFor;
   var _resumed = false;
+  var _searchOpen = false;
 
   @override
   void initState() {
@@ -35,8 +37,31 @@ class _GraphScreenState extends State<GraphScreen> {
   @override
   void dispose() {
     _search.dispose();
+    _searchFocus.dispose();
     _transform.dispose();
     super.dispose();
+  }
+
+  void _openSearch() {
+    if (_searchOpen) return;
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _searchFocus.requestFocus();
+    });
+  }
+
+  void _dismissSearch() {
+    if (!_searchOpen && !_searchFocus.hasFocus) return;
+    _searchFocus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_searchOpen) setState(() => _searchOpen = false);
+  }
+
+  Future<void> _submitSearch(GraphController graph) async {
+    final topic = _search.text;
+    _dismissSearch();
+    await graph.search(topic);
   }
 
   @override
@@ -45,6 +70,7 @@ class _GraphScreenState extends State<GraphScreen> {
     _resetView(graph);
     final layout = _layoutFor(graph);
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: GradientTopBar(
         title: 'Graph',
         actions: [
@@ -74,41 +100,48 @@ class _GraphScreenState extends State<GraphScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-            child: Row(
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _dismissSearch,
+        child: Stack(
+          children: [
+            Column(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _search,
-                    textInputAction: TextInputAction.search,
-                    decoration: const InputDecoration(hintText: 'Search a topic', isDense: true),
-                    onSubmitted: graph.search,
+                if (graph.categoryGraph?['incomplete'] == true)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                    child: Text(
+                      'Some surrounding topics are still loading. Open this topic again to continue.',
+                    ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Search',
-                  onPressed: () => graph.search(_search.text),
-                  icon: const Icon(Icons.search),
-                ),
+                if (graph.error != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: StudyCard(
+                      dense: true,
+                      eyebrow: 'GRAPH',
+                      title: graph.error!,
+                      subtitle: 'Try another topic.',
+                    ),
+                  ),
+                if (layout.nodes.isNotEmpty) const _Legend(),
+                Expanded(child: _body(context, graph, layout)),
               ],
             ),
-          ),
-          if (graph.categoryGraph?['incomplete'] == true)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 4),
-              child: Text('Some surrounding topics are still loading. Open this topic again to continue.'),
+            Positioned(
+              right: 16,
+              bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
+              child: _FloatingSearch(
+                open: _searchOpen,
+                controller: _search,
+                focusNode: _searchFocus,
+                onOpen: _openSearch,
+                onSubmit: () => _submitSearch(graph),
+                onDismiss: _dismissSearch,
+              ),
             ),
-          if (graph.error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: StudyCard(dense: true, eyebrow: 'GRAPH', title: graph.error!, subtitle: 'Try another topic.'),
-            ),
-          if (layout.nodes.isNotEmpty) const _Legend(),
-          Expanded(child: _body(context, graph, layout)),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -193,6 +226,71 @@ class _GraphScreenState extends State<GraphScreen> {
     ];
     final focus = graph.focusId ?? (nodes.isEmpty ? 0 : nodes.first.id);
     return layoutGraph(nodes, edges, focusId: focus);
+  }
+}
+
+class _FloatingSearch extends StatelessWidget {
+  const _FloatingSearch({
+    required this.open,
+    required this.controller,
+    required this.focusNode,
+    required this.onOpen,
+    required this.onSubmit,
+    required this.onDismiss,
+  });
+
+  final bool open;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback onOpen;
+  final VoidCallback onSubmit;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (!open) {
+      return FloatingActionButton(
+        heroTag: 'graph-search',
+        tooltip: 'Search',
+        onPressed: onOpen,
+        child: const Icon(Icons.search),
+      );
+    }
+    return Material(
+      elevation: 6,
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(28),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  hintText: 'Search a topic',
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+                onSubmitted: (_) => onSubmit(),
+                onTapOutside: (_) => onDismiss(),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Search',
+              onPressed: onSubmit,
+              icon: const Icon(Icons.search),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
