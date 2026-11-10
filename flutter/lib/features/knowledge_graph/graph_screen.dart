@@ -436,7 +436,7 @@ class _GraphView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const shadowPad = 8.0;
+    const shadowPad = 10.0;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
@@ -481,12 +481,13 @@ class _NodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final fill = pending ? const Color(0xFFDDE7F4) : roleFill(node.role, scheme);
+    final dark = scheme.brightness == Brightness.dark;
     final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
     if (node.isFlower) {
       return GestureDetector(
         onTap: onTap,
         child: CustomPaint(
-          painter: _HexFlowerPainter(color: fill),
+          painter: _HexFlowerPainter(color: fill, dark: dark),
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.55,
@@ -546,7 +547,7 @@ class _NodeCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: CustomPaint(
-        painter: _HexTilePainter(color: fill),
+        painter: _HexTilePainter(color: fill, dark: dark),
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: node.radius * 0.34,
@@ -705,20 +706,30 @@ bool _textFits({
   return true;
 }
 
-void _paintHexDepth(Canvas canvas, Path path, Color color) {
-  canvas.drawShadow(path, const Color(0xFF000000), 5, true);
+void _paintHexDepth(Canvas canvas, Path path, Color color, {required bool dark}) {
+  if (dark) {
+    // Very soft white lift — just enough to read on dark backgrounds.
+    canvas.drawShadow(path, Colors.white.withValues(alpha: 0.18), 4, false);
+  } else {
+    canvas.drawShadow(path, const Color(0xFF000000), 5, true);
+  }
   canvas.drawPath(path, Paint()..color = color);
-  // Soft top-left highlight for a subtle 3D lift.
   final bounds = path.getBounds();
   final highlight = Paint()
     ..shader = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [
-        Colors.white.withValues(alpha: 0.16),
-        Colors.white.withValues(alpha: 0.0),
-        Colors.black.withValues(alpha: 0.10),
-      ],
+      colors: dark
+          ? [
+              Colors.white.withValues(alpha: 0.14),
+              Colors.white.withValues(alpha: 0.0),
+              Colors.black.withValues(alpha: 0.22),
+            ]
+          : [
+              Colors.white.withValues(alpha: 0.16),
+              Colors.white.withValues(alpha: 0.0),
+              Colors.black.withValues(alpha: 0.10),
+            ],
       stops: const [0.0, 0.45, 1.0],
     ).createShader(bounds);
   canvas.save();
@@ -728,9 +739,10 @@ void _paintHexDepth(Canvas canvas, Path path, Color color) {
 }
 
 class _HexFlowerPainter extends CustomPainter {
-  _HexFlowerPainter({required this.color});
+  _HexFlowerPainter({required this.color, required this.dark});
 
   final Color color;
+  final bool dark;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -739,17 +751,19 @@ class _HexFlowerPainter extends CustomPainter {
       latticeSize: lattice,
       center: Offset(size.width / 2, size.height / 2),
     );
-    _paintHexDepth(canvas, path, color);
+    _paintHexDepth(canvas, path, color, dark: dark);
   }
 
   @override
-  bool shouldRepaint(covariant _HexFlowerPainter oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(covariant _HexFlowerPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.dark != dark;
 }
 
 class _HexTilePainter extends CustomPainter {
-  _HexTilePainter({required this.color});
+  _HexTilePainter({required this.color, required this.dark});
 
   final Color color;
+  final bool dark;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -758,9 +772,10 @@ class _HexTilePainter extends CustomPainter {
       lattice * (1 - hexGapInset),
       center: Offset(size.width / 2, size.height / 2),
     );
-    _paintHexDepth(canvas, path, color);
+    _paintHexDepth(canvas, path, color, dark: dark);
   }
 
   @override
-  bool shouldRepaint(covariant _HexTilePainter oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(covariant _HexTilePainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.dark != dark;
 }

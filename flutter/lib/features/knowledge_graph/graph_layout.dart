@@ -122,22 +122,55 @@ const flowerCells = <(int, int)>[
   (0, 1),
 ];
 
-Path flatHexPath(double radius, {Offset center = Offset.zero}) {
-  final path = Path();
-  for (var i = 0; i < 6; i++) {
-    final angle = i * math.pi / 3;
-    final point = Offset(
-      center.dx + radius * math.cos(angle),
-      center.dy + radius * math.sin(angle),
-    );
-    if (i == 0) {
-      path.moveTo(point.dx, point.dy);
-    } else {
-      path.lineTo(point.dx, point.dy);
+/// Soft corner radius as a fraction of hex circumradius.
+const hexCornerFraction = 0.16;
+
+/// Rounded polygon via quadratic corners at each vertex.
+Path roundedPolygonPath(List<Offset> verts, {required double cornerRadius}) {
+  if (verts.length < 3) return Path();
+  if (cornerRadius <= 0) {
+    final path = Path()..moveTo(verts.first.dx, verts.first.dy);
+    for (var i = 1; i < verts.length; i++) {
+      path.lineTo(verts[i].dx, verts[i].dy);
     }
+    path.close();
+    return path;
+  }
+
+  final path = Path();
+  final n = verts.length;
+  for (var i = 0; i < n; i++) {
+    final prev = verts[(i - 1 + n) % n];
+    final cur = verts[i];
+    final next = verts[(i + 1) % n];
+    final toPrev = prev - cur;
+    final toNext = next - cur;
+    final dPrev = toPrev.distance;
+    final dNext = toNext.distance;
+    if (dPrev < 1e-9 || dNext < 1e-9) continue;
+    final r = math.min(cornerRadius, math.min(dPrev, dNext) * 0.4);
+    final p1 = cur + toPrev * (r / dPrev);
+    final p2 = cur + toNext * (r / dNext);
+    if (i == 0) {
+      path.moveTo(p1.dx, p1.dy);
+    } else {
+      path.lineTo(p1.dx, p1.dy);
+    }
+    path.quadraticBezierTo(cur.dx, cur.dy, p2.dx, p2.dy);
   }
   path.close();
   return path;
+}
+
+Path flatHexPath(double radius, {Offset center = Offset.zero}) {
+  final verts = [
+    for (var i = 0; i < 6; i++)
+      Offset(
+        center.dx + radius * math.cos(i * math.pi / 3),
+        center.dy + radius * math.sin(i * math.pi / 3),
+      ),
+  ];
+  return roundedPolygonPath(verts, cornerRadius: radius * hexCornerFraction);
 }
 
 /// Same distance a unit-hex flat retreats when radius *= (1 - hexGapInset).
@@ -266,18 +299,9 @@ List<Offset> _insetPolygon(List<Offset> verts, double dist) {
   return _offsetPolygon(pts, dist, leftNormal: false);
 }
 
-Path _pathFromVerts(List<Offset> verts, Offset center) {
-  final path = Path()..fillType = PathFillType.nonZero;
-  for (var i = 0; i < verts.length; i++) {
-    final p = verts[i] + center;
-    if (i == 0) {
-      path.moveTo(p.dx, p.dy);
-    } else {
-      path.lineTo(p.dx, p.dy);
-    }
-  }
-  path.close();
-  return path;
+Path _pathFromVerts(List<Offset> verts, Offset center, {required double cornerRadius}) {
+  final shifted = [for (final v in verts) v + center];
+  return roundedPolygonPath(shifted, cornerRadius: cornerRadius)..fillType = PathFillType.nonZero;
 }
 
 /// Solid 7-cell focus: full lattice outline, parallel-inset by the unit-hex flat
@@ -288,7 +312,11 @@ Path hexFlowerPath({
 }) {
   final outline = hexFlowerOutline(latticeSize);
   final inset = _insetPolygon(outline, hexFlatInset(latticeSize));
-  final path = _pathFromVerts(inset, center);
+  final path = _pathFromVerts(
+    inset,
+    center,
+    cornerRadius: latticeSize * hexCornerFraction,
+  );
   final ok = path.contains(center) && _polygonWidth(inset) < _polygonWidth(outline);
   if (!ok) {
     Path? solid;
