@@ -4,10 +4,11 @@ import '../../core/networking/api_client.dart';
 import '../../core/networking/api_exception.dart';
 
 class CategoryChoice {
-  const CategoryChoice({required this.id, required this.title});
+  const CategoryChoice({required this.id, required this.title, this.description});
 
   final int id;
   final String title;
+  final String? description;
 }
 
 class GraphController extends ChangeNotifier {
@@ -111,6 +112,7 @@ class GraphController extends ChangeNotifier {
           CategoryChoice(
             id: ((item['wikidata_qid'] ?? item['id']) as num).toInt(),
             title: item['title']?.toString() ?? 'Topic',
+            description: item['description']?.toString(),
           ),
     ];
   }

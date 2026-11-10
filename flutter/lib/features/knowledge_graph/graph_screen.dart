@@ -127,6 +127,11 @@ class _GraphScreenState extends State<GraphScreen> {
           for (final choice in graph.candidates)
             ListTile(
               title: Text(choice.title),
+              subtitle: Text(
+                (choice.description?.trim().isNotEmpty == true)
+                    ? choice.description!
+                    : 'Q${choice.id}',
+              ),
               onTap: () => graph.choose(choice),
             ),
         ],

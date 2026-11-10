@@ -247,15 +247,20 @@ def test_failed_fetch_stays_incomplete_and_a_stale_direction_is_read_again(clien
     assert _parent_fetches(fake, DINOSAURS) == []
 
 
-def test_ambiguous_search_and_domain_root_stop(client, auth, session, monkeypatch):
+def test_clear_winner_skips_chooser_and_ambiguous_shows_descriptions(client, auth, session, monkeypatch):
     fake = _dinosaurs()
     _install(monkeypatch, fake)
+    opened = _graph(client, auth, topic="Dinosaurs", up_depth=1, down_depth=0)
+    assert opened.status_code == 200
+    assert opened.json()["focus_node_id"] == DINOSAURS
+
     ambiguous = _graph(client, auth, topic="dino")
     assert ambiguous.status_code == 409
-    candidates = {item["title"] for item in ambiguous.json()["details"]["candidates"]}
-    assert "dinosaur colors" in candidates
-    assert "dinosaur toys" in candidates
-    assert session.exec(select(func.count()).select_from(KnowledgeItem)).one() == 0
+    candidates = ambiguous.json()["details"]["candidates"]
+    titles = {item["title"] for item in candidates}
+    assert "dinosaur colors" in titles
+    assert "dinosaur toys" in titles
+    assert all("description" in item for item in candidates)
 
     rooted = _graph(client, auth, topic="animal", up_depth=2, down_depth=0)
     assert rooted.status_code == 200

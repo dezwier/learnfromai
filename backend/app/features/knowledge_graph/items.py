@@ -108,23 +108,58 @@ def _resolve(session: Session, api: WikidataClient, *, topic: str | None, item_i
     if len(stored) == 1:
         return stored[0]
     if len(stored) > 1:
-        _raise_ambiguous([{"wikidata_qid": row.wikidata_qid, "title": row.title} for row in _sorted_rows(stored)])
+        _raise_ambiguous(
+            [
+                {"wikidata_qid": row.wikidata_qid, "title": row.title, "description": row.description}
+                for row in _sorted_rows(stored)
+            ]
+        )
     try:
         matches = api.search(name)
     except WikiDataError as exc:
         raise _unavailable() from exc
-    exact = [item for item in matches if same_topic(item.title, name)]
-    chosen = exact[0] if len(exact) == 1 else matches[0] if len(matches) == 1 else None
+    chosen = _pick_match(name, matches)
     if chosen is not None:
         return _upsert(session, chosen)
-    if len(matches) > 1:
+    if matches:
+        ranked = sorted(matches, key=_match_rank, reverse=True)
         _raise_ambiguous(
             [
-                {"wikidata_qid": item.qid, "title": item.title}
-                for item in sorted(matches, key=lambda item: (item.title.lower(), item.qid))
+                {"wikidata_qid": item.qid, "title": item.title, "description": item.description}
+                for item in ranked
             ]
         )
     raise not_found("No Wikidata item matched this topic")
+
+
+def _match_rank(item: WikiEntity) -> tuple:
+    return (
+        1 if item.parent_taxon or item.subclass_of else 0,
+        item.sitelinks,
+        -item.qid,
+    )
+
+
+def _pick_match(name: str, matches: list[WikiEntity]) -> WikiEntity | None:
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    exact = [item for item in matches if same_topic(item.title, name)]
+    pool = exact or matches
+    ranked = sorted(pool, key=_match_rank, reverse=True)
+    best = ranked[0]
+    if len(ranked) == 1:
+        return best
+    second = ranked[1]
+    # One clear head: the main class/taxon with far more Wikipedia coverage.
+    if best.sitelinks >= max(8, second.sitelinks * 3):
+        return best
+    if best.sitelinks > second.sitelinks and (best.parent_taxon or best.subclass_of) and not (
+        second.parent_taxon or second.subclass_of
+    ):
+        return best
+    return None
 
 
 def _resolve_qid(session: Session, api: WikidataClient, qid: int) -> KnowledgeItem:

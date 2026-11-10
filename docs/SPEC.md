@@ -28,7 +28,7 @@ Sign in, then explore one shared knowledge graph built from Wikidata classes.
 - `GET /api/v1/jobs/{job_id}`
 - `GET /health`
 
-`GET /knowledge/graph` returns `focus_node_id`, `incomplete`, `nodes`, and `edges`. Node ids are Wikidata Q numbers. `depth` is relative to the focus: negative above it, zero on it, positive below it. `distance` is the unsigned hop count to the focus. Edges run from parent to child. Several matches return 409 with `details.candidates` (`wikidata_qid`, `title`). No match returns 404.
+`GET /knowledge/graph` returns `focus_node_id`, `incomplete`, `nodes`, and `edges`. Node ids are Wikidata Q numbers. `depth` is relative to the focus: negative above it, zero on it, positive below it. `distance` is the unsigned hop count to the focus. Edges run from parent to child. A search that has one clear head (far more sitelinks, preferably a class or taxon) opens that item. Only a real tie returns 409 with `details.candidates` (`wikidata_qid`, `title`, `description`). No match returns 404.
 
 `GET /workspace/graph` still returns the older concept nodes, edges, and extend requests.
 
