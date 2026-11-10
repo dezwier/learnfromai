@@ -184,9 +184,10 @@ void main() {
       viewport: const Size(390, 700),
     );
     final byId = {for (final node in layout.nodes) node.id: node};
-    expect(byId['1']!.y < byId['2']!.y, isTrue);
-    expect(byId['2']!.y < byId['3']!.y, isTrue);
+    expect(byId['1']!.center.dy < byId['2']!.center.dy, isTrue);
+    expect(byId['2']!.center.dy < byId['3']!.center.dy, isTrue);
     expect(byId['4']!.role, NodeRole.sibling);
+    expect(byId['2']!.radius / byId['4']!.radius, closeTo(2.5, 0.01));
   });
 
   test('api client maps the error envelope', () {

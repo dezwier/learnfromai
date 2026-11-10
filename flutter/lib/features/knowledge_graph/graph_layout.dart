@@ -59,6 +59,7 @@ class PlacedNode {
     required this.y,
     required this.width,
     required this.height,
+    required this.radius,
     this.description,
   });
 
@@ -72,13 +73,13 @@ class PlacedNode {
   final double y;
   final double width;
   final double height;
+  /// Drawn flat-top circumradius (center → vertex).
+  final double radius;
   final String? description;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
-  bool contains(Offset point) {
-    return point.dx >= x && point.dx <= x + width && point.dy >= y && point.dy <= y + height;
-  }
+  bool contains(Offset point) => pointInFlatHex(point - center, radius);
 }
 
 class GraphLayout {
@@ -93,14 +94,46 @@ class GraphLayout {
   final double height;
 }
 
-const mosaicGap = 3.0;
-const graphFocusWidth = 168.0; // kept for older test imports
+const graphFocusWidth = 168.0;
 const graphFocusHeight = 96.0;
 const graphCardWidth = 118.0;
 const graphSideGap = 8.0;
 
-/// Tile pastel boxes into the viewport. Focus center, parents above, children below,
-/// siblings on the sides, related filling the remaining perimeter.
+/// Equal inset so every hex leaves the same thin background strip.
+const hexGapInset = 0.05;
+
+/// Focus covers the 7-cell flower (center + 6). In flat-top unit space that
+/// is circumradius 2.5; ring-1 is reserved, neighbors start at ring 2.
+const focusUnitRadius = 2.5;
+
+Path flatHexPath(double radius, {Offset center = Offset.zero}) {
+  final path = Path();
+  for (var i = 0; i < 6; i++) {
+    final angle = i * math.pi / 3;
+    final point = Offset(
+      center.dx + radius * math.cos(angle),
+      center.dy + radius * math.sin(angle),
+    );
+    if (i == 0) {
+      path.moveTo(point.dx, point.dy);
+    } else {
+      path.lineTo(point.dx, point.dy);
+    }
+  }
+  path.close();
+  return path;
+}
+
+bool pointInFlatHex(Offset local, double radius) {
+  final ax = local.dx.abs();
+  final ay = local.dy.abs();
+  if (ax > radius || ay > radius * math.sqrt(3) / 2) return false;
+  return radius * math.sqrt(3) - math.sqrt(3) * ax - ay >= -1e-6;
+}
+
+Size flatHexBounds(double radius) => Size(radius * 2, radius * math.sqrt(3));
+
+/// Tight honeycomb on a flat-top axial lattice.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
   List<GraphEdge> _, {
@@ -143,104 +176,148 @@ GraphLayout layoutGraph(
       if (node.role == NodeRole.related && node.id != focusNode.id) node,
   ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  final hasTop = parents.isNotEmpty || related.isNotEmpty;
-  final hasBottom = children.isNotEmpty || related.length > 2;
-  final hasSides = siblings.isNotEmpty || related.isNotEmpty;
+  final queue = <(GraphNode, NodeRole)>[
+    for (final node in parents) (node, NodeRole.parent),
+    for (final node in children) (node, NodeRole.child),
+    for (final node in siblings) (node, NodeRole.sibling),
+    for (final node in related) (node, NodeRole.related),
+  ];
 
-  final topH = hasTop ? height * (parents.isEmpty ? 0.16 : 0.20) : 0.0;
-  final bottomH = hasBottom ? height * (children.isEmpty ? 0.16 : 0.22) : 0.0;
-  final midH = height - topH - bottomH - (hasTop ? mosaicGap : 0) - (hasBottom ? mosaicGap : 0);
-  final sideW = hasSides ? width * 0.27 : 0.0;
-  final centerW = width - (hasSides ? sideW * 2 + mosaicGap * 2 : 0);
+  final cells = _ringCells(fromRing: 2, count: math.max(queue.length, 1));
+  final used = <int>{};
+  final assignments = <(GraphNode, _HexCell)>[];
 
-  final midY = hasTop ? topH + mosaicGap : 0.0;
-  final bottomY = midY + midH + (hasBottom ? mosaicGap : 0);
-  final centerX = hasSides ? sideW + mosaicGap : 0.0;
-
-  final placed = <PlacedNode>[];
-  final relatedPool = List<GraphNode>.of(related);
-
-  // Top band: parents across the middle; related in leftover top cells.
-  if (hasTop) {
-    if (parents.isNotEmpty) {
-      placed.addAll(_splitRow(parents, x: 0, y: 0, width: width, height: topH));
-    } else {
-      final take = math.min(relatedPool.length, 3);
-      placed.addAll(_splitRow(relatedPool.sublist(0, take), x: 0, y: 0, width: width, height: topH));
-      relatedPool.removeRange(0, take);
+  for (final item in queue) {
+    var best = -1;
+    var bestScore = -9999.0;
+    for (var i = 0; i < cells.length; i++) {
+      if (used.contains(i)) continue;
+      final score = _cellScore(cells[i], item.$2);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
     }
+    if (best < 0) break;
+    used.add(best);
+    assignments.add((item.$1, cells[best]));
   }
 
-  // Focus center.
-  placed.add(
-    _box(focusNode, x: centerX, y: midY, width: centerW, height: midH),
-  );
+  final centers = <(GraphNode, Offset, double)>[
+    (focusNode, Offset.zero, focusUnitRadius),
+    for (final a in assignments) (a.$1, _axialToPixel(a.$2.q, a.$2.r, 1.0), 1.0),
+  ];
 
-  // Side columns: siblings first, then related leftovers.
-  final leftSiblings = [for (var i = 0; i < siblings.length; i += 2) siblings[i]];
-  final rightSiblings = [for (var i = 1; i < siblings.length; i += 2) siblings[i]];
-
-  if (hasSides) {
-    final leftItems = <GraphNode>[...leftSiblings];
-    final rightItems = <GraphNode>[...rightSiblings];
-    while (relatedPool.isNotEmpty && leftItems.length <= rightItems.length) {
-      leftItems.add(relatedPool.removeAt(0));
-      if (relatedPool.isEmpty) break;
-      rightItems.add(relatedPool.removeAt(0));
-    }
-    while (relatedPool.isNotEmpty) {
-      (leftItems.length <= rightItems.length ? leftItems : rightItems).add(relatedPool.removeAt(0));
-    }
-    if (leftItems.isNotEmpty) {
-      placed.addAll(_splitColumn(leftItems, x: 0, y: midY, width: sideW, height: midH));
-    }
-    if (rightItems.isNotEmpty) {
-      placed.addAll(
-        _splitColumn(rightItems, x: centerX + centerW + mosaicGap, y: midY, width: sideW, height: midH),
-      );
-    }
+  var minX = double.infinity;
+  var minY = double.infinity;
+  var maxX = -double.infinity;
+  var maxY = -double.infinity;
+  for (final c in centers) {
+    final b = flatHexBounds(c.$3);
+    minX = math.min(minX, c.$2.dx - b.width / 2);
+    maxX = math.max(maxX, c.$2.dx + b.width / 2);
+    minY = math.min(minY, c.$2.dy - b.height / 2);
+    maxY = math.max(maxY, c.$2.dy + b.height / 2);
   }
 
-  // Bottom band: children, then any remaining related.
-  if (hasBottom) {
-    final bottomItems = <GraphNode>[...children, ...relatedPool];
-    if (bottomItems.isNotEmpty) {
-      placed.addAll(_splitRow(bottomItems, x: 0, y: bottomY, width: width, height: bottomH));
-    }
-  } else if (relatedPool.isNotEmpty && midH > 0) {
-    // Rare: only related left and no bottom band — fold into sides already handled.
-  }
+  const pad = 8.0;
+  final contentW = math.max(maxX - minX, 1.0);
+  final contentH = math.max(maxY - minY, 1.0);
+  final scale = math.min((width - 2 * pad) / contentW, (height - 2 * pad) / contentH);
+  final ox = (width - contentW * scale) / 2 - minX * scale;
+  final oy = (height - contentH * scale) / 2 - minY * scale;
+
+  final placed = [
+    for (final c in centers)
+      _hex(
+        c.$1,
+        cx: c.$2.dx * scale + ox,
+        cy: c.$2.dy * scale + oy,
+        radius: c.$3 * scale * (1 - hexGapInset),
+      ),
+  ];
 
   return GraphLayout(nodes: placed, width: width, height: height);
 }
 
-List<PlacedNode> _splitRow(List<GraphNode> items, {required double x, required double y, required double width, required double height}) {
-  if (items.isEmpty || width <= 0 || height <= 0) return const [];
-  final gaps = mosaicGap * math.max(0, items.length - 1);
-  final cell = (width - gaps) / items.length;
-  return [
-    for (var i = 0; i < items.length; i++)
-      _box(items[i], x: x + i * (cell + mosaicGap), y: y, width: cell, height: height),
-  ];
+class _HexCell {
+  const _HexCell(this.q, this.r);
+
+  final int q;
+  final int r;
+
+  int get s => -q - r;
+  int get ring => (q.abs() + r.abs() + s.abs()) ~/ 2;
 }
 
-List<PlacedNode> _splitColumn(
-  List<GraphNode> items, {
-  required double x,
-  required double y,
-  required double width,
-  required double height,
-}) {
-  if (items.isEmpty || width <= 0 || height <= 0) return const [];
-  final gaps = mosaicGap * math.max(0, items.length - 1);
-  final cell = (height - gaps) / items.length;
-  return [
-    for (var i = 0; i < items.length; i++)
-      _box(items[i], x: x, y: y + i * (cell + mosaicGap), width: width, height: cell),
-  ];
+Offset _axialToPixel(int q, int r, double size) {
+  final x = size * (3 / 2) * q;
+  final y = size * (math.sqrt(3) / 2 * q + math.sqrt(3) * r);
+  return Offset(x, y);
 }
 
-PlacedNode _box(GraphNode node, {required double x, required double y, required double width, required double height}) {
+List<_HexCell> _ringCells({required int fromRing, required int count}) {
+  final out = <_HexCell>[];
+  var ring = fromRing;
+  while (out.length < count && ring <= fromRing + 8) {
+    out.addAll(_cellsOnRing(ring));
+    ring++;
+  }
+  return out;
+}
+
+/// Cube-ring walk (redblobgames). Axial dirs for flat-top.
+List<_HexCell> _cellsOnRing(int ring) {
+  if (ring <= 0) return const [_HexCell(0, 0)];
+  // neighbor directions in order; start at scale(dir4, ring) then walk dir0..5
+  const dirs = [
+    (1, 0),
+    (1, -1),
+    (0, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, 1),
+  ];
+  var q = dirs[4].$1 * ring;
+  var r = dirs[4].$2 * ring;
+  final cells = <_HexCell>[];
+  for (var i = 0; i < 6; i++) {
+    final d = dirs[i];
+    for (var j = 0; j < ring; j++) {
+      cells.add(_HexCell(q, r));
+      q += d.$1;
+      r += d.$2;
+    }
+  }
+  return cells;
+}
+
+double _cellScore(_HexCell cell, NodeRole role) {
+  final c = _axialToPixel(cell.q, cell.r, 1.0);
+  final angle = math.atan2(c.dy, c.dx); // 0 = east, π/2 = south
+  final north = _angleDist(angle, -math.pi / 2);
+  final south = _angleDist(angle, math.pi / 2);
+  final east = _angleDist(angle, 0);
+  final west = _angleDist(angle, math.pi);
+  final ringPenalty = (cell.ring - 2) * 0.45;
+
+  return switch (role) {
+    NodeRole.parent => 4.0 - north - ringPenalty,
+    NodeRole.child => 4.0 - south - ringPenalty,
+    NodeRole.sibling => 4.0 - math.min(east, west) - ringPenalty,
+    NodeRole.related => 2.0 - ringPenalty * 0.5,
+    NodeRole.focus => 0,
+  };
+}
+
+double _angleDist(double a, double b) {
+  var d = (a - b).abs() % (2 * math.pi);
+  if (d > math.pi) d = 2 * math.pi - d;
+  return d;
+}
+
+PlacedNode _hex(GraphNode node, {required double cx, required double cy, required double radius}) {
+  final bounds = flatHexBounds(radius);
   return PlacedNode(
     id: node.id,
     title: node.title,
@@ -249,10 +326,11 @@ PlacedNode _box(GraphNode node, {required double x, required double y, required 
     kind: node.kind,
     role: node.role,
     description: node.description,
-    x: x,
-    y: y,
-    width: width,
-    height: height,
+    radius: radius,
+    x: cx - bounds.width / 2,
+    y: cy - bounds.height / 2,
+    width: bounds.width,
+    height: bounds.height,
   );
 }
 
@@ -263,7 +341,6 @@ String? hitTestNode(GraphLayout layout, Offset point) {
   return null;
 }
 
-/// Soft opaque pastel fills for node roles.
 Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
@@ -276,3 +353,25 @@ Color roleFill(NodeRole role, ColorScheme scheme) {
 }
 
 Color roleColor(NodeRole role, ColorScheme scheme) => roleFill(role, scheme);
+
+class HexagonBorder extends ShapeBorder {
+  const HexagonBorder();
+
+  @override
+  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) => getOuterPath(rect);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    final radius = math.min(rect.width / 2, rect.height / math.sqrt(3));
+    return flatHexPath(radius, center: rect.center);
+  }
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {}
+
+  @override
+  ShapeBorder scale(double t) => this;
+}

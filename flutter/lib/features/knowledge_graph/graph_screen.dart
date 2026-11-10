@@ -499,18 +499,24 @@ class _NodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fill = roleFill(node.role, scheme);
+    final fill = pending ? const Color(0xFFDDE7F4) : roleFill(node.role, scheme);
     final showDescription = focused && (node.description ?? '').trim().isNotEmpty;
+    const shape = HexagonBorder();
     return Material(
-      color: pending ? const Color(0xFFDDE7F4) : fill,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      color: fill,
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        customBorder: shape,
         onTap: onTap,
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: focused ? 14 : 8, vertical: focused ? 12 : 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: focused ? node.radius * 0.28 : node.radius * 0.22,
+            vertical: focused ? node.radius * 0.22 : node.radius * 0.18,
+          ),
           child: focused
               ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
@@ -519,7 +525,7 @@ class _NodeCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 17,
+                        fontSize: (node.radius * 0.22).clamp(15.0, 22.0),
                         height: 1.15,
                         fontWeight: FontWeight.w700,
                         color: scheme.onSurface,
@@ -527,14 +533,14 @@ class _NodeCard extends StatelessWidget {
                     ),
                     if (showDescription) ...[
                       const SizedBox(height: 8),
-                      Expanded(
+                      Flexible(
                         child: Text(
                           node.description!.trim(),
                           textAlign: TextAlign.center,
-                          maxLines: 6,
+                          maxLines: 5,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: (node.radius * 0.12).clamp(11.0, 14.0),
                             height: 1.3,
                             fontWeight: FontWeight.w400,
                             color: scheme.onSurface.withValues(alpha: 0.72),
@@ -551,7 +557,7 @@ class _NodeCard extends StatelessWidget {
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: (node.radius * 0.28).clamp(11.0, 15.0),
                       height: 1.2,
                       fontWeight: FontWeight.w500,
                       color: scheme.onSurface.withValues(alpha: 0.88),
