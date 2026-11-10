@@ -415,21 +415,26 @@ class _GraphView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const shadowPad = 8.0;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           for (final node in layout.nodes)
             Positioned(
-              left: node.x,
-              top: node.y,
-              width: node.width,
-              height: node.height,
-              child: _NodeCard(
-                node: node,
-                focused: node.id == focusId,
-                pending: node.id == pendingId,
-                onTap: () => onOpen(node.id),
+              left: node.x - shadowPad,
+              top: node.y - shadowPad,
+              width: node.width + shadowPad * 2,
+              height: node.height + shadowPad * 2,
+              child: Padding(
+                padding: const EdgeInsets.all(shadowPad),
+                child: _NodeCard(
+                  node: node,
+                  focused: node.id == focusId,
+                  pending: node.id == pendingId,
+                  onTap: () => onOpen(node.id),
+                ),
               ),
             ),
         ],
@@ -506,14 +511,10 @@ class _NodeCard extends StatelessWidget {
       );
     }
 
-    const shape = HexagonBorder();
-    return Material(
-      color: fill,
-      shape: shape,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        customBorder: shape,
-        onTap: onTap,
+    return GestureDetector(
+      onTap: onTap,
+      child: CustomPaint(
+        painter: _HexTilePainter(color: fill),
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: node.radius * 0.22,
@@ -539,6 +540,28 @@ class _NodeCard extends StatelessWidget {
   }
 }
 
+void _paintHexDepth(Canvas canvas, Path path, Color color) {
+  canvas.drawShadow(path, const Color(0xFF000000), 5, true);
+  canvas.drawPath(path, Paint()..color = color);
+  // Soft top-left highlight for a subtle 3D lift.
+  final bounds = path.getBounds();
+  final highlight = Paint()
+    ..shader = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Colors.white.withValues(alpha: 0.16),
+        Colors.white.withValues(alpha: 0.0),
+        Colors.black.withValues(alpha: 0.10),
+      ],
+      stops: const [0.0, 0.45, 1.0],
+    ).createShader(bounds);
+  canvas.save();
+  canvas.clipPath(path);
+  canvas.drawRect(bounds, highlight);
+  canvas.restore();
+}
+
 class _HexFlowerPainter extends CustomPainter {
   _HexFlowerPainter({required this.color});
 
@@ -551,15 +574,28 @@ class _HexFlowerPainter extends CustomPainter {
       latticeSize: lattice,
       center: Offset(size.width / 2, size.height / 2),
     );
-    canvas.drawPath(path, Paint()..color = color);
+    _paintHexDepth(canvas, path, color);
   }
 
   @override
   bool shouldRepaint(covariant _HexFlowerPainter oldDelegate) => oldDelegate.color != color;
+}
+
+class _HexTilePainter extends CustomPainter {
+  _HexTilePainter({required this.color});
+
+  final Color color;
 
   @override
-  bool hitTest(Offset position) {
-    // Size is unknown here; defer to parent GestureDetector bounds.
-    return true;
+  void paint(Canvas canvas, Size size) {
+    final lattice = math.min(size.width / 2, size.height / math.sqrt(3));
+    final path = flatHexPath(
+      lattice * (1 - hexGapInset),
+      center: Offset(size.width / 2, size.height / 2),
+    );
+    _paintHexDepth(canvas, path, color);
   }
+
+  @override
+  bool shouldRepaint(covariant _HexTilePainter oldDelegate) => oldDelegate.color != color;
 }

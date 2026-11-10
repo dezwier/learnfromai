@@ -109,7 +109,7 @@ const graphCardWidth = 118.0;
 const graphSideGap = 8.0;
 
 /// Equal inset so unit hexes (and the flower outline) leave a thin strip.
-const hexGapInset = 0.05;
+const hexGapInset = 0.08;
 
 /// Flat-top axial cells that make the 7-hex focus flower.
 const flowerCells = <(int, int)>[
@@ -553,11 +553,12 @@ String? hitTestNode(GraphLayout layout, Offset point) {
 Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
-    NodeRole.parent => dark ? const Color(0xFF2A3F5C) : const Color(0xFFD7E6F8),
-    NodeRole.focus => dark ? const Color(0xFF3D4A5C) : const Color(0xFFE8EEF5),
-    NodeRole.sibling => dark ? const Color(0xFF3A2F55) : const Color(0xFFE8DDF8),
-    NodeRole.child => dark ? const Color(0xFF243F36) : const Color(0xFFD5EEE3),
-    NodeRole.related => dark ? const Color(0xFF4A3A2A) : const Color(0xFFF3E4D4),
+    // Soft pastel blue / green / red / yellow-orange; grey center.
+    NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFFD7E6F8),
+    NodeRole.focus => dark ? const Color(0xFF3C4046) : const Color(0xFFE6E8EC),
+    NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFF3D6DB),
+    NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFFD5EEE3),
+    NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFF6E0C4),
   };
 }
 
