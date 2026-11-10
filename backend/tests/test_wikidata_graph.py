@@ -248,19 +248,27 @@ def test_failed_fetch_stays_incomplete_and_a_stale_direction_is_read_again(clien
 
 
 def test_clear_winner_skips_chooser_and_ambiguous_shows_descriptions(client, auth, session, monkeypatch):
-    fake = _dinosaurs()
-    _install(monkeypatch, fake)
-    opened = _graph(client, auth, topic="Dinosaurs", up_depth=1, down_depth=0)
-    assert opened.status_code == 200
-    assert opened.json()["focus_node_id"] == DINOSAURS
-
-    ambiguous = _graph(client, auth, topic="dino")
+    tied = FakeWikidata(
+        [
+            _item(TOYS, "dinosaur toys", subclass=(DINOSAURS,), sitelinks=5, description="plastic toys"),
+            _item(COLORS, "dinosaur colors", subclass=(DINOSAURS,), sitelinks=5, description="pigment patterns"),
+        ],
+        children={},
+    )
+    _install(monkeypatch, tied)
+    ambiguous = _graph(client, auth, topic="dinosaur")
     assert ambiguous.status_code == 409
     candidates = ambiguous.json()["details"]["candidates"]
     titles = {item["title"] for item in candidates}
     assert "dinosaur colors" in titles
     assert "dinosaur toys" in titles
-    assert all("description" in item for item in candidates)
+    assert {item["description"] for item in candidates} == {"plastic toys", "pigment patterns"}
+
+    fake = _dinosaurs()
+    _install(monkeypatch, fake)
+    opened = _graph(client, auth, topic="Dinosaurs", up_depth=1, down_depth=0)
+    assert opened.status_code == 200
+    assert opened.json()["focus_node_id"] == DINOSAURS
 
     rooted = _graph(client, auth, topic="animal", up_depth=2, down_depth=0)
     assert rooted.status_code == 200
