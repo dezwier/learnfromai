@@ -187,7 +187,8 @@ void main() {
     expect(byId['1']!.center.dy < byId['2']!.center.dy, isTrue);
     expect(byId['2']!.center.dy < byId['3']!.center.dy, isTrue);
     expect(byId['4']!.role, NodeRole.sibling);
-    expect(byId['2']!.radius / byId['4']!.radius, closeTo(2.5, 0.01));
+    expect(byId['2']!.isFlower, isTrue);
+    expect(byId['2']!.width / byId['4']!.width, closeTo(2.5, 0.05));
   });
 
   test('api client maps the error envelope', () {

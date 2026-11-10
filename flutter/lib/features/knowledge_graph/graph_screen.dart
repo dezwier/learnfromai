@@ -500,8 +500,8 @@ class _NodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final fill = pending ? const Color(0xFFDDE7F4) : roleFill(node.role, scheme);
-    final showDescription = focused && (node.description ?? '').trim().isNotEmpty;
-    const shape = HexagonBorder();
+    final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
+    final ShapeBorder shape = node.isFlower ? const HexFlowerBorder() : const HexagonBorder();
     return Material(
       color: fill,
       shape: shape,
@@ -511,10 +511,10 @@ class _NodeCard extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: focused ? node.radius * 0.28 : node.radius * 0.22,
-            vertical: focused ? node.radius * 0.22 : node.radius * 0.18,
+            horizontal: node.isFlower ? node.radius * 1.1 : node.radius * 0.22,
+            vertical: node.isFlower ? node.radius * 0.85 : node.radius * 0.18,
           ),
-          child: focused
+          child: node.isFlower
               ? Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -522,25 +522,25 @@ class _NodeCard extends StatelessWidget {
                     Text(
                       node.title,
                       textAlign: TextAlign.center,
-                      maxLines: 2,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: (node.radius * 0.22).clamp(15.0, 22.0),
+                        fontSize: (node.radius * 0.55).clamp(18.0, 28.0),
                         height: 1.15,
                         fontWeight: FontWeight.w700,
                         color: scheme.onSurface,
                       ),
                     ),
                     if (showDescription) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       Flexible(
                         child: Text(
                           node.description!.trim(),
                           textAlign: TextAlign.center,
-                          maxLines: 5,
+                          maxLines: 8,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: (node.radius * 0.12).clamp(11.0, 14.0),
+                            fontSize: (node.radius * 0.28).clamp(12.0, 16.0),
                             height: 1.3,
                             fontWeight: FontWeight.w400,
                             color: scheme.onSurface.withValues(alpha: 0.72),
