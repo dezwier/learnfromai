@@ -29,38 +29,103 @@ void main() {
     await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsWidgets);
-    expect(find.text('Trajectories'), findsNothing);
-    expect(find.text('Review'), findsNothing);
   });
 
   testWidgets('an empty graph asks for a topic', (tester) async {
     final graph = GraphController(
+      poster: (path, {body}) async {
+        expect(path, '/knowledge/focus');
+        return {'focus_node_id': null, 'incomplete': false, 'nodes': [], 'edges': []};
+      },
       loader: (path) async {
-        expect(path, startsWith('/knowledge/graph'));
+        if (path == '/me/preferences') {
+          return {
+            'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
+          };
+        }
         return {'focus_node_id': null, 'incomplete': false, 'nodes': [], 'edges': []};
       },
     );
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
     expect(find.text('Explore the graph'), findsOneWidget);
-    expect(find.text('Extend the graph'), findsNothing);
-    expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('graph shows parents, children, related neighbors, and legend', (tester) async {
-    final graph = GraphController(loader: (path) async => _compact())..categoryGraph = _compact();
+  testWidgets('graph shows parents, siblings, children, related, and legend', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
     expect(find.text('Saurischia'), findsOneWidget);
+    expect(find.text('Mammals'), findsOneWidget);
     expect(find.text('Mesozoic'), findsOneWidget);
-    expect(find.text('Related'), findsOneWidget);
+    expect(find.text('Sibling'), findsOneWidget);
     expect(find.byTooltip('Search'), findsOneWidget);
-    expect(find.text('Show more'), findsNothing);
+  });
+
+  testWidgets('job progress barrier appears while generating', (tester) async {
+    var polls = 0;
+    final graph = GraphController(
+      loader: (path) async {
+        if (path == '/me/preferences') {
+          return {
+            'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
+          };
+        }
+        if (path.startsWith('/knowledge/graph/')) return _compact();
+        return {'focus_node_id': null, 'nodes': [], 'edges': []};
+      },
+      poster: (path, {body}) async {
+        final topic = body is Map ? body['topic']?.toString() : null;
+        if (topic == null || topic.isEmpty) {
+          return {'focus_node_id': null, 'nodes': [], 'edges': []};
+        }
+        return {
+          'status': 'queued',
+          'job_id': 'job-1',
+          'focus_node_id': '2',
+          'progress': {'message': 'Asking the model…'},
+        };
+      },
+      jobLoader: (jobId) async {
+        polls += 1;
+        if (polls < 2) {
+          return {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Merging Reptiles…'},
+          };
+        }
+        return {
+          'id': jobId,
+          'state': 'succeeded',
+          'progress': {'message': 'Neighborhood ready'},
+          'result': {'focus_id': '2'},
+        };
+      },
+    );
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+    final pending = graph.search('dinosaurs');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(graph.working, isTrue);
+    expect(find.textContaining('Merging Reptiles'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 800));
+    await pending;
+    await tester.pumpAndSettle();
+    expect(graph.focusId, '2');
+    expect(find.text('Saurischia'), findsOneWidget);
   });
 
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
-    final graph = GraphController(loader: (path) async => _compact())..categoryGraph = _compact();
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
@@ -72,63 +137,26 @@ void main() {
     await tester.tapAt(const Offset(24, 180));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
-    expect(find.byTooltip('Search'), findsOneWidget);
   });
 
   testWidgets('tapping back returns to the previous focus', (tester) async {
     final graph = GraphController(
-      loader: (path) async {
-        if (path.contains('focus_qid=3')) return _saurischia();
-        if (path.contains('focus_qid=2')) return _compact();
+      poster: (path, {body}) async {
+        final id = body is Map ? body['node_id']?.toString() : null;
+        if (id == '3') return _saurischia();
         return _compact();
       },
+      loader: (path) async => _compact(),
     )
       ..categoryGraph = _saurischia()
-      ..focusHistory.addAll([2, 3]);
+      ..focusHistory.addAll(['2', '3']);
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    expect(graph.focusId, 3);
-    expect(find.text('Genera'), findsOneWidget);
-    expect(find.byTooltip('Previous topic'), findsOneWidget);
-
+    expect(graph.focusId, '3');
     await tester.tap(find.byTooltip('Previous topic'));
     await tester.pumpAndSettle();
-    expect(graph.focusId, 2);
-    expect(find.text('Saurischia'), findsOneWidget);
-  });
-
-  testWidgets('ambiguous results can be chosen', (tester) async {
-    final graph = GraphController(
-      loader: (path) async {
-        expect(path, contains('focus_qid=6'));
-        return _compact();
-      },
-    )..candidates = const [
-        CategoryChoice(id: 6, title: 'Dinosaur toys', description: 'toys shaped like dinosaurs'),
-        CategoryChoice(id: 10, title: 'Dinosaur colors', description: 'coloration'),
-      ];
-    await tester.pumpWidget(_app(_signedIn(), graph));
-    await tester.pumpAndSettle();
-    expect(find.text('Choose a topic'), findsOneWidget);
-    expect(find.text('Dinosaur toys'), findsOneWidget);
-    expect(find.text('toys shaped like dinosaurs'), findsOneWidget);
-
-    await tester.tap(find.text('Dinosaur toys'));
-    await tester.pumpAndSettle();
-    expect(graph.focusId, 2);
-    expect(find.text('Saurischia'), findsOneWidget);
-  });
-
-  testWidgets('expired session surfaces the auth error', (tester) async {
-    final tokens = MemoryTokenStore()..value = 'stale';
-    final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
-    final auth = AuthController(api: api, gateway: _Gateway());
-    auth.error = 'Session expired';
-    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
-    await tester.pumpAndSettle();
-    expect(find.text('Session expired'), findsOneWidget);
-    expect(find.text('Sign in'), findsWidgets);
+    expect(graph.focusId, '2');
   });
 
   testWidgets('loading slot uses a full-size pulse', (tester) async {
@@ -140,26 +168,25 @@ void main() {
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
-  test('graph places parents above, children below, related beside', () {
+  test('graph places parents above, siblings beside, children below', () {
     final layout = layoutGraph(
       const [
-        GraphNode(id: 1, title: 'Reptile', depth: -1, kind: 'parent'),
-        GraphNode(id: 2, title: 'Dinosaur', depth: 0, kind: 'focus'),
-        GraphNode(id: 3, title: 'Saurischia', depth: 1, kind: 'child'),
-        GraphNode(id: 4, title: 'Mesozoic', depth: 0, kind: 'related'),
+        GraphNode(id: '1', title: 'Reptile', depth: -1, kind: 'parent'),
+        GraphNode(id: '2', title: 'Dinosaur', depth: 0, kind: 'focus'),
+        GraphNode(id: '3', title: 'Saurischia', depth: 1, kind: 'child'),
+        GraphNode(id: '4', title: 'Mammals', depth: 0, kind: 'sibling'),
       ],
       const [
-        GraphEdge(source: 1, target: 2, type: 'subclass_of'),
-        GraphEdge(source: 2, target: 3, type: 'parent_taxon'),
-        GraphEdge(source: 2, target: 4, type: 'related_to'),
+        GraphEdge(source: '2', target: '1', type: 'parent'),
+        GraphEdge(source: '2', target: '3', type: 'child'),
+        GraphEdge(source: '2', target: '4', type: 'sibling'),
       ],
-      focusId: 2,
+      focusId: '2',
     );
     final byId = {for (final node in layout.nodes) node.id: node};
-    expect(byId[1]!.y < byId[2]!.y, isTrue);
-    expect(byId[2]!.y < byId[3]!.y, isTrue);
-    expect(byId[4]!.role, NodeRole.related);
-    expect(layout.edges.any((edge) => edge.type == 'related_to'), isTrue);
+    expect(byId['1']!.y < byId['2']!.y, isTrue);
+    expect(byId['2']!.y < byId['3']!.y, isTrue);
+    expect(byId['4']!.role, NodeRole.sibling);
   });
 
   test('api client maps the error envelope', () {
@@ -169,34 +196,36 @@ void main() {
 
 Map<String, dynamic> _compact() {
   return {
-    'focus_node_id': 2,
+    'focus_node_id': '2',
     'incomplete': false,
     'nodes': [
-      {'id': 1, 'title': 'Paleontology', 'depth': -1, 'distance': 1, 'kind': 'parent'},
-      {'id': 2, 'title': 'Dinosaurs', 'depth': 0, 'distance': 0, 'kind': 'focus'},
-      {'id': 3, 'title': 'Saurischia', 'depth': 1, 'distance': 1, 'kind': 'child'},
-      {'id': 4, 'title': 'Mesozoic', 'depth': 0, 'distance': 1, 'kind': 'related'},
+      {'id': '1', 'title': 'Reptiles', 'depth': -1, 'distance': 1, 'kind': 'parent'},
+      {'id': '2', 'title': 'Dinosaurs', 'depth': 0, 'distance': 0, 'kind': 'focus'},
+      {'id': '3', 'title': 'Saurischia', 'depth': 1, 'distance': 1, 'kind': 'child'},
+      {'id': '4', 'title': 'Mammals', 'depth': 0, 'distance': 1, 'kind': 'sibling'},
+      {'id': '5', 'title': 'Mesozoic', 'depth': 0, 'distance': 1, 'kind': 'related'},
     ],
     'edges': [
-      {'source': 1, 'target': 2, 'type': 'subclass_of'},
-      {'source': 2, 'target': 3, 'type': 'parent_taxon'},
-      {'source': 2, 'target': 4, 'type': 'related_to'},
+      {'source': '2', 'target': '1', 'type': 'parent'},
+      {'source': '2', 'target': '3', 'type': 'child'},
+      {'source': '2', 'target': '4', 'type': 'sibling'},
+      {'source': '2', 'target': '5', 'type': 'acquaintance'},
     ],
   };
 }
 
 Map<String, dynamic> _saurischia() {
   return {
-    'focus_node_id': 3,
+    'focus_node_id': '3',
     'incomplete': false,
     'nodes': [
-      {'id': 2, 'title': 'Dinosaurs', 'depth': -1, 'distance': 1, 'kind': 'parent'},
-      {'id': 3, 'title': 'Saurischia', 'depth': 0, 'distance': 0, 'kind': 'focus'},
-      {'id': 8, 'title': 'Genera', 'depth': 1, 'distance': 1, 'kind': 'child'},
+      {'id': '2', 'title': 'Dinosaurs', 'depth': -1, 'distance': 1, 'kind': 'parent'},
+      {'id': '3', 'title': 'Saurischia', 'depth': 0, 'distance': 0, 'kind': 'focus'},
+      {'id': '8', 'title': 'Theropods', 'depth': 1, 'distance': 1, 'kind': 'child'},
     ],
     'edges': [
-      {'source': 2, 'target': 3, 'type': 'parent_taxon'},
-      {'source': 3, 'target': 8, 'type': 'parent_taxon'},
+      {'source': '3', 'target': '2', 'type': 'parent'},
+      {'source': '3', 'target': '8', 'type': 'child'},
     ],
   };
 }

@@ -1,5 +1,5 @@
-"""Compatibility shim. Prefer graph.load_knowledge_graph."""
+"""Compatibility shim. Prefer graph.focus_or_enqueue."""
 
-from app.features.knowledge_graph.graph import load_knowledge_graph
+from app.features.knowledge_graph.graph import focus_or_enqueue, load_knowledge_graph
 
-__all__ = ["load_knowledge_graph"]
+__all__ = ["focus_or_enqueue", "load_knowledge_graph"]

@@ -20,7 +20,7 @@ class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
-  int? _focusedFor;
+  String? _focusedFor;
   var _resumed = false;
   var _searchOpen = false;
 
@@ -64,6 +64,74 @@ class _GraphScreenState extends State<GraphScreen> {
     await graph.search(topic);
   }
 
+  Future<void> _openPrefs(GraphController graph) async {
+    var draft = graph.prefs;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            Widget stepper(String label, int value, int min, int max, ValueChanged<int> onChanged) {
+              return ListTile(
+                title: Text(label),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: value > min ? () => setSheet(() => onChanged(value - 1)) : null,
+                      icon: const Icon(Icons.remove),
+                    ),
+                    Text('$value'),
+                    IconButton(
+                      onPressed: value < max ? () => setSheet(() => onChanged(value + 1)) : null,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const ListTile(
+                      title: Text('Neighborhood size'),
+                      subtitle: Text('How many related topics to fetch around a focus.'),
+                    ),
+                    stepper('Parents', draft.parents, 1, 2, (value) => draft = draft.copyWith(parents: value)),
+                    stepper('Siblings', draft.siblings, 2, 3, (value) => draft = draft.copyWith(siblings: value)),
+                    stepper('Children', draft.children, 3, 5, (value) => draft = draft.copyWith(children: value)),
+                    stepper(
+                      'Related',
+                      draft.acquaintances,
+                      3,
+                      5,
+                      (value) => draft = draft.copyWith(acquaintances: value),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: FilledButton(
+                        onPressed: () async {
+                          Navigator.of(context).pop();
+                          await graph.savePreferences(draft);
+                        },
+                        child: const Text('Save'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
@@ -80,6 +148,11 @@ class _GraphScreenState extends State<GraphScreen> {
               onPressed: () => graph.back(),
               icon: const Icon(Icons.arrow_back),
             ),
+          IconButton(
+            tooltip: 'Neighborhood settings',
+            onPressed: () => _openPrefs(graph),
+            icon: const Icon(Icons.tune),
+          ),
           IconButton(
             tooltip: 'Theme',
             onPressed: () {
@@ -100,48 +173,78 @@ class _GraphScreenState extends State<GraphScreen> {
           ),
         ],
       ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: _dismissSearch,
-        child: Stack(
-          children: [
-            Column(
-              children: [
-                if (graph.categoryGraph?['incomplete'] == true)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
-                    child: Text(
-                      'Some surrounding topics are still loading. Open this topic again to continue.',
-                    ),
-                  ),
-                if (graph.error != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: StudyCard(
-                      dense: true,
-                      eyebrow: 'GRAPH',
-                      title: graph.error!,
-                      subtitle: 'Try another topic.',
-                    ),
-                  ),
-                if (layout.nodes.isNotEmpty) const _Legend(),
-                Expanded(child: _body(context, graph, layout)),
-              ],
+      floatingActionButton: _searchOpen
+          ? null
+          : FloatingActionButton(
+              heroTag: 'graph-search',
+              tooltip: 'Search',
+              onPressed: graph.working ? null : _openSearch,
+              child: const Icon(Icons.search),
             ),
-            Positioned(
-              right: 16,
-              bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
-              child: _FloatingSearch(
-                open: _searchOpen,
-                controller: _search,
-                focusNode: _searchFocus,
-                onOpen: _openSearch,
-                onSubmit: () => _submitSearch(graph),
-                onDismiss: _dismissSearch,
+      bottomSheet: _searchOpen
+          ? _SearchBar(
+              controller: _search,
+              focusNode: _searchFocus,
+              onSubmit: () => _submitSearch(graph),
+              onDismiss: _dismissSearch,
+            )
+          : null,
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              if (graph.categoryGraph?['incomplete'] == true)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Text('Some surrounding topics are still loading. Open this topic again to continue.'),
+                ),
+              if (graph.error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: StudyCard(
+                    dense: true,
+                    eyebrow: 'GRAPH',
+                    title: graph.error!,
+                    subtitle: 'Try another topic.',
+                  ),
+                ),
+              if (layout.nodes.isNotEmpty) const _Legend(),
+              Expanded(child: _body(context, graph, layout)),
+            ],
+          ),
+          if (graph.working)
+            Positioned.fill(
+              child: Material(
+                color: Colors.black54,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              graph.progressMessage ?? 'Working…',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -164,14 +267,14 @@ class _GraphScreenState extends State<GraphScreen> {
           const StudyCard(
             eyebrow: 'TOPICS',
             title: 'Choose a topic',
-            subtitle: 'More than one Wikidata item matches this search.',
+            subtitle: 'More than one topic matches this search.',
           ),
           const SizedBox(height: 12),
           for (final choice in graph.candidates)
             ListTile(
               title: Text(choice.title),
               subtitle: Text(
-                (choice.description?.trim().isNotEmpty == true) ? choice.description! : 'Q${choice.id}',
+                (choice.description?.trim().isNotEmpty == true) ? choice.description! : choice.id,
               ),
               onTap: () => graph.choose(choice),
             ),
@@ -185,7 +288,7 @@ class _GraphScreenState extends State<GraphScreen> {
           StudyCard(
             eyebrow: 'GRAPH',
             title: 'Explore the graph',
-            subtitle: 'Search a topic to see parents above, children below, and related neighbors on the sides.',
+            subtitle: 'Search a topic to see parents, siblings, children, and related neighbors.',
           ),
         ],
       );
@@ -208,7 +311,7 @@ class _GraphScreenState extends State<GraphScreen> {
       for (final raw in (payload['nodes'] as List?) ?? const [])
         if (raw is Map)
           GraphNode(
-            id: (raw['id'] as num).toInt(),
+            id: raw['id'].toString(),
             title: raw['title']?.toString() ?? '',
             depth: (raw['depth'] as num?)?.toInt() ?? 0,
             distance: (raw['distance'] as num?)?.toInt() ?? 0,
@@ -219,75 +322,63 @@ class _GraphScreenState extends State<GraphScreen> {
       for (final raw in (payload['edges'] as List?) ?? const [])
         if (raw is Map)
           GraphEdge(
-            source: (raw['source'] as num).toInt(),
-            target: (raw['target'] as num).toInt(),
-            type: raw['type']?.toString() ?? 'subclass_of',
+            source: raw['source'].toString(),
+            target: raw['target'].toString(),
+            type: raw['type']?.toString() ?? 'child',
           ),
     ];
-    final focus = graph.focusId ?? (nodes.isEmpty ? 0 : nodes.first.id);
+    final focus = graph.focusId ?? (nodes.isEmpty ? '' : nodes.first.id);
     return layoutGraph(nodes, edges, focusId: focus);
   }
 }
 
-class _FloatingSearch extends StatelessWidget {
-  const _FloatingSearch({
-    required this.open,
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({
     required this.controller,
     required this.focusNode,
-    required this.onOpen,
     required this.onSubmit,
     required this.onDismiss,
   });
 
-  final bool open;
   final TextEditingController controller;
   final FocusNode focusNode;
-  final VoidCallback onOpen;
   final VoidCallback onSubmit;
   final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (!open) {
-      return FloatingActionButton(
-        heroTag: 'graph-search',
-        tooltip: 'Search',
-        onPressed: onOpen,
-        child: const Icon(Icons.search),
-      );
-    }
     return Material(
-      elevation: 6,
+      elevation: 8,
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(28),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(width: 16),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                autofocus: true,
-                textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
-                  hintText: 'Search a topic',
-                  border: InputBorder.none,
-                  isDense: true,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Search a topic',
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => onSubmit(),
+                  onTapOutside: (_) => onDismiss(),
                 ),
-                onSubmitted: (_) => onSubmit(),
-                onTapOutside: (_) => onDismiss(),
               ),
-            ),
-            IconButton(
-              tooltip: 'Search',
-              onPressed: onSubmit,
-              icon: const Icon(Icons.search),
-            ),
-          ],
+              IconButton(
+                tooltip: 'Search',
+                onPressed: onSubmit,
+                icon: const Icon(Icons.search),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -308,6 +399,7 @@ class _Legend extends StatelessWidget {
         children: [
           _LegendSwatch(color: roleColor(NodeRole.parent, scheme), label: 'Parent'),
           _LegendSwatch(color: roleColor(NodeRole.focus, scheme), label: 'Focus'),
+          _LegendSwatch(color: roleColor(NodeRole.sibling, scheme), label: 'Sibling'),
           _LegendSwatch(color: roleColor(NodeRole.child, scheme), label: 'Child'),
           _LegendSwatch(color: roleColor(NodeRole.related, scheme), label: 'Related'),
         ],
@@ -349,10 +441,10 @@ class _GraphView extends StatelessWidget {
   });
 
   final GraphLayout layout;
-  final int? focusId;
-  final int? pendingId;
+  final String? focusId;
+  final String? pendingId;
   final TransformationController transform;
-  final ValueChanged<int> onOpen;
+  final ValueChanged<String> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -366,7 +458,7 @@ class _GraphView extends StatelessWidget {
         maxScale: 3.0,
         boundaryMargin: const EdgeInsets.all(400),
         child: SizedBox(
-          width: layout.width < 360 ? 360 : layout.width,
+          width: layout.width < 420 ? 420 : layout.width,
           height: layout.height < 280 ? 280 : layout.height,
           child: Stack(
             children: [
@@ -424,21 +516,18 @@ class _NodeCard extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                node.title,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.15,
-                  fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
-                ),
+          child: Center(
+            child: Text(
+              node.title,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.15,
+                fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -461,11 +550,18 @@ class _EdgePainter extends CustomPainter {
       if (from == null || to == null) continue;
       final paint = Paint()
         ..color = edgeColor(edge, scheme)
-        ..strokeWidth = edge.isRelated ? 1.2 : 1.8
+        ..strokeWidth = edge.isRelated || edge.isSibling ? 1.2 : 1.8
         ..style = PaintingStyle.stroke;
-      if (edge.isRelated) {
-        paint.strokeCap = StrokeCap.round;
-        _drawCurve(canvas, from.center, to.center, paint);
+      if (edge.isRelated || edge.isSibling) {
+        final path = Path()
+          ..moveTo(from.center.dx, from.center.dy)
+          ..quadraticBezierTo(
+            (from.center.dx + to.center.dx) / 2,
+            (from.center.dy + to.center.dy) / 2 - 24,
+            to.center.dx,
+            to.center.dy,
+          );
+        canvas.drawPath(path, paint);
       } else {
         canvas.drawLine(
           Offset(from.x + from.width / 2, from.y + from.height),
@@ -474,13 +570,6 @@ class _EdgePainter extends CustomPainter {
         );
       }
     }
-  }
-
-  void _drawCurve(Canvas canvas, Offset a, Offset b, Paint paint) {
-    final path = Path()
-      ..moveTo(a.dx, a.dy)
-      ..quadraticBezierTo((a.dx + b.dx) / 2, (a.dy + b.dy) / 2 - 24, b.dx, b.dy);
-    canvas.drawPath(path, paint);
   }
 
   @override

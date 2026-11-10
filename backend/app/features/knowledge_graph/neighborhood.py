@@ -1,0 +1,405 @@
+"""Shared LLM neighborhood expand + merge into one knowledge universe."""
+
+from __future__ import annotations
+
+from collections import deque
+from uuid import UUID
+
+from sqlmodel import Session, col, select
+
+from app.core.time import utcnow
+from app.features.knowledge_graph.identity import canonical_key_for
+from app.features.knowledge_graph.node_models import (
+    KnowledgeEdge,
+    KnowledgeNode,
+    KnowledgeRequest,
+    KnowledgeRequestNode,
+)
+from app.features.platform.llm import assert_user_quota, record_usage
+from app.features.platform.models import GenerationJob
+from app.features.platform.neighborhood_llm import BUCKETS, get_neighborhood_llm, parse_uuid
+
+RELATION_PARENT = "parent"
+RELATION_CHILD = "child"
+RELATION_SIBLING = "sibling"
+RELATION_ACQUAINTANCE = "acquaintance"
+
+BUCKET_RELATION = {
+    "parents": RELATION_PARENT,
+    "siblings": RELATION_SIBLING,
+    "children": RELATION_CHILD,
+    "acquaintances": RELATION_ACQUAINTANCE,
+}
+
+INVERSE = {
+    RELATION_PARENT: RELATION_CHILD,
+    RELATION_CHILD: RELATION_PARENT,
+    RELATION_SIBLING: RELATION_SIBLING,
+    RELATION_ACQUAINTANCE: RELATION_ACQUAINTANCE,
+}
+
+KIND_FOR_RELATION = {
+    RELATION_PARENT: "parent",
+    RELATION_CHILD: "child",
+    RELATION_SIBLING: "sibling",
+    RELATION_ACQUAINTANCE: "related",
+}
+
+
+def relation_counts(session: Session, focus_id: UUID) -> dict[str, int]:
+    edges = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus_id)).all())
+    counts = {key: 0 for key in BUCKET_RELATION}
+    for edge in edges:
+        for bucket, relation in BUCKET_RELATION.items():
+            if edge.relation == relation:
+                counts[bucket] += 1
+    return counts
+
+
+def is_complete(session: Session, focus_id: UUID, counts: dict[str, int]) -> bool:
+    have = relation_counts(session, focus_id)
+    return all(have.get(bucket, 0) >= int(counts.get(bucket, 0)) for bucket in BUCKET_RELATION)
+
+
+def ensure_focus_node(session: Session, *, topic: str | None = None, node_id: UUID | None = None) -> KnowledgeNode:
+    if node_id is not None:
+        row = session.get(KnowledgeNode, node_id)
+        if row is None:
+            from app.core.errors import not_found
+
+            raise not_found("Topic not found")
+        return row
+    name = (topic or "").strip()
+    if not name:
+        from app.core.errors import AppError
+
+        raise AppError("VALIDATION_ERROR", "Provide a topic or a node_id", 422)
+    key = canonical_key_for(name)
+    existing = list(session.exec(select(KnowledgeNode).where(KnowledgeNode.name_key == key)).all())
+    if len(existing) == 1:
+        return existing[0]
+    if existing:
+        # Prefer exact display-name match before creating another collision.
+        for row in existing:
+            if row.name.lower() == name.lower():
+                return row
+        return existing[0]
+    row = KnowledgeNode(name=name[:1].upper() + name[1:] if name else name, name_key=key, description=None)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def set_progress(session: Session, job: GenerationJob, *, stage: str, message: str, fraction: float) -> None:
+    job.progress = {"stage": stage, "message": message, "fraction": max(0.0, min(1.0, fraction))}
+    job.updated_at = utcnow()
+    session.add(job)
+    session.commit()
+
+
+def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
+    payload = job.payload or {}
+    user_id = job.user_id
+    if user_id is None:
+        from app.core.errors import AppError
+
+        raise AppError("VALIDATION_ERROR", "Job is missing a user", 422)
+    assert_user_quota(session, user_id)
+    counts = {
+        "parents": int(payload.get("parents") or 2),
+        "siblings": int(payload.get("siblings") or 3),
+        "children": int(payload.get("children") or 4),
+        "acquaintances": int(payload.get("acquaintances") or 4),
+    }
+    focus_id = parse_uuid(payload.get("focus_id"))
+    topic = str(payload.get("topic") or "").strip() or None
+    set_progress(session, job, stage="resolve", message="Resolving topic…", fraction=0.05)
+    focus = ensure_focus_node(session, topic=topic, node_id=focus_id)
+    session.commit()
+
+    if is_complete(session, focus.id, counts):
+        set_progress(session, job, stage="done", message="Neighborhood already complete", fraction=1.0)
+        request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
+        session.commit()
+        return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": True}
+
+    llm = get_neighborhood_llm()
+    set_progress(session, job, stage="generate", message="Asking the model for related topics…", fraction=0.15)
+    neighborhood, usage = llm.generate_neighborhood(focus.name if not topic else topic, counts)
+    record_usage(session, user_id=user_id, job_id=job.id, task="neighborhood", provider=llm.name, usage=usage)
+    session.commit()
+
+    focus_spec = neighborhood.get("focus") if isinstance(neighborhood.get("focus"), dict) else {}
+    if focus_spec.get("name") or focus_spec.get("description"):
+        focus = _upsert_named(
+            session,
+            llm=llm,
+            user_id=user_id,
+            job_id=job.id,
+            name=str(focus_spec.get("name") or focus.name),
+            description=focus_spec.get("description"),
+            preferred=focus,
+        )
+        session.commit()
+
+    set_progress(session, job, stage="merge", message="Merging topics into the shared graph…", fraction=0.35)
+    linked: dict[str, list[UUID]] = {bucket: [] for bucket in BUCKETS}
+    seen_names: set[str] = {canonical_key_for(focus.name)}
+    total = sum(len(neighborhood.get(bucket) or []) for bucket in BUCKETS) or 1
+    done = 0
+    for bucket in BUCKETS:
+        relation = BUCKET_RELATION[bucket]
+        for item in neighborhood.get(bucket) or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            key = canonical_key_for(name)
+            if key == canonical_key_for(focus.name) or key in seen_names:
+                continue
+            seen_names.add(key)
+            set_progress(
+                session,
+                job,
+                stage="merge",
+                message=f"Merging {name}…",
+                fraction=0.35 + 0.45 * (done / total),
+            )
+            node = _upsert_named(
+                session,
+                llm=llm,
+                user_id=user_id,
+                job_id=job.id,
+                name=name,
+                description=item.get("description"),
+            )
+            _ensure_pair(session, focus.id, node.id, relation)
+            linked[bucket].append(node.id)
+            done += 1
+            session.commit()
+
+    # Fill short buckets with a repair pass once.
+    short = {bucket: max(0, counts[bucket] - len(linked[bucket])) for bucket in BUCKETS if len(linked[bucket]) < counts[bucket]}
+    if any(short.values()):
+        set_progress(session, job, stage="repair", message="Filling missing related topics…", fraction=0.85)
+        repair_counts = {bucket: short.get(bucket, 0) for bucket in BUCKETS}
+        repair, repair_usage = llm.generate_neighborhood(focus.name, repair_counts)
+        record_usage(
+            session, user_id=user_id, job_id=job.id, task="neighborhood_repair", provider=llm.name, usage=repair_usage
+        )
+        for bucket in BUCKETS:
+            relation = BUCKET_RELATION[bucket]
+            need = short.get(bucket, 0)
+            if need <= 0:
+                continue
+            for item in (repair.get(bucket) or [])[:need]:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                key = canonical_key_for(name)
+                if key == canonical_key_for(focus.name) or key in seen_names:
+                    continue
+                seen_names.add(key)
+                node = _upsert_named(
+                    session,
+                    llm=llm,
+                    user_id=user_id,
+                    job_id=job.id,
+                    name=name,
+                    description=item.get("description"),
+                )
+                _ensure_pair(session, focus.id, node.id, relation)
+                linked[bucket].append(node.id)
+        session.commit()
+
+    set_progress(session, job, stage="persist", message="Saving neighborhood…", fraction=0.95)
+    request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
+    set_progress(session, job, stage="done", message="Neighborhood ready", fraction=1.0)
+    session.commit()
+    return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": False}
+
+
+def _upsert_named(
+    session: Session,
+    *,
+    llm,
+    user_id: UUID,
+    job_id: UUID | None,
+    name: str,
+    description: object,
+    preferred: KnowledgeNode | None = None,
+) -> KnowledgeNode:
+    key = canonical_key_for(name)
+    desc = str(description).strip() if description else None
+    existing = list(session.exec(select(KnowledgeNode).where(KnowledgeNode.name_key == key)).all())
+    if preferred is not None and preferred.name_key == key:
+        if desc and not preferred.description:
+            preferred.description = desc
+            preferred.name = name
+            session.add(preferred)
+            session.flush()
+        return preferred
+    if not existing:
+        row = KnowledgeNode(name=name, name_key=key, description=desc)
+        session.add(row)
+        session.flush()
+        return row
+    if len(existing) == 1 and (
+        not desc
+        or not existing[0].description
+        or existing[0].description == desc
+        or preferred is not None
+    ):
+        row = existing[0]
+        if desc and (not row.description or preferred is not None):
+            row.description = desc or row.description
+            row.name = name
+            session.add(row)
+            session.flush()
+        return row
+
+    candidates = [
+        {
+            "key": "c0",
+            "name": name,
+            "description": desc,
+            "existing": [{"id": str(row.id), "name": row.name, "description": row.description} for row in existing],
+        }
+    ]
+    matched, usage = llm.match_topics(candidates)
+    record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
+    chosen = parse_uuid((matched.get("matches") or {}).get("c0"))
+    if chosen is not None:
+        row = session.get(KnowledgeNode, chosen)
+        if row is not None:
+            if desc and not row.description:
+                row.description = desc
+                session.add(row)
+                session.flush()
+            return row
+    row = KnowledgeNode(name=name, name_key=key, description=desc)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _ensure_pair(session: Session, focus_id: UUID, other_id: UUID, relation: str) -> None:
+    if focus_id == other_id:
+        return
+    inverse = INVERSE[relation]
+    _add_edge(session, focus_id, relation, other_id)
+    _add_edge(session, other_id, inverse, focus_id)
+
+
+def _add_edge(session: Session, from_id: UUID, relation: str, to_id: UUID) -> None:
+    existing = session.get(KnowledgeEdge, (from_id, relation, to_id))
+    if existing is not None:
+        return
+    session.add(KnowledgeEdge(from_id=from_id, relation=relation, to_id=to_id))
+
+
+def _persist_request(
+    session: Session,
+    *,
+    user_id: UUID,
+    focus: KnowledgeNode,
+    counts: dict[str, int],
+    job_id: UUID | None,
+) -> KnowledgeRequest:
+    payload = build_subgraph(session, focus)
+    request = KnowledgeRequest(
+        user_id=user_id,
+        focus_id=focus.id,
+        parents=counts["parents"],
+        siblings=counts["siblings"],
+        children=counts["children"],
+        acquaintances=counts["acquaintances"],
+        job_id=job_id,
+    )
+    session.add(request)
+    session.flush()
+    for node in payload["nodes"]:
+        session.add(
+            KnowledgeRequestNode(
+                request_id=request.id,
+                node_id=UUID(str(node["id"])),
+                distance=int(node["distance"]),
+                kind=str(node["kind"]),
+            )
+        )
+    session.flush()
+    return request
+
+
+def build_subgraph(session: Session, focus: KnowledgeNode) -> dict:
+    kinds: dict[UUID, str] = {focus.id: "focus"}
+    depths: dict[UUID, int] = {focus.id: 0}
+    nodes: dict[UUID, KnowledgeNode] = {focus.id: focus}
+
+    for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus.id)).all():
+        other = session.get(KnowledgeNode, edge.to_id)
+        if other is None:
+            continue
+        nodes[other.id] = other
+        kind = KIND_FOR_RELATION.get(edge.relation, "related")
+        kinds.setdefault(other.id, kind)
+        if edge.relation == RELATION_PARENT:
+            depths[other.id] = -1
+        elif edge.relation == RELATION_CHILD:
+            depths[other.id] = 1
+        else:
+            depths.setdefault(other.id, 0)
+
+    ids = list(nodes.keys())
+    edges = list(
+        session.exec(
+            select(KnowledgeEdge).where(col(KnowledgeEdge.from_id).in_(ids), col(KnowledgeEdge.to_id).in_(ids))
+        ).all()
+    ) if ids else []
+    distances = _distances(focus.id, edges)
+    node_payload = []
+    for node_id in sorted(ids, key=lambda value: (depths.get(value, 0), nodes[value].name.lower(), str(value))):
+        node = nodes[node_id]
+        node_payload.append(
+            {
+                "id": str(node.id),
+                "title": node.name,
+                "description": node.description,
+                "depth": depths.get(node_id, 0),
+                "distance": distances.get(node_id, 0),
+                "kind": kinds.get(node_id, "related"),
+            }
+        )
+    edge_payload = [
+        {"source": str(edge.from_id), "target": str(edge.to_id), "type": edge.relation}
+        for edge in sorted(edges, key=lambda row: (str(row.from_id), row.relation, str(row.to_id)))
+        if edge.from_id == focus.id or edge.to_id == focus.id
+    ]
+    # Prefer outbound edges from focus for a clean neighborhood drawing.
+    edge_payload = [edge for edge in edge_payload if edge["source"] == str(focus.id)]
+    return {
+        "focus_node_id": str(focus.id),
+        "incomplete": False,
+        "nodes": node_payload,
+        "edges": edge_payload,
+    }
+
+
+def _distances(focus_id: UUID, edges: list[KnowledgeEdge]) -> dict[UUID, int]:
+    adjacency: dict[UUID, set[UUID]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.from_id, set()).add(edge.to_id)
+        adjacency.setdefault(edge.to_id, set()).add(edge.from_id)
+    distances = {focus_id: 0}
+    queue: deque[UUID] = deque([focus_id])
+    while queue:
+        current = queue.popleft()
+        for neighbor in adjacency.get(current, ()):
+            if neighbor in distances:
+                continue
+            distances[neighbor] = distances[current] + 1
+            queue.append(neighbor)
+    return distances

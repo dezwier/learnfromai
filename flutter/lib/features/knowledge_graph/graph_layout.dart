@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-enum NodeRole { parent, focus, child, related }
+enum NodeRole { parent, focus, sibling, child, related }
 
 class GraphNode {
   const GraphNode({
@@ -13,7 +13,7 @@ class GraphNode {
     this.kind = 'focus',
   });
 
-  final int id;
+  final String id;
   final String title;
   final int depth;
   final int distance;
@@ -23,6 +23,8 @@ class GraphNode {
     switch (kind) {
       case 'parent':
         return NodeRole.parent;
+      case 'sibling':
+        return NodeRole.sibling;
       case 'child':
         return NodeRole.child;
       case 'related':
@@ -36,14 +38,14 @@ class GraphNode {
 }
 
 class GraphEdge {
-  const GraphEdge({required this.source, required this.target, this.type = 'subclass_of'});
+  const GraphEdge({required this.source, required this.target, this.type = 'child'});
 
-  final int source;
-  final int target;
+  final String source;
+  final String target;
   final String type;
 
-  bool get isRelated => type == 'related_to';
-  bool get isHierarchy => type == 'subclass_of' || type == 'parent_taxon';
+  bool get isRelated => type == 'acquaintance' || type == 'related_to' || type == 'related';
+  bool get isSibling => type == 'sibling';
 }
 
 class PlacedNode {
@@ -60,7 +62,7 @@ class PlacedNode {
     required this.height,
   });
 
-  final int id;
+  final String id;
   final String title;
   final int depth;
   final int distance;
@@ -96,14 +98,14 @@ const graphCardWidth = 148.0;
 const graphCardHeight = 52.0;
 const graphGapX = 20.0;
 const graphGapY = 88.0;
-const graphSideGap = 56.0;
+const graphSideGap = 40.0;
 const graphPadding = 64.0;
 
-/// Neighborhood graph: parents above, focus center, children below, related on the sides.
+/// Parents above, siblings near focus sides, related farther out, children below.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
   List<GraphEdge> edges, {
-  required int focusId,
+  required String focusId,
 }) {
   final byId = {for (final node in nodes) node.id: node};
   final parents = [
@@ -113,6 +115,10 @@ GraphLayout layoutGraph(
   final children = [
     for (final node in nodes)
       if (node.role == NodeRole.child) node,
+  ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+  final siblings = [
+    for (final node in nodes)
+      if (node.role == NodeRole.sibling) node,
   ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   final related = [
     for (final node in nodes)
@@ -130,19 +136,28 @@ GraphLayout layoutGraph(
   }
   focus ??= nodes.isEmpty ? null : nodes.first;
 
+  final leftSiblings = [for (var i = 0; i < siblings.length; i += 2) siblings[i]];
+  final rightSiblings = [for (var i = 1; i < siblings.length; i += 2) siblings[i]];
+  final leftRelated = [for (var i = 0; i < related.length; i += 2) related[i]];
+  final rightRelated = [for (var i = 1; i < related.length; i += 2) related[i]];
+
   final parentWidth = _rowWidth(parents.length);
   final childWidth = _rowWidth(children.length);
-  final leftRelated = [
-    for (var i = 0; i < related.length; i += 2) related[i],
-  ];
-  final rightRelated = [
-    for (var i = 1; i < related.length; i += 2) related[i],
-  ];
-  final sideWidth = math.max(_columnWidth(leftRelated.length), _columnWidth(rightRelated.length));
+  final sideInner = math.max(_columnWidth(leftSiblings.length), _columnWidth(rightSiblings.length));
+  final sideOuter = math.max(_columnWidth(leftRelated.length), _columnWidth(rightRelated.length));
   final centerBand = math.max(graphCardWidth, math.max(parentWidth, childWidth));
   final width = math.max(
-    graphPadding * 2 + sideWidth + graphSideGap + centerBand + graphSideGap + sideWidth,
-    360.0,
+    graphPadding * 2 +
+        sideOuter +
+        graphSideGap +
+        sideInner +
+        graphSideGap +
+        centerBand +
+        graphSideGap +
+        sideInner +
+        graphSideGap +
+        sideOuter,
+    420.0,
   );
 
   final placed = <PlacedNode>[];
@@ -155,37 +170,29 @@ GraphLayout layoutGraph(
 
   final focusY = y;
   if (focus != null) {
-    placed.add(
-      _card(
-        focus,
-        x: (width - graphCardWidth) / 2,
-        y: focusY,
-      ),
-    );
+    placed.add(_card(focus, x: (width - graphCardWidth) / 2, y: focusY));
   }
 
-  // Related neighbors flank the focus.
+  final siblingLeftX = graphPadding + sideOuter + graphSideGap;
+  final siblingRightX = width - graphPadding - sideOuter - graphSideGap - graphCardWidth;
+  final relatedLeftX = graphPadding.toDouble();
+  final relatedRightX = width - graphPadding - graphCardWidth;
+
+  if (leftSiblings.isNotEmpty) {
+    final top = focusY + (graphCardHeight - _columnHeight(leftSiblings.length)) / 2;
+    placed.addAll(_placeColumn(leftSiblings, x: siblingLeftX, top: top));
+  }
+  if (rightSiblings.isNotEmpty) {
+    final top = focusY + (graphCardHeight - _columnHeight(rightSiblings.length)) / 2;
+    placed.addAll(_placeColumn(rightSiblings, x: siblingRightX, top: top));
+  }
   if (leftRelated.isNotEmpty) {
-    final columnHeight = _columnHeight(leftRelated.length);
-    final top = focusY + (graphCardHeight - columnHeight) / 2;
-    placed.addAll(
-      _placeColumn(
-        leftRelated,
-        x: graphPadding + (sideWidth - graphCardWidth).clamp(0, sideWidth) / 2,
-        top: top,
-      ),
-    );
+    final top = focusY + (graphCardHeight - _columnHeight(leftRelated.length)) / 2;
+    placed.addAll(_placeColumn(leftRelated, x: relatedLeftX, top: top));
   }
   if (rightRelated.isNotEmpty) {
-    final columnHeight = _columnHeight(rightRelated.length);
-    final top = focusY + (graphCardHeight - columnHeight) / 2;
-    placed.addAll(
-      _placeColumn(
-        rightRelated,
-        x: width - graphPadding - sideWidth + (sideWidth - graphCardWidth).clamp(0, sideWidth) / 2,
-        top: top,
-      ),
-    );
+    final top = focusY + (graphCardHeight - _columnHeight(rightRelated.length)) / 2;
+    placed.addAll(_placeColumn(rightRelated, x: relatedRightX, top: top));
   }
 
   y = focusY + graphCardHeight + graphGapY;
@@ -262,18 +269,18 @@ PlacedNode _card(GraphNode node, {required double x, required double y}) {
   );
 }
 
-int? hitTestNode(GraphLayout layout, Offset point) {
+String? hitTestNode(GraphLayout layout, Offset point) {
   for (final node in layout.nodes.reversed) {
     if (node.contains(point)) return node.id;
   }
   return null;
 }
 
-/// Stable colors for relationship roles across light/dark themes.
 Color roleColor(NodeRole role, ColorScheme scheme) {
   return switch (role) {
     NodeRole.parent => const Color(0xFF2F6FED),
     NodeRole.focus => scheme.primary,
+    NodeRole.sibling => const Color(0xFF7A3FF2),
     NodeRole.child => const Color(0xFF0F8A5F),
     NodeRole.related => const Color(0xFFB05C1B),
   };
@@ -281,5 +288,6 @@ Color roleColor(NodeRole role, ColorScheme scheme) {
 
 Color edgeColor(GraphEdge edge, ColorScheme scheme) {
   if (edge.isRelated) return roleColor(NodeRole.related, scheme).withValues(alpha: 0.55);
+  if (edge.isSibling) return roleColor(NodeRole.sibling, scheme).withValues(alpha: 0.5);
   return roleColor(NodeRole.parent, scheme).withValues(alpha: 0.45);
 }

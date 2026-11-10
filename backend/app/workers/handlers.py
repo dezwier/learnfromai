@@ -8,6 +8,7 @@ from app.core.db import engine
 from app.core.errors import AppError
 from app.core.time import utcnow
 from app.features.graph_extend.models import ExtendRequest
+from app.features.knowledge_graph.neighborhood import expand_neighborhood
 from app.features.platform.jobs import finish
 from app.features.platform.models import GenerationJob, WorkerHeartbeat
 
@@ -20,6 +21,7 @@ def handle(job_id: UUID, token: UUID) -> None:
         dispatch = {
             "noop": _noop,
             "expand_graph": _expand_graph,
+            "expand_neighborhood": _expand_neighborhood,
         }
         fn = dispatch.get(job.type)
         if fn is None:
@@ -51,9 +53,12 @@ def _noop(session: Session, job: GenerationJob) -> dict:
 
 
 def _expand_graph(session: Session, job: GenerationJob) -> dict:
-    """Graph structure comes from Wikipedia. A leftover expand job must not call a model."""
     _ = (session, job)
     raise AppError("GONE", "Graph generation has been removed", 410, {"terminal": True})
+
+
+def _expand_neighborhood(session: Session, job: GenerationJob) -> dict:
+    return expand_neighborhood(session, job)
 
 
 def _fail_request(job_id: UUID, code: str) -> None:

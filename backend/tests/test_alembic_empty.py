@@ -44,6 +44,16 @@ def test_alembic_upgrade_on_empty_database():
     assert "knowledge_edges" in tables
     assert "knowledge_requests" in tables
     assert "knowledge_request_nodes" in tables
+    with _engine(database).connect() as connection:
+        cols = {
+            row[0]
+            for row in connection.execute(
+                text("SELECT column_name FROM information_schema.columns WHERE table_name = 'knowledge_nodes'")
+            )
+        }
+    assert "id" in cols
+    assert "name_key" in cols
+    assert "qid" not in cols
     assert "users" in tables
     assert "generation_jobs" in tables
     assert "learning_goals" not in tables
