@@ -203,7 +203,6 @@ class _GraphScreenState extends State<GraphScreen> {
                     subtitle: 'Try another topic.',
                   ),
                 ),
-              if (_hasNodes(graph)) const _Legend(),
               Expanded(child: _body(context, graph)),
             ],
           ),
@@ -395,52 +394,6 @@ class _SearchBar extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _Legend extends StatelessWidget {
-  const _Legend();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 6,
-        children: [
-          _LegendSwatch(color: roleColor(NodeRole.parent, scheme), label: 'Parent'),
-          _LegendSwatch(color: roleColor(NodeRole.focus, scheme), label: 'Focus'),
-          _LegendSwatch(color: roleColor(NodeRole.sibling, scheme), label: 'Sibling'),
-          _LegendSwatch(color: roleColor(NodeRole.child, scheme), label: 'Child'),
-          _LegendSwatch(color: roleColor(NodeRole.related, scheme), label: 'Related'),
-        ],
-      ),
-    );
-  }
-}
-
-class _LegendSwatch extends StatelessWidget {
-  const _LegendSwatch({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.labelMedium),
-      ],
     );
   }
 }

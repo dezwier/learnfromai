@@ -8,6 +8,7 @@ ThemeData buildTheme({Brightness brightness = Brightness.light}) {
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
+    fontFamily: 'tt_ramilas',
     colorScheme: ColorScheme.fromSeed(seedColor: accent, brightness: brightness).copyWith(
       surface: paper,
       primary: accent,
