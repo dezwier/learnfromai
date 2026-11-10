@@ -6,17 +6,10 @@ from sqlmodel import func, select
 
 from app.core.config import get_settings
 from app.core.time import utcnow
-from app.features.knowledge_graph.item_models import (
-    KnowledgeGraphRequest,
-    KnowledgeGraphRequestNode,
-    KnowledgeItem,
-)
-from app.features.knowledge_graph.wikidata import (
-    WikidataClient,
-    WikiDataError,
-    WikiEntity,
-    parse_qid,
-)
+from app.features.knowledge_graph.graph import load_knowledge_graph
+from app.features.knowledge_graph.node_models import KnowledgeNode, KnowledgeRequest, KnowledgeRequestNode
+from app.features.knowledge_graph.wikidata import WikiDataError, WikiEntity, parse_qid
+from app.features.knowledge_graph.wikipedia_related import RelatedHit, WikipediaError
 
 LIFE = 7239
 ANIMALS = 20
@@ -27,15 +20,17 @@ ORNITHISCHIA = 7
 GENERA = 8
 TOYS = 11
 COLORS = 10
-LIZARDS = 12
+MESOZOIC = 500
+PALAEONTOLOGY = 501
 DRACOHORS = 99
 
 
-def _item(qid, title, *, subclass=(), taxon=(), instance=(), sitelinks=1, description=None):
+def _item(qid, title, *, subclass=(), taxon=(), instance=(), sitelinks=1, description=None, enwiki=None):
     return WikiEntity(
         qid=qid,
         title=title,
         description=description,
+        enwiki_title=enwiki or title,
         sitelinks=sitelinks,
         subclass_of=tuple(subclass),
         parent_taxon=tuple(taxon),
@@ -77,13 +72,30 @@ class FakeWikidata:
                 found.append(item)
         return found
 
-    def children(self, qid):
-        self.calls.append(("children", qid))
+    def children(self, qid, *, taxon=False):
+        self.calls.append(("children", qid, taxon))
         if qid in self.fail_downstream:
             raise WikiDataError("downstream failed")
         if qid not in self.items:
             raise WikiDataError("missing item")
         return list(self.child_map.get(qid, []))
+
+
+class FakeWikipedia:
+    def __init__(self, related=None):
+        self.related_map = {key.lower(): list(value) for key, value in (related or {}).items()}
+        self.calls: list[tuple] = []
+        self.fail = False
+
+    def close(self):
+        return None
+
+    def related(self, enwiki_title, *, limit=8):
+        self.calls.append(("related", enwiki_title, limit))
+        if self.fail:
+            raise WikipediaError("wikipedia failed")
+        hits = self.related_map.get(enwiki_title.lower(), [])
+        return hits[:limit]
 
 
 def _dinosaurs():
@@ -98,240 +110,236 @@ def _dinosaurs():
                 taxon=(DRACOHORS,),
                 subclass=(REPTILES, ANIMALS),
                 sitelinks=50,
-                description="clade of reptiles",
+                enwiki="Dinosaur",
             ),
-            _item(DRACOHORS, "Dracohors", taxon=(ANIMALS,), sitelinks=5),
-            _item(SAURISCHIA, "Saurischia", taxon=(DINOSAURS,), sitelinks=12),
-            _item(ORNITHISCHIA, "Ornithischia", taxon=(DINOSAURS,), sitelinks=11),
-            _item(GENERA, "dinosaur genera", taxon=(SAURISCHIA,), sitelinks=4),
-            _item(TOYS, "dinosaur toys", subclass=(DINOSAURS,), sitelinks=2),
-            _item(COLORS, "dinosaur colors", subclass=(DINOSAURS,), sitelinks=2),
-            _item(LIZARDS, "lizard", taxon=(REPTILES,), subclass=(REPTILES,), sitelinks=8),
-            _item(4167836, "Wikimedia category", instance=(4167836,), sitelinks=0),
+            _item(DRACOHORS, "Dracohors", taxon=(REPTILES,), sitelinks=2),
+            _item(SAURISCHIA, "Saurischia", taxon=(DINOSAURS,), sitelinks=30),
+            _item(ORNITHISCHIA, "Ornithischia", taxon=(DINOSAURS,), sitelinks=28),
+            _item(GENERA, "dinosaur genera", taxon=(SAURISCHIA,), sitelinks=5),
+            _item(TOYS, "dinosaur toys", sitelinks=3, description="toys shaped like dinosaurs"),
+            _item(COLORS, "dinosaur colors", sitelinks=2, description="coloration"),
+            _item(MESOZOIC, "Mesozoic", sitelinks=40, enwiki="Mesozoic"),
+            _item(PALAEONTOLOGY, "paleontology", sitelinks=35, enwiki="Paleontology"),
         ],
-        children={
-            LIFE: [ANIMALS],
-            ANIMALS: [REPTILES],
-            REPTILES: [DINOSAURS, LIZARDS],
-            DINOSAURS: [SAURISCHIA, ORNITHISCHIA, 4167836],
-            SAURISCHIA: [GENERA],
-            ORNITHISCHIA: [],
-            DRACOHORS: [DINOSAURS],
-        },
+        children={DINOSAURS: [SAURISCHIA, ORNITHISCHIA], SAURISCHIA: [GENERA]},
     )
 
 
-def _install(monkeypatch, fake):
-    monkeypatch.setattr("app.features.knowledge_graph.items.WikidataClient", lambda **_kwargs: fake)
+def _wikipedia():
+    return FakeWikipedia(
+        {
+            "Dinosaur": [
+                RelatedHit(title="Mesozoic", qid=MESOZOIC),
+                RelatedHit(title="Paleontology", qid=PALAEONTOLOGY),
+            ]
+        }
+    )
 
 
 def _graph(client, auth, **params):
-    return client.get("/api/v1/knowledge/graph", headers=auth, params=params)
+    query = "&".join(f"{key}={value}" for key, value in params.items() if value is not None)
+    path = "/api/v1/knowledge/graph" + (f"?{query}" if query else "")
+    return client.get(path, headers=auth)
 
 
-def _parent_fetches(fake: FakeWikidata, qid: int) -> list[tuple]:
-    return [call for call in fake.calls if call[0] == "entities" and call[1] == (qid,)]
+def test_parse_qid():
+    assert parse_qid("Q430") == 430
+    assert parse_qid("https://www.wikidata.org/entity/Q430") == 430
+    assert parse_qid(None) is None
 
 
-def test_dinosaurs_walks_parents_and_top_children_only(client, auth, monkeypatch):
-    fake = _dinosaurs()
-    _install(monkeypatch, fake)
+def test_dinosaurs_resolve_parents_children_and_related(client, auth, session, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
 
-    response = _graph(client, auth, topic="Dinosaurs", up_depth=2, down_depth=1)
+    def load(session, **kwargs):
+        kwargs.setdefault("wikidata", wiki)
+        kwargs.setdefault("wikipedia", related)
+        return load_knowledge_graph(session, **kwargs)
+
+    monkeypatch.setattr("app.api.v1.router.load_knowledge_graph", load)
+
+    response = _graph(client, auth, topic="dinosaurs", up_depth=2, down_depth=1, cloud_radius=1)
     assert response.status_code == 200
-    body = response.json()
-    assert body["focus_node_id"] == DINOSAURS
-    assert body["incomplete"] is False
-    titles = {node["title"]: node for node in body["nodes"]}
-    assert titles["animal"]["depth"] == -2
-    assert titles["reptile"]["depth"] == -1
-    assert titles["dinosaur"]["depth"] == 0
-    assert titles["dinosaur"]["distance"] == 0
-    assert titles["reptile"]["distance"] == 1
-    assert titles["animal"]["distance"] == 2
-    assert titles["Saurischia"]["depth"] == 1
-    assert titles["Ornithischia"]["depth"] == 1
-    assert "lizard" not in titles
-    assert "organism" not in titles
-    assert "Wikimedia category" not in titles
-    assert "dinosaur genera" not in titles
-    edges = {(edge["source"], edge["target"], edge["type"]) for edge in body["edges"]}
-    assert (REPTILES, DINOSAURS, "parent_child") in edges
-    assert (ANIMALS, REPTILES, "parent_child") in edges
-    assert (DINOSAURS, SAURISCHIA, "parent_child") in edges
-    assert (REPTILES, LIZARDS, "parent_child") not in edges
-    assert COLORS not in {edge[0] for edge in edges} | {edge[1] for edge in edges}
+    payload = response.json()
+    assert payload["focus_node_id"] == DINOSAURS
+    assert payload["request_id"]
+    by_id = {node["id"]: node for node in payload["nodes"]}
+    assert REPTILES in by_id
+    assert ANIMALS in by_id
+    assert SAURISCHIA in by_id
+    assert ORNITHISCHIA in by_id
+    assert MESOZOIC in by_id
+    assert PALAEONTOLOGY in by_id
+    assert by_id[REPTILES]["depth"] == -1
+    assert by_id[ANIMALS]["depth"] == -2
+    assert by_id[SAURISCHIA]["depth"] == 1
+    assert by_id[MESOZOIC]["kind"] == "related"
+    assert by_id[DINOSAURS]["distance"] == 0
+    assert by_id[SAURISCHIA]["distance"] == 1
+    types = {(edge["source"], edge["target"], edge["type"]) for edge in payload["edges"]}
+    assert (REPTILES, DINOSAURS, "subclass_of") in types
+    assert (DINOSAURS, SAURISCHIA, "parent_taxon") in types
+    assert (DINOSAURS, MESOZOIC, "related_to") in types
+    assert DRACOHORS not in by_id
+
+    stored = session.exec(select(KnowledgeRequestNode)).all()
+    assert {row.qid for row in stored} == set(by_id)
+    assert session.exec(select(func.count()).select_from(KnowledgeRequest)).one() == 1
 
 
-def test_cycles_stop_and_a_second_search_reuses_the_same_rows(client, auth, other_auth, session, monkeypatch):
-    fake = FakeWikidata(
+def test_clear_winner_skips_ambiguous_chooser(client, auth, monkeypatch):
+    wiki = FakeWikidata(
         [
-            _item(1, "Alpha", subclass=(2,)),
-            _item(2, "Beta", subclass=(1,)),
+            _item(DINOSAURS, "dinosaur", subclass=(REPTILES,), sitelinks=50),
+            _item(REPTILES, "reptile", sitelinks=60),
+            _item(TOYS, "dinosaur toys", sitelinks=3, description="toys"),
         ],
-        children={1: [2], 2: [1]},
+        children={DINOSAURS: []},
     )
-    _install(monkeypatch, fake)
-    first = _graph(client, auth, topic="Alpha", up_depth=2, down_depth=2)
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(session, wikidata=wiki, wikipedia=FakeWikipedia(), **kwargs),
+    )
+    response = _graph(client, auth, topic="dinosaur")
+    assert response.status_code == 200
+    assert response.json()["focus_node_id"] == DINOSAURS
+
+
+def test_ambiguous_includes_descriptions(client, auth, monkeypatch):
+    wiki = FakeWikidata(
+        [
+            _item(TOYS, "Dinosaur", sitelinks=5, description="toys shaped like dinosaurs"),
+            _item(COLORS, "Dinosaur", sitelinks=4, description="coloration"),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(session, wikidata=wiki, wikipedia=FakeWikipedia(), **kwargs),
+    )
+    response = _graph(client, auth, topic="Dinosaur")
+    assert response.status_code == 409
+    candidates = response.json()["details"]["candidates"]
+    assert {row["wikidata_qid"] for row in candidates} == {TOYS, COLORS}
+    assert all(row.get("description") for row in candidates)
+
+
+def test_resume_latest_request(client, auth, other_auth, session, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(
+            session, wikidata=wiki, wikipedia=related, **kwargs
+        ),
+    )
+    first = _graph(client, auth, topic="dinosaurs", up_depth=1, down_depth=1, cloud_radius=1)
     assert first.status_code == 200
-    body = first.json()
-    assert {node["id"] for node in body["nodes"]} == {1, 2}
-    assert fake.calls
-    recorded = len(fake.calls)
-    fake.calls.clear()
-
-    second = _graph(client, other_auth, topic="beta", up_depth=2, down_depth=2)
-    assert second.status_code == 200
-    assert second.json()["focus_node_id"] == 2
-    # Beta's own children are fetched once when it becomes the focus.
-    assert any(call[0] == "children" and call[1] == 2 for call in fake.calls)
-    assert recorded > 0
-    fake.calls.clear()
-    again = _graph(client, other_auth, topic="beta", up_depth=2, down_depth=2)
-    assert again.status_code == 200
-    assert fake.calls == []
-    count = session.exec(select(func.count()).select_from(KnowledgeItem)).one()
-    distinct_ids = session.exec(select(func.count(distinct(KnowledgeItem.wikidata_qid)))).one()
-    assert count == distinct_ids == 2
-    requests = session.exec(select(KnowledgeGraphRequest)).all()
-    assert len(requests) == 3
-    distances = session.exec(select(KnowledgeGraphRequestNode)).all()
-    assert len(distances) >= 2
-
-
-def test_overlapping_topic_fetches_only_the_missing_branch(client, auth, other_auth, session, monkeypatch):
-    fake = _dinosaurs()
-    _install(monkeypatch, fake)
-    opened = _graph(client, auth, topic="dinosaur", up_depth=2, down_depth=1)
-    assert opened.status_code == 200
-    assert session.exec(select(KnowledgeItem).where(KnowledgeItem.wikidata_qid == DINOSAURS)).first() is not None
-    fake.calls.clear()
-
-    focused = _graph(client, other_auth, category_id=SAURISCHIA, up_depth=2, down_depth=2)
-    assert focused.status_code == 200
-    body = focused.json()
-    assert body["focus_node_id"] == SAURISCHIA
-    titles = {node["title"] for node in body["nodes"]}
-    assert "dinosaur genera" in titles
-    assert "dinosaur" in titles
-    assert not any(call[0] == "children" and call[1] == DINOSAURS for call in fake.calls)
-    assert any(call[0] == "children" and call[1] == SAURISCHIA for call in fake.calls)
-    rows = session.exec(select(KnowledgeItem.wikidata_qid)).all()
-    assert len(rows) == len(set(rows))
-    again = _graph(client, auth, category_id=SAURISCHIA, up_depth=2, down_depth=2)
-    assert again.status_code == 200
-    assert session.exec(select(func.count()).select_from(KnowledgeItem)).one() == len(set(rows))
-
-
-def test_failed_fetch_stays_incomplete_and_a_stale_direction_is_read_again(client, auth, session, monkeypatch):
-    fake = _dinosaurs()
-    fake.fail_upstream.add(DINOSAURS)
-    _install(monkeypatch, fake)
-    partial = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=0)
-    assert partial.status_code == 200
-    assert partial.json()["incomplete"] is True
-    assert partial.json()["nodes"] == [{"id": DINOSAURS, "title": "dinosaur", "depth": 0, "distance": 0}]
-    assert partial.json()["edges"] == []
-    stored = session.exec(select(KnowledgeItem).where(KnowledgeItem.wikidata_qid == DINOSAURS)).one()
-    assert stored.upstream_complete is False
-
-    fake.fail_upstream.clear()
-    restored = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=0)
-    assert restored.status_code == 200
-    assert restored.json()["incomplete"] is False
-    assert {edge["source"] for edge in restored.json()["edges"]} == {REPTILES}
-
-    session.expire_all()
-    item = session.exec(select(KnowledgeItem).where(KnowledgeItem.wikidata_qid == DINOSAURS)).one()
-    item.upstream_fetched_at = utcnow() - timedelta(days=31)
-    session.add(item)
-    session.commit()
-    fake.calls.clear()
-    stale = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=0)
-    assert stale.status_code == 200
-    assert _parent_fetches(fake, DINOSAURS)
-
-    session.expire_all()
-    item = session.exec(select(KnowledgeItem).where(KnowledgeItem.wikidata_qid == DINOSAURS)).one()
-    assert item.upstream_complete is True
-    fake.calls.clear()
-    fresh = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=0)
-    assert fresh.status_code == 200
-    assert _parent_fetches(fake, DINOSAURS) == []
-
-
-def test_clear_winner_skips_chooser_and_ambiguous_shows_descriptions(client, auth, session, monkeypatch):
-    tied = FakeWikidata(
-        [
-            _item(TOYS, "dinosaur toys", subclass=(DINOSAURS,), sitelinks=5, description="plastic toys"),
-            _item(COLORS, "dinosaur colors", subclass=(DINOSAURS,), sitelinks=5, description="pigment patterns"),
-        ],
-        children={},
-    )
-    _install(monkeypatch, tied)
-    ambiguous = _graph(client, auth, topic="dinosaur")
-    assert ambiguous.status_code == 409
-    candidates = ambiguous.json()["details"]["candidates"]
-    titles = {item["title"] for item in candidates}
-    assert "dinosaur colors" in titles
-    assert "dinosaur toys" in titles
-    assert {item["description"] for item in candidates} == {"plastic toys", "pigment patterns"}
-
-    fake = _dinosaurs()
-    _install(monkeypatch, fake)
-    opened = _graph(client, auth, topic="Dinosaurs", up_depth=1, down_depth=0)
-    assert opened.status_code == 200
-    assert opened.json()["focus_node_id"] == DINOSAURS
-
-    rooted = _graph(client, auth, topic="animal", up_depth=2, down_depth=0)
-    assert rooted.status_code == 200
-    titles = {node["title"] for node in rooted.json()["nodes"]}
-    assert "organism" in titles
-    assert rooted.json()["nodes"]
-    organism = session.exec(select(KnowledgeItem).where(KnowledgeItem.wikidata_qid == LIFE)).one()
-    assert organism.upstream_complete is True
-    assert organism.domain_qid == LIFE
-
-
-def test_resume_latest_and_item_budget(client, auth, monkeypatch):
-    fake = _dinosaurs()
-    _install(monkeypatch, fake)
-    missing = _graph(client, auth, topic="No such item")
-    assert missing.status_code == 404
-    empty = client.get("/api/v1/knowledge/graph", headers=auth)
-    assert empty.status_code == 200
-    assert empty.json() == {"focus_node_id": None, "incomplete": False, "nodes": [], "edges": []}
-
-    opened = _graph(client, auth, topic="dinosaur", up_depth=1, down_depth=1)
-    assert opened.status_code == 200
-    resumed = client.get("/api/v1/knowledge/graph", headers=auth, params={"up_depth": 1, "down_depth": 1})
+    resumed = _graph(client, auth)
     assert resumed.status_code == 200
     assert resumed.json()["focus_node_id"] == DINOSAURS
-    assert {node["id"] for node in resumed.json()["nodes"]} == {node["id"] for node in opened.json()["nodes"]}
 
-    settings = get_settings()
-    monkeypatch.setattr(settings, "wikidata_max_items_per_request", 1)
-    limited = _graph(client, auth, topic="Saurischia", up_depth=2, down_depth=2)
-    assert limited.status_code == 200
-    assert limited.json()["incomplete"] is True
-    assert limited.json()["focus_node_id"] == SAURISCHIA
+    empty = _graph(client, other_auth)
+    assert empty.status_code == 200
+    assert empty.json()["focus_node_id"] is None
+    assert empty.json()["nodes"] == []
 
 
-def test_wikidata_client_retries_a_rate_limit_and_sends_a_user_agent():
-    calls = {"n": 0}
+def test_focus_qid_opens_child_without_duplicating_nodes(client, auth, session, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(
+            session, wikidata=wiki, wikipedia=related, **kwargs
+        ),
+    )
+    _graph(client, auth, topic="dinosaurs", up_depth=1, down_depth=1, cloud_radius=1)
+    before = set(session.exec(select(KnowledgeNode.qid)).all())
+    focused = _graph(client, auth, focus_qid=SAURISCHIA, up_depth=1, down_depth=1, cloud_radius=1)
+    assert focused.status_code == 200
+    assert focused.json()["focus_node_id"] == SAURISCHIA
+    after = set(session.exec(select(KnowledgeNode.qid)).all())
+    assert before.issubset(after)
+    assert GENERA in after
+    assert len(after) == session.exec(select(func.count(distinct(KnowledgeNode.qid))).select_from(KnowledgeNode)).one()
+
+
+def test_cache_skips_refetch(client, auth, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(
+            session, wikidata=wiki, wikipedia=related, **kwargs
+        ),
+    )
+    _graph(client, auth, topic="dinosaurs", up_depth=1, down_depth=1, cloud_radius=1)
+    before = len(wiki.calls)
+    related_before = len(related.calls)
+    _graph(client, auth, focus_qid=DINOSAURS, up_depth=1, down_depth=1, cloud_radius=1)
+    assert len(wiki.calls) == before
+    assert len(related.calls) == related_before
+
+
+def test_stale_cache_refetches(client, auth, session, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(
+            session, wikidata=wiki, wikipedia=related, **kwargs
+        ),
+    )
+    _graph(client, auth, topic="dinosaurs", up_depth=1, down_depth=1, cloud_radius=1)
+    node = session.get(KnowledgeNode, DINOSAURS)
+    node.upstream_fetched_at = utcnow() - timedelta(days=get_settings().wikidata_cache_ttl_days + 1)
+    node.downstream_fetched_at = node.upstream_fetched_at
+    node.related_fetched_at = node.upstream_fetched_at
+    session.add(node)
+    session.commit()
+    before = len([call for call in wiki.calls if call[0] == "children"])
+    _graph(client, auth, focus_qid=DINOSAURS, up_depth=1, down_depth=1, cloud_radius=1)
+    after = len([call for call in wiki.calls if call[0] == "children"])
+    assert after > before
+
+
+def test_related_limit_scales_with_cloud_radius(client, auth, monkeypatch):
+    wiki = _dinosaurs()
+    related = _wikipedia()
+    monkeypatch.setattr(
+        "app.api.v1.router.load_knowledge_graph",
+        lambda session, **kwargs: load_knowledge_graph(
+            session, wikidata=wiki, wikipedia=related, **kwargs
+        ),
+    )
+    _graph(client, auth, topic="dinosaurs", cloud_radius=2)
+    assert related.calls[-1] == ("related", "Dinosaur", 16)
+
+
+def test_wikipedia_morelike_transport_maps_qid(monkeypatch):
+    from app.features.knowledge_graph.wikipedia_related import WikipediaRelatedClient
 
     def handler(request: httpx.Request) -> httpx.Response:
-        calls["n"] += 1
-        assert request.headers["user-agent"].startswith("AdaptiveMastery/")
-        if calls["n"] == 1:
-            return httpx.Response(429, headers={"Retry-After": "0"}, json={"error": {"code": "ratelimited"}})
-        return httpx.Response(200, json={"search": [], "success": 1})
+        if b"list=search" in request.url.query or "list=search" in str(request.url):
+            return httpx.Response(
+                200,
+                json={"query": {"search": [{"title": "Mesozoic"}, {"title": "Paleontology"}]}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "query": {
+                    "pages": {
+                        "1": {"title": "Mesozoic", "pageprops": {"wikibase_item": "Q500"}, "description": "era"},
+                        "2": {"title": "Paleontology", "pageprops": {"wikibase_item": "Q501"}},
+                    }
+                }
+            },
+        )
 
-    client = WikidataClient(transport=httpx.MockTransport(handler), sleeper=lambda _delay: None)
-    try:
-        payload = client.get({"action": "wbsearchentities", "search": "dinosaur"})
-    finally:
-        client.close()
-    assert calls["n"] == 2
-    assert payload["success"] == 1
-    assert parse_qid("http://www.wikidata.org/entity/Q430") == 430
+    transport = httpx.MockTransport(handler)
+    client = WikipediaRelatedClient(transport=transport, sleeper=lambda _: None)
+    hits = client.related("Dinosaur", limit=8)
+    client.close()
+    assert [hit.qid for hit in hits] == [500, 501]

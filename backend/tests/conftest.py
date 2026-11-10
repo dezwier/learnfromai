@@ -33,8 +33,8 @@ def clean_db():
     with Session(engine, expire_on_commit=False) as session:
         session.exec(
             text(
-                "TRUNCATE TABLE knowledge_graph_request_nodes, knowledge_graph_requests, knowledge_item_edges, "
-                "knowledge_items, knowledge_category_edges, knowledge_categories, "
+                "TRUNCATE TABLE knowledge_request_nodes, knowledge_requests, knowledge_edges, "
+                "knowledge_nodes, knowledge_category_edges, knowledge_categories, "
                 "extend_requests, llm_usage, generation_jobs, edges, concepts, graphs, "
                 "worker_heartbeats, users RESTART IDENTITY CASCADE"
             )

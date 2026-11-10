@@ -11,7 +11,7 @@ from app.core.errors import AppError, forbidden, not_found
 from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
-from app.features.knowledge_graph.items import load_knowledge_graph
+from app.features.knowledge_graph.graph import load_knowledge_graph
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.platform.models import GenerationJob
@@ -68,9 +68,11 @@ def workspace(user: User = Depends(get_current_user), session: Session = Depends
 @router.get("/knowledge/graph")
 def knowledge_graph(
     topic: str | None = None,
+    focus_qid: int | None = None,
     category_id: int | None = None,
     up_depth: int | None = None,
     down_depth: int | None = None,
+    cloud_radius: int | None = None,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -78,9 +80,10 @@ def knowledge_graph(
         session,
         user_id=user.id,
         topic=topic,
-        category_id=category_id,
+        focus_qid=focus_qid if focus_qid is not None else category_id,
         up_depth=up_depth,
         down_depth=down_depth,
+        cloud_radius=cloud_radius,
     )
     session.commit()
     return payload

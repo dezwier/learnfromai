@@ -6,6 +6,7 @@ import 'package:adaptive_mastery/core/widgets/pulse_placeholder.dart';
 import 'package:adaptive_mastery/features/auth/auth_controller.dart';
 import 'package:adaptive_mastery/features/auth/auth_gateway.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/graph_controller.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/graph_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -46,22 +47,21 @@ void main() {
     expect(find.byTooltip('Past extends'), findsNothing);
   });
 
-  testWidgets('the hex map shows children of the focus', (tester) async {
-    final graph = GraphController(
-      loader: (path) async => _compact(),
-    )..categoryGraph = _compact();
+  testWidgets('hierarchy shows parents, focus, children, and related strip', (tester) async {
+    final graph = GraphController(loader: (path) async => _compact())..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
     expect(find.text('Saurischia'), findsOneWidget);
+    expect(find.text('Mesozoic'), findsOneWidget);
     expect(find.text('Show more'), findsNothing);
   });
 
-  testWidgets('tapping a category focuses it and back returns', (tester) async {
+  testWidgets('tapping back returns to the previous focus', (tester) async {
     final graph = GraphController(
       loader: (path) async {
-        if (path.contains('category_id=3')) return _saurischia();
-        if (path.contains('category_id=2')) return _compact();
+        if (path.contains('focus_qid=3')) return _saurischia();
+        if (path.contains('focus_qid=2')) return _compact();
         return _compact();
       },
     )
@@ -83,17 +83,18 @@ void main() {
   testWidgets('ambiguous results can be chosen', (tester) async {
     final graph = GraphController(
       loader: (path) async {
-        expect(path, contains('category_id=6'));
+        expect(path, contains('focus_qid=6'));
         return _compact();
       },
     )..candidates = const [
-        CategoryChoice(id: 6, title: 'Dinosaur toys'),
-        CategoryChoice(id: 10, title: 'Dinosaur colors'),
+        CategoryChoice(id: 6, title: 'Dinosaur toys', description: 'toys shaped like dinosaurs'),
+        CategoryChoice(id: 10, title: 'Dinosaur colors', description: 'coloration'),
       ];
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
     expect(find.text('Choose a topic'), findsOneWidget);
     expect(find.text('Dinosaur toys'), findsOneWidget);
+    expect(find.text('toys shaped like dinosaurs'), findsOneWidget);
 
     await tester.tap(find.text('Dinosaur toys'));
     await tester.pumpAndSettle();
@@ -121,29 +122,31 @@ void main() {
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
+  test('hierarchy places parents above and children below', () {
+    final layout = layoutHierarchy(
+      const [
+        GraphNode(id: 1, title: 'Reptile', depth: -1, kind: 'parent'),
+        GraphNode(id: 2, title: 'Dinosaur', depth: 0, kind: 'focus'),
+        GraphNode(id: 3, title: 'Saurischia', depth: 1, kind: 'child'),
+        GraphNode(id: 4, title: 'Mesozoic', depth: 0, kind: 'related'),
+      ],
+      const [
+        GraphEdge(source: 1, target: 2, type: 'subclass_of'),
+        GraphEdge(source: 2, target: 3, type: 'parent_taxon'),
+        GraphEdge(source: 2, target: 4, type: 'related_to'),
+      ],
+      focusId: 2,
+    );
+    final byId = {for (final node in layout.nodes) node.id: node};
+    expect(byId[1]!.y < byId[2]!.y, isTrue);
+    expect(byId[2]!.y < byId[3]!.y, isTrue);
+    expect(layout.related.map((node) => node.id), [4]);
+    expect(layout.edges.any((edge) => edge.type == 'related_to'), isFalse);
+  });
+
   test('api client maps the error envelope', () {
     expect(ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code, 'UNAUTHORIZED');
   });
-}
-
-Map<String, dynamic> _dinosaurs() {
-  return {
-    'focus_node_id': 2,
-    'incomplete': false,
-    'nodes': [
-      {'id': 1, 'title': 'Paleontology', 'depth': -1},
-      {'id': 2, 'title': 'Dinosaurs', 'depth': 0},
-        {'id': 3, 'title': 'Saurischia', 'depth': 1},
-      for (var index = 0; index < 5; index++) {'id': 20 + index, 'title': 'Child $index', 'depth': 1},
-      {'id': 30, 'title': 'Zebra', 'depth': 1},
-    ],
-    'edges': [
-      {'source': 1, 'target': 2, 'type': 'parent_child'},
-      {'source': 2, 'target': 3, 'type': 'parent_child'},
-      for (var index = 0; index < 5; index++) {'source': 2, 'target': 20 + index, 'type': 'parent_child'},
-      {'source': 2, 'target': 30, 'type': 'parent_child'},
-    ],
-  };
 }
 
 Map<String, dynamic> _compact() {
@@ -151,13 +154,15 @@ Map<String, dynamic> _compact() {
     'focus_node_id': 2,
     'incomplete': false,
     'nodes': [
-      {'id': 1, 'title': 'Paleontology', 'depth': -1},
-      {'id': 2, 'title': 'Dinosaurs', 'depth': 0},
-      {'id': 3, 'title': 'Saurischia', 'depth': 1},
+      {'id': 1, 'title': 'Paleontology', 'depth': -1, 'distance': 1, 'kind': 'parent'},
+      {'id': 2, 'title': 'Dinosaurs', 'depth': 0, 'distance': 0, 'kind': 'focus'},
+      {'id': 3, 'title': 'Saurischia', 'depth': 1, 'distance': 1, 'kind': 'child'},
+      {'id': 4, 'title': 'Mesozoic', 'depth': 0, 'distance': 1, 'kind': 'related'},
     ],
     'edges': [
-      {'source': 1, 'target': 2, 'type': 'parent_child'},
-      {'source': 2, 'target': 3, 'type': 'parent_child'},
+      {'source': 1, 'target': 2, 'type': 'subclass_of'},
+      {'source': 2, 'target': 3, 'type': 'parent_taxon'},
+      {'source': 2, 'target': 4, 'type': 'related_to'},
     ],
   };
 }
@@ -167,13 +172,13 @@ Map<String, dynamic> _saurischia() {
     'focus_node_id': 3,
     'incomplete': false,
     'nodes': [
-      {'id': 2, 'title': 'Dinosaurs', 'depth': -1},
-      {'id': 3, 'title': 'Saurischia', 'depth': 0},
-      {'id': 8, 'title': 'Genera', 'depth': 1},
+      {'id': 2, 'title': 'Dinosaurs', 'depth': -1, 'distance': 1, 'kind': 'parent'},
+      {'id': 3, 'title': 'Saurischia', 'depth': 0, 'distance': 0, 'kind': 'focus'},
+      {'id': 8, 'title': 'Genera', 'depth': 1, 'distance': 1, 'kind': 'child'},
     ],
     'edges': [
-      {'source': 2, 'target': 3, 'type': 'parent_child'},
-      {'source': 3, 'target': 8, 'type': 'parent_child'},
+      {'source': 2, 'target': 3, 'type': 'parent_taxon'},
+      {'source': 3, 'target': 8, 'type': 'parent_taxon'},
     ],
   };
 }

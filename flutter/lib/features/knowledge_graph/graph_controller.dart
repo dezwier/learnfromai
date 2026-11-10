@@ -34,9 +34,11 @@ class GraphController extends ChangeNotifier {
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
+  static const _params = 'up_depth=1&down_depth=1&cloud_radius=1';
+
   Future<void> resume() async {
     if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing) return;
-    await _load('/knowledge/graph?up_depth=2&down_depth=2');
+    await _load('/knowledge/graph?$_params');
   }
 
   Future<void> search(String topic) async {
@@ -44,7 +46,7 @@ class GraphController extends ChangeNotifier {
     if (trimmed.isEmpty || refreshing || loading) return;
     final previous = List<int>.of(focusHistory);
     focusHistory.clear();
-    await _load('/knowledge/graph?topic=${Uri.encodeQueryComponent(trimmed)}&up_depth=2&down_depth=2');
+    await _load('/knowledge/graph?topic=${Uri.encodeQueryComponent(trimmed)}&$_params');
     if (error != null || candidates.isNotEmpty) {
       focusHistory
         ..clear()
@@ -52,24 +54,27 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  Future<void> openCategory(int id) async {
+  Future<void> openNode(int id) async {
     if (refreshing || loading) return;
     if (focusId == id && categoryGraph != null) return;
     pendingNodeId = id;
-    await _load('/knowledge/graph?category_id=$id&up_depth=2&down_depth=2');
+    await _load('/knowledge/graph?focus_qid=$id&$_params');
   }
+
+  /// Kept for older call sites / tests.
+  Future<void> openCategory(int id) => openNode(id);
 
   Future<void> choose(CategoryChoice choice) async {
     candidates = [];
     notifyListeners();
-    await openCategory(choice.id);
+    await openNode(choice.id);
   }
 
   Future<void> back() async {
     if (!canGoBack) return;
     final current = focusHistory.removeLast();
     final previous = focusHistory.last;
-    await _load('/knowledge/graph?category_id=$previous&up_depth=2&down_depth=2', record: false);
+    await _load('/knowledge/graph?focus_qid=$previous&$_params', record: false);
     if (error != null) focusHistory.add(current);
   }
 

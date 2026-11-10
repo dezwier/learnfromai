@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -109,6 +107,7 @@ class _GraphScreenState extends State<GraphScreen> {
               child: StudyCard(dense: true, eyebrow: 'GRAPH', title: graph.error!, subtitle: 'Try another topic.'),
             ),
           Expanded(child: _body(context, graph, layout)),
+          if (layout.related.isNotEmpty) _RelatedStrip(related: layout.related, onOpen: graph.openNode),
         ],
       ),
     );
@@ -121,7 +120,7 @@ class _GraphScreenState extends State<GraphScreen> {
     _transform.value = Matrix4.identity();
   }
 
-  Widget _body(BuildContext context, GraphController graph, HexLayout layout) {
+  Widget _body(BuildContext context, GraphController graph, HierarchyLayout layout) {
     if (graph.loading && graph.categoryGraph == null) {
       return const Padding(padding: studyPagePadding, child: PulsePlaceholder.map());
     }
@@ -139,41 +138,38 @@ class _GraphScreenState extends State<GraphScreen> {
             ListTile(
               title: Text(choice.title),
               subtitle: Text(
-                (choice.description?.trim().isNotEmpty == true)
-                    ? choice.description!
-                    : 'Q${choice.id}',
+                (choice.description?.trim().isNotEmpty == true) ? choice.description! : 'Q${choice.id}',
               ),
               onTap: () => graph.choose(choice),
             ),
         ],
       );
     }
-    if (layout.cells.isEmpty) {
+    if (layout.nodes.isEmpty) {
       return ListView(
         padding: studyPagePadding,
         children: const [
           StudyCard(
             eyebrow: 'GRAPH',
             title: 'Explore the graph',
-            subtitle: 'Parents merge into a hex. Zoom in to split it into children.',
+            subtitle: 'Search a topic to see its parents, children, and related pages.',
           ),
         ],
       );
     }
-    return _HexView(
+    return _HierarchyView(
       layout: layout,
       focusId: graph.focusId,
       pendingId: graph.refreshing ? graph.pendingNodeId : null,
       transform: _transform,
-      onScale: () => setState(() {}),
-      onOpen: graph.openCategory,
+      onOpen: graph.openNode,
     );
   }
 
-  HexLayout _layoutFor(GraphController graph) {
+  HierarchyLayout _layoutFor(GraphController graph) {
     final payload = graph.categoryGraph;
     if (payload == null) {
-      return const HexLayout(cells: [], width: 0, height: 0);
+      return const HierarchyLayout(nodes: [], edges: [], related: [], width: 0, height: 0);
     }
     final nodes = [
       for (final raw in (payload['nodes'] as List?) ?? const [])
@@ -183,101 +179,130 @@ class _GraphScreenState extends State<GraphScreen> {
             title: raw['title']?.toString() ?? '',
             depth: (raw['depth'] as num?)?.toInt() ?? 0,
             distance: (raw['distance'] as num?)?.toInt() ?? 0,
+            kind: raw['kind']?.toString() ?? 'focus',
           ),
     ];
     final edges = [
       for (final raw in (payload['edges'] as List?) ?? const [])
         if (raw is Map)
-          GraphEdge(source: (raw['source'] as num).toInt(), target: (raw['target'] as num).toInt()),
+          GraphEdge(
+            source: (raw['source'] as num).toInt(),
+            target: (raw['target'] as num).toInt(),
+            type: raw['type']?.toString() ?? 'subclass_of',
+          ),
     ];
-    final scale = _transform.value.getMaxScaleOnAxis();
     final focus = graph.focusId ?? (nodes.isEmpty ? 0 : nodes.first.id);
-    return layoutHexMap(nodes, edges, focusId: focus, scale: scale);
+    return layoutHierarchy(nodes, edges, focusId: focus);
   }
 }
 
-class _HexView extends StatelessWidget {
-  const _HexView({
-    required this.layout,
-    required this.focusId,
-    required this.pendingId,
-    required this.transform,
-    required this.onScale,
-    required this.onOpen,
-  });
+class _RelatedStrip extends StatelessWidget {
+  const _RelatedStrip({required this.related, required this.onOpen});
 
-  final HexLayout layout;
-  final int? focusId;
-  final int? pendingId;
-  final TransformationController transform;
-  final VoidCallback onScale;
+  final List<GraphNode> related;
   final ValueChanged<int> onOpen;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final scale = transform.value.getMaxScaleOnAxis();
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      child: SizedBox(
+        height: 64,
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          scrollDirection: Axis.horizontal,
+          itemCount: related.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final node = related[index];
+            return ActionChip(
+              label: Text(node.title),
+              onPressed: () => onOpen(node.id),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _HierarchyView extends StatelessWidget {
+  const _HierarchyView({
+    required this.layout,
+    required this.focusId,
+    required this.pendingId,
+    required this.transform,
+    required this.onOpen,
+  });
+
+  final HierarchyLayout layout;
+  final int? focusId;
+  final int? pendingId;
+  final TransformationController transform;
+  final ValueChanged<int> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: InteractiveViewer(
         transformationController: transform,
         constrained: false,
-        minScale: 0.4,
-        maxScale: 3.2,
-        boundaryMargin: const EdgeInsets.all(240),
-        onInteractionUpdate: (_) => onScale(),
-        onInteractionEnd: (_) => onScale(),
+        minScale: 0.6,
+        maxScale: 2.5,
+        boundaryMargin: const EdgeInsets.all(160),
         child: SizedBox(
           width: layout.width < 320 ? 320 : layout.width,
           height: layout.height < 240 ? 240 : layout.height,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: (details) {
-              final id = hitTestHex(layout, details.localPosition);
-              if (id != null) onOpen(id);
-            },
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _HexPainter(layout: layout, focusId: focusId, color: scheme.primary, fill: scheme.surface),
-                  ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _EdgePainter(layout: layout, color: scheme.primary),
                 ),
-                for (final cell in layout.cells)
-                  if (cell.showLabel)
-                    Positioned(
-                      left: cell.x,
-                      top: cell.y,
-                      child: Transform.translate(
-                        offset: Offset(-80, -hexLabelFontSize),
-                        child: Transform.scale(
-                          scale: 1 / scale,
-                          child: SizedBox(
-                            width: 160,
-                            child: Text(
-                              cell.title,
-                              textAlign: TextAlign.center,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: hexLabelFontSize,
-                                height: 1.1,
-                                fontWeight: cell.id == focusId ? FontWeight.w700 : FontWeight.w500,
-                                color: scheme.onSurface,
-                              ),
+              ),
+              for (final node in layout.nodes)
+                Positioned(
+                  left: node.x,
+                  top: node.y,
+                  width: node.width,
+                  height: node.height,
+                  child: Material(
+                    color: node.id == pendingId
+                        ? scheme.primary.withValues(alpha: 0.12)
+                        : scheme.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: scheme.primary,
+                        width: node.id == focusId ? 2.4 : 1.4,
+                      ),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => onOpen(node.id),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Text(
+                            node.title,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.15,
+                              fontWeight: node.id == focusId ? FontWeight.w700 : FontWeight.w500,
                             ),
                           ),
                         ),
                       ),
                     ),
-                if (pendingId != null)
-                  const Positioned(
-                    right: 16,
-                    top: 16,
-                    child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
@@ -285,51 +310,33 @@ class _HexView extends StatelessWidget {
   }
 }
 
-class _HexPainter extends CustomPainter {
-  _HexPainter({required this.layout, required this.focusId, required this.color, required this.fill});
+class _EdgePainter extends CustomPainter {
+  _EdgePainter({required this.layout, required this.color});
 
-  final HexLayout layout;
-  final int? focusId;
+  final HierarchyLayout layout;
   final Color color;
-  final Color fill;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final border = Paint()
-      ..color = color.withValues(alpha: 0.55)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4;
-    final selected = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4;
-    final background = Paint()
-      ..color = fill
-      ..style = PaintingStyle.fill;
-    for (final cell in layout.cells) {
-      final path = _hex(Offset(cell.x, cell.y), cell.radius);
-      canvas.drawPath(path, background);
-      canvas.drawPath(path, cell.id == focusId ? selected : border);
+    final byId = {for (final node in layout.nodes) node.id: node};
+    final line = Paint()
+      ..color = color.withValues(alpha: 0.35)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    for (final edge in layout.edges) {
+      final from = byId[edge.source];
+      final to = byId[edge.target];
+      if (from == null || to == null) continue;
+      canvas.drawLine(
+        Offset(from.x + from.width / 2, from.y + from.height),
+        Offset(to.x + to.width / 2, to.y),
+        line,
+      );
     }
-  }
-
-  Path _hex(Offset center, double radius) {
-    final path = Path();
-    for (var index = 0; index < 6; index++) {
-      final angle = math.pi / 180 * (60 * index - 30);
-      final point = Offset(center.dx + radius * math.cos(angle), center.dy + radius * math.sin(angle));
-      if (index == 0) {
-        path.moveTo(point.dx, point.dy);
-      } else {
-        path.lineTo(point.dx, point.dy);
-      }
-    }
-    path.close();
-    return path;
   }
 
   @override
-  bool shouldRepaint(covariant _HexPainter oldDelegate) {
-    return oldDelegate.layout.cells != layout.cells || oldDelegate.focusId != focusId || oldDelegate.color != color;
+  bool shouldRepaint(covariant _EdgePainter oldDelegate) {
+    return oldDelegate.layout != layout || oldDelegate.color != color;
   }
 }

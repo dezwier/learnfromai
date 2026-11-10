@@ -3,247 +3,198 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 class GraphNode {
-  const GraphNode({required this.id, required this.title, required this.depth, this.distance = 0});
-
-  final int id;
-  final String title;
-  final int depth;
-  final int distance;
-}
-
-class GraphEdge {
-  const GraphEdge({required this.source, required this.target});
-
-  final int source;
-  final int target;
-}
-
-class PlacedHex {
-  const PlacedHex({
+  const GraphNode({
     required this.id,
     required this.title,
     required this.depth,
-    required this.distance,
-    required this.x,
-    required this.y,
-    required this.radius,
-    required this.showLabel,
+    this.distance = 0,
+    this.kind = 'focus',
   });
 
   final int id;
   final String title;
   final int depth;
   final int distance;
+  final String kind;
+}
+
+class GraphEdge {
+  const GraphEdge({required this.source, required this.target, this.type = 'subclass_of'});
+
+  final int source;
+  final int target;
+  final String type;
+}
+
+class PlacedNode {
+  const PlacedNode({
+    required this.id,
+    required this.title,
+    required this.depth,
+    required this.distance,
+    required this.kind,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  final int id;
+  final String title;
+  final int depth;
+  final int distance;
+  final String kind;
   final double x;
   final double y;
-  final double radius;
-  final bool showLabel;
+  final double width;
+  final double height;
 
   bool contains(Offset point) {
-    final dx = point.dx - x;
-    final dy = point.dy - y;
-    return dx * dx + dy * dy <= radius * radius;
+    return point.dx >= x && point.dx <= x + width && point.dy >= y && point.dy <= y + height;
   }
 }
 
-class HexLayout {
-  const HexLayout({required this.cells, required this.width, required this.height});
+class HierarchyLayout {
+  const HierarchyLayout({
+    required this.nodes,
+    required this.edges,
+    required this.related,
+    required this.width,
+    required this.height,
+  });
 
-  final List<PlacedHex> cells;
+  final List<PlacedNode> nodes;
+  final List<GraphEdge> edges;
+  final List<GraphNode> related;
   final double width;
   final double height;
 }
 
-class ZoomWindow {
-  const ZoomWindow({required this.climb, required this.expand});
+const hierarchyCardWidth = 160.0;
+const hierarchyCardHeight = 56.0;
+const hierarchyGapX = 24.0;
+const hierarchyGapY = 72.0;
+const hierarchyPadding = 48.0;
 
-  final int climb;
-  final int expand;
-}
-
-const hexLabelFontSize = 13.0;
-const hexRootRadius = 180.0;
-
-/// Default: the focus hex, split into its children.
-/// Zoom out: climb to the parent (still only the explored path).
-/// Zoom in: same children, larger.
-ZoomWindow zoomWindowFor(double scale) {
-  if (scale < 0.7) return const ZoomWindow(climb: 1, expand: 0);
-  if (scale < 1.1) return const ZoomWindow(climb: 0, expand: 1);
-  return const ZoomWindow(climb: 0, expand: 1);
-}
-
-List<(int, int)> flowerAxial(int count, {bool includeCenter = false}) {
-  if (count <= 0) return const [];
-  const dirs = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
-  final result = <(int, int)>[];
-  if (includeCenter || count == 1) {
-    result.add((0, 0));
-    if (result.length >= count) return result;
-  }
-  var ring = 1;
-  while (result.length < count) {
-    var q = dirs[4].$1 * ring;
-    var r = dirs[4].$2 * ring;
-    for (var side = 0; side < 6; side++) {
-      for (var step = 0; step < ring; step++) {
-        result.add((q, r));
-        if (result.length >= count) return result;
-        q += dirs[side].$1;
-        r += dirs[side].$2;
-      }
-    }
-    ring += 1;
-  }
-  return result;
-}
-
-int ringsFor(int count) {
-  if (count <= 1) return 0;
-  var ring = 1;
-  var capacity = 6;
-  while (capacity < count) {
-    ring += 1;
-    capacity += 6 * ring;
-  }
-  return ring;
-}
-
-Offset axialToPixel(int q, int r, double hexRadius) {
-  final width = math.sqrt(3) * hexRadius;
-  final height = 1.5 * hexRadius;
-  return Offset(width * (q + r / 2), height * r);
-}
-
-double estimateLabelWidth(String title, double fontSize) => title.length * fontSize * 0.62;
-
-class _RawHex {
-  const _RawHex(this.node, this.center, this.radius);
-
-  final GraphNode node;
-  final Offset center;
-  final double radius;
-}
-
-HexLayout layoutHexMap(
+HierarchyLayout layoutHierarchy(
   List<GraphNode> nodes,
   List<GraphEdge> edges, {
   required int focusId,
-  ZoomWindow? window,
-  double rootRadius = hexRootRadius,
-  double scale = 1,
-  double fontSize = hexLabelFontSize,
 }) {
-  if (nodes.isEmpty) {
-    return const HexLayout(cells: [], width: 0, height: 0);
-  }
   final byId = {for (final node in nodes) node.id: node};
-  final children = <int, List<GraphNode>>{};
-  final parents = <int, List<GraphNode>>{};
-  for (final edge in edges) {
-    final parent = byId[edge.source];
-    final child = byId[edge.target];
-    if (parent == null || child == null) continue;
-    children.putIfAbsent(parent.id, () => []).add(child);
-    parents.putIfAbsent(child.id, () => []).add(parent);
-  }
-  for (final list in children.values) {
-    list.sort((a, b) => a.id.compareTo(b.id));
-  }
-  for (final list in parents.values) {
-    list.sort((a, b) => a.depth.compareTo(b.depth));
-  }
+  final related = [
+    for (final node in nodes)
+      if (node.kind == 'related' || (node.id != focusId && node.depth == 0 && node.kind != 'focus'))
+        node,
+  ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  final zoom = window ?? zoomWindowFor(scale);
-  final focus = byId[focusId] ?? nodes.first;
-  var root = focus;
-  for (var step = 0; step < zoom.climb; step++) {
-    final above = parents[root.id];
-    if (above == null || above.isEmpty) break;
-    root = above.first;
-  }
-
-  final placed = <_RawHex>[];
-  void place(GraphNode node, Offset center, double radius, int remaining) {
-    final kids = [...(children[node.id] ?? const <GraphNode>[])];
-    if (kids.isEmpty || remaining <= 0) {
-      placed.add(_RawHex(node, center, radius));
-      return;
-    }
-    kids.sort((a, b) {
-      if (a.id == focusId) return -1;
-      if (b.id == focusId) return 1;
-      return a.id.compareTo(b.id);
-    });
-    final coords = flowerAxial(kids.length, includeCenter: kids.first.id == focusId);
-    final rings = math.max(1, ringsFor(kids.length));
-    final childRadius = radius / (2 * rings + 1);
-    for (var index = 0; index < kids.length; index++) {
-      final pixel = axialToPixel(coords[index].$1, coords[index].$2, childRadius);
-      place(kids[index], center + pixel, childRadius, remaining - 1);
-    }
-  }
-
-  place(root, Offset.zero, rootRadius, zoom.expand);
-
-  if (placed.isEmpty) {
-    return const HexLayout(cells: [], width: 0, height: 0);
-  }
-  var minX = placed.first.center.dx - placed.first.radius;
-  var maxX = placed.first.center.dx + placed.first.radius;
-  var minY = placed.first.center.dy - placed.first.radius;
-  var maxY = placed.first.center.dy + placed.first.radius;
-  for (final cell in placed) {
-    minX = math.min(minX, cell.center.dx - cell.radius);
-    maxX = math.max(maxX, cell.center.dx + cell.radius);
-    minY = math.min(minY, cell.center.dy - cell.radius);
-    maxY = math.max(maxY, cell.center.dy + cell.radius);
-  }
-  const margin = 28.0;
-  final shift = Offset(margin - minX, margin - minY);
-  final ranked = [...placed]
-    ..sort((a, b) {
-      final byDistance = a.node.distance.compareTo(b.node.distance);
-      if (byDistance != 0) return byDistance;
-      return b.radius.compareTo(a.radius);
-    });
-  final occupied = <Rect>[];
-  final labeled = <int>{};
-  for (final cell in ranked) {
-    final width = estimateLabelWidth(cell.node.title, fontSize);
-    final hexWidth = 2 * cell.radius * scale;
-    if (hexWidth < width + 12) continue;
-    final center = cell.center + shift;
-    final rect = Rect.fromCenter(center: center, width: width, height: fontSize + 6);
-    if (occupied.any((other) => other.overlaps(rect))) continue;
-    occupied.add(rect);
-    labeled.add(cell.node.id);
-  }
-  final cells = [
-    for (final cell in placed)
-      PlacedHex(
-        id: cell.node.id,
-        title: cell.node.title,
-        depth: cell.node.depth,
-        distance: cell.node.distance,
-        x: cell.center.dx + shift.dx,
-        y: cell.center.dy + shift.dy,
-        radius: cell.radius,
-        showLabel: labeled.contains(cell.node.id),
-      ),
+  final relatedIds = {for (final node in related) node.id};
+  final hierarchyNodes = [
+    for (final node in nodes)
+      if (!relatedIds.contains(node.id) || node.id == focusId) node,
   ];
-  return HexLayout(
-    cells: cells,
-    width: maxX - minX + margin * 2,
-    height: maxY - minY + margin * 2,
+
+  final parents = [
+    for (final node in hierarchyNodes)
+      if (node.depth < 0) node,
+  ]..sort((a, b) => a.depth.compareTo(b.depth));
+  GraphNode? focus = byId[focusId];
+  if (focus == null) {
+    for (final node in hierarchyNodes) {
+      if (node.depth == 0) {
+        focus = node;
+        break;
+      }
+    }
+  }
+  focus ??= hierarchyNodes.isEmpty ? null : hierarchyNodes.first;
+  final children = [
+    for (final node in hierarchyNodes)
+      if (node.depth > 0) node,
+  ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+
+  final rows = <List<GraphNode>>[];
+  if (parents.isNotEmpty) rows.add(parents);
+  if (focus != null) rows.add([focus]);
+  if (children.isNotEmpty) rows.add(children);
+
+  final placed = <PlacedNode>[];
+  var maxWidth = hierarchyPadding * 2;
+  var y = hierarchyPadding;
+  for (final row in rows) {
+    final rowWidth = row.length * hierarchyCardWidth + math.max(0, row.length - 1) * hierarchyGapX;
+    maxWidth = math.max(maxWidth, rowWidth + hierarchyPadding * 2);
+    var x = hierarchyPadding;
+    // Center the row later after we know canvas width.
+    for (final node in row) {
+      placed.add(
+        PlacedNode(
+          id: node.id,
+          title: node.title,
+          depth: node.depth,
+          distance: node.distance,
+          kind: node.kind,
+          x: x,
+          y: y,
+          width: hierarchyCardWidth,
+          height: hierarchyCardHeight,
+        ),
+      );
+      x += hierarchyCardWidth + hierarchyGapX;
+    }
+    y += hierarchyCardHeight + hierarchyGapY;
+  }
+
+  final width = math.max(maxWidth, 320.0);
+  final centered = <PlacedNode>[];
+  // Re-center each depth band.
+  final byDepth = <int, List<PlacedNode>>{};
+  for (final node in placed) {
+    byDepth.putIfAbsent(node.depth, () => []).add(node);
+  }
+  for (final entry in byDepth.entries) {
+    final band = entry.value;
+    final bandWidth = band.length * hierarchyCardWidth + math.max(0, band.length - 1) * hierarchyGapX;
+    var x = (width - bandWidth) / 2;
+    for (final node in band) {
+      centered.add(
+        PlacedNode(
+          id: node.id,
+          title: node.title,
+          depth: node.depth,
+          distance: node.distance,
+          kind: node.kind,
+          x: x,
+          y: node.y,
+          width: node.width,
+          height: node.height,
+        ),
+      );
+      x += hierarchyCardWidth + hierarchyGapX;
+    }
+  }
+
+  final visibleEdges = [
+    for (final edge in edges)
+      if (edge.type != 'related_to' &&
+          centered.any((node) => node.id == edge.source) &&
+          centered.any((node) => node.id == edge.target))
+        edge,
+  ];
+
+  final height = y - hierarchyGapY + hierarchyPadding;
+  return HierarchyLayout(
+    nodes: centered,
+    edges: visibleEdges,
+    related: related,
+    width: width,
+    height: math.max(height, 240.0),
   );
 }
 
-int? hitTestHex(HexLayout layout, Offset point) {
-  PlacedHex? best;
-  for (final cell in layout.cells) {
-    if (!cell.contains(point)) continue;
-    if (best == null || cell.radius < best.radius) best = cell;
+int? hitTestNode(HierarchyLayout layout, Offset point) {
+  for (final node in layout.nodes.reversed) {
+    if (node.contains(point)) return node.id;
   }
-  return best?.id;
+  return null;
 }

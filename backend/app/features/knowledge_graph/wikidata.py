@@ -13,7 +13,7 @@ from app.core.config import get_settings
 USER_AGENT = "AdaptiveMastery/1.0 (https://github.com/dezwier/learnfromai; knowledge graph)"
 _RETRY_CODES = {"ratelimited", "maxlag"}
 _ENTITY_BATCH = 20
-_CHILD_LIMIT = 80
+_CHILD_LIMIT = 40
 
 # Pedagogical ceilings. Never walk parents of these, never climb to entity (Q35120).
 DOMAIN_ROOT_QIDS: frozenset[int] = frozenset(
@@ -52,6 +52,7 @@ class WikiEntity:
     qid: int
     title: str
     description: str | None
+    enwiki_title: str | None
     sitelinks: int
     subclass_of: tuple[int, ...]
     parent_taxon: tuple[int, ...]
@@ -60,6 +61,10 @@ class WikiEntity:
     @property
     def skipped(self) -> bool:
         return bool(set(self.instance_of) & _SKIP_INSTANCE) or _junk_title(self.title)
+
+    @property
+    def is_taxon(self) -> bool:
+        return bool(self.parent_taxon)
 
 
 class WikidataClient:
@@ -161,10 +166,14 @@ class WikidataClient:
         return [item for item in self.entities(qids) if not item.skipped]
 
     def entities(self, qids: list[int]) -> list[WikiEntity]:
+        """Load entities and follow redirects so merged items share one qid."""
         found: list[WikiEntity] = []
         unique = list(dict.fromkeys(qids))
-        for start in range(0, len(unique), _ENTITY_BATCH):
-            chunk = unique[start : start + _ENTITY_BATCH]
+        pending = list(unique)
+        seen_redirects: set[int] = set()
+        while pending:
+            chunk = pending[:_ENTITY_BATCH]
+            pending = pending[_ENTITY_BATCH:]
             if not chunk:
                 continue
             payload = self.get(
@@ -174,22 +183,49 @@ class WikidataClient:
                     "props": "labels|descriptions|claims|sitelinks",
                     "languages": "en",
                     "languagefallback": "1",
+                    "redirects": "1",
                 }
             )
             entities = payload.get("entities") or {}
             if not isinstance(entities, dict):
                 continue
-            for raw in entities.values():
+            for key, raw in entities.items():
+                if not isinstance(raw, dict):
+                    continue
+                redirect = parse_qid(raw.get("redirects")) if "redirects" in raw else None
+                if redirect is None and isinstance(raw.get("redirects"), dict):
+                    redirect = parse_qid(raw["redirects"].get("to"))
+                # wbgetentities with redirects=1 may return the target under the target id,
+                # or a stub that points elsewhere. Follow stubs once.
+                if raw.get("missing") is not None:
+                    continue
+                if "labels" not in raw and "claims" not in raw:
+                    target = parse_qid(raw.get("id")) or parse_qid(key)
+                    if target is not None and target not in seen_redirects:
+                        seen_redirects.add(target)
+                        pending.append(target)
+                    continue
+                # Some responses nest redirects as {"from": "Q1", "to": "Q2"} on the entity.
+                nested = raw.get("redirects")
+                if isinstance(nested, dict):
+                    target = parse_qid(nested.get("to"))
+                    if target is not None and target not in seen_redirects:
+                        seen_redirects.add(target)
+                        pending.append(target)
+                        continue
                 item = parse_entity(raw)
                 if item is not None:
                     found.append(item)
-        return found
+        # Deduplicate by final qid, prefer the last parsed copy.
+        by_qid = {item.qid: item for item in found}
+        return list(by_qid.values())
 
-    def children(self, qid: int) -> list[int]:
-        # Property paths only. A VALUES ?rel pattern returns unrelated property rows.
+    def children(self, qid: int, *, taxon: bool) -> list[int]:
+        """Direct children: P171 for taxa, otherwise P279."""
+        prop = "wdt:P171" if taxon else "wdt:P279"
         query = (
             "SELECT DISTINCT ?child WHERE {"
-            f" ?child wdt:P279|wdt:P171 wd:Q{qid} ."
+            f" ?child {prop} wd:Q{qid} ."
             " }"
             f" LIMIT {_CHILD_LIMIT}"
         )
@@ -231,11 +267,17 @@ def parse_entity(raw: object) -> WikiEntity | None:
     description = _description(raw)
     sitelinks = raw.get("sitelinks") or {}
     count = len(sitelinks) if isinstance(sitelinks, dict) else 0
+    enwiki = None
+    if isinstance(sitelinks, dict):
+        wiki = sitelinks.get("enwiki")
+        if isinstance(wiki, dict) and wiki.get("title"):
+            enwiki = str(wiki["title"]).strip() or None
     claims = raw.get("claims") if isinstance(raw.get("claims"), dict) else {}
     return WikiEntity(
         qid=qid,
         title=title,
         description=description,
+        enwiki_title=enwiki,
         sitelinks=count,
         subclass_of=tuple(_claim_qids(claims, "P279")),
         parent_taxon=tuple(_claim_qids(claims, "P171")),
@@ -246,7 +288,6 @@ def parse_entity(raw: object) -> WikiEntity | None:
 def preferred_parent_qids(entity: WikiEntity) -> list[int]:
     if entity.qid in DOMAIN_ROOT_QIDS:
         return []
-    # Consider both class and taxon parents. An obscure P171 should not hide Reptilia.
     return [qid for qid in (*entity.subclass_of, *entity.parent_taxon) if qid != entity.qid]
 
 
@@ -263,7 +304,6 @@ def pick_parent(entity: WikiEntity, parents: list[WikiEntity]) -> WikiEntity | N
     # Prefer a well-known class parent (reptile) over a rare taxon (Dracohors).
     class_parents = [item for item in pool if item.qid in subclass_ids]
     if class_parents:
-        # More specific first: among major classes, the smaller sitelink count wins.
         return min(class_parents, key=lambda item: (item.sitelinks, item.qid))
     roots = [item for item in pool if item.qid in DOMAIN_ROOT_QIDS]
     chosen = roots or pool

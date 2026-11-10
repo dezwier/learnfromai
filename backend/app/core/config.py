@@ -31,18 +31,20 @@ class Settings(BaseSettings):
     wikipedia_user_agent: str = "AdaptiveMastery/1.0 (https://github.com/dezwier/learnfromai; knowledge graph)"
     wikipedia_timeout_seconds: float = 20.0
     wikipedia_cache_ttl_days: int = 30
-    wikipedia_default_up_depth: int = 2
-    wikipedia_default_down_depth: int = 2
-    wikipedia_max_depth: int = 3
+    wikipedia_default_up_depth: int = 1
+    wikipedia_default_down_depth: int = 1
+    wikipedia_max_depth: int = 2
     wikipedia_max_categories_per_request: int = 200
     wikidata_api_url: str = "https://www.wikidata.org/w/api.php"
     wikidata_sparql_url: str = "https://query.wikidata.org/sparql"
     wikidata_user_agent: str = "AdaptiveMastery/1.0 (https://github.com/dezwier/learnfromai; knowledge graph)"
     wikidata_timeout_seconds: float = 20.0
     wikidata_cache_ttl_days: int = 30
-    wikidata_default_up_depth: int = 2
-    wikidata_default_down_depth: int = 2
-    wikidata_max_depth: int = 3
+    wikidata_default_up_depth: int = 1
+    wikidata_default_down_depth: int = 1
+    wikidata_max_depth: int = 2
+    wikidata_default_cloud_radius: int = 1
+    wikidata_max_cloud_radius: int = 2
     wikidata_max_items_per_request: int = 200
 
     @property
