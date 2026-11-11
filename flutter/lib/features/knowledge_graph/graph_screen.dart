@@ -132,45 +132,14 @@ class _GraphScreenState extends State<GraphScreen> {
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
+    final drawerVisible = !_profileOpen && !_searchOpen && _highlighted != null;
+    final drawerClearance = drawerVisible ? _HighlightDrawer.totalHeight(safeBottom) + 12 : 16.0;
+    final floatBottom = drawerClearance + keyboard;
     return Scaffold(
       // Keep the graph still when the keyboard opens; search floats above it.
       resizeToAvoidBottomInset: false,
-      floatingActionButton: (_searchOpen || _profileOpen)
-          ? null
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (graph.canGoBack) ...[
-                  FloatingActionButton.small(
-                    heroTag: 'graph-back',
-                    tooltip: 'Previous topic',
-                    backgroundColor: scheme.surfaceContainerHighest,
-                    foregroundColor: scheme.onSurfaceVariant,
-                    elevation: 1.5,
-                    focusElevation: 2,
-                    hoverElevation: 2,
-                    highlightElevation: 2,
-                    onPressed: () => graph.back(),
-                    child: const Icon(Icons.arrow_back, size: 20),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                FloatingActionButton.small(
-                  heroTag: 'graph-search',
-                  tooltip: 'Search',
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  foregroundColor: scheme.onSurfaceVariant,
-                  elevation: 1.5,
-                  focusElevation: 2,
-                  hoverElevation: 2,
-                  highlightElevation: 2,
-                  onPressed: _openSearch,
-                  child: const Icon(Icons.search, size: 20),
-                ),
-              ],
-            ),
       body: Stack(
         children: [
           Column(
@@ -239,7 +208,7 @@ class _GraphScreenState extends State<GraphScreen> {
                 ),
               ),
             ),
-          if (!_profileOpen && !_searchOpen && _highlighted != null)
+          if (drawerVisible)
             Positioned(
               left: 0,
               right: 0,
@@ -249,8 +218,46 @@ class _GraphScreenState extends State<GraphScreen> {
           if (graph.working)
             Positioned(
               left: 16,
-              bottom: (_highlighted != null && !_profileOpen && !_searchOpen ? 132 : 16) + keyboard,
+              bottom: floatBottom,
               child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
+            ),
+          if (!_searchOpen && !_profileOpen)
+            Positioned(
+              right: 16,
+              bottom: floatBottom,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (graph.canGoBack) ...[
+                    FloatingActionButton.small(
+                      heroTag: 'graph-back',
+                      tooltip: 'Previous topic',
+                      backgroundColor: scheme.surfaceContainerHighest,
+                      foregroundColor: scheme.onSurfaceVariant,
+                      elevation: 1.5,
+                      focusElevation: 2,
+                      hoverElevation: 2,
+                      highlightElevation: 2,
+                      onPressed: () => graph.back(),
+                      child: const Icon(Icons.arrow_back, size: 20),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  FloatingActionButton.small(
+                    heroTag: 'graph-search',
+                    tooltip: 'Search',
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    foregroundColor: scheme.onSurfaceVariant,
+                    elevation: 1.5,
+                    focusElevation: 2,
+                    hoverElevation: 2,
+                    highlightElevation: 2,
+                    onPressed: _openSearch,
+                    child: const Icon(Icons.search, size: 20),
+                  ),
+                ],
+              ),
             ),
           if (_searchOpen)
             Positioned(
@@ -446,6 +453,11 @@ class _ProgressChip extends StatelessWidget {
 class _HighlightDrawer extends StatelessWidget {
   const _HighlightDrawer({required this.node});
 
+  /// Fixed content height (above the home-indicator inset).
+  static const double contentHeight = 158;
+
+  static double totalHeight(double safeBottom) => contentHeight + safeBottom;
+
   final PlacedNode node;
 
   @override
@@ -458,14 +470,11 @@ class _HighlightDrawer extends StatelessWidget {
       shadowColor: Colors.black.withValues(alpha: 0.28),
       color: scheme.surface.withValues(alpha: 0.97),
       borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottom),
-        child: AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
+      child: SizedBox(
+        height: totalHeight(bottom),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 14, 20, 12 + bottom),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
@@ -491,18 +500,20 @@ class _HighlightDrawer extends StatelessWidget {
                   color: scheme.onSurface,
                 ),
               ),
-              if (desc.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  desc,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.72),
-                        height: 1.35,
+              const SizedBox(height: 8),
+              Expanded(
+                child: desc.isEmpty
+                    ? const SizedBox.shrink()
+                    : Text(
+                        desc,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.72),
+                              height: 1.35,
+                            ),
                       ),
-                ),
-              ],
+              ),
             ],
           ),
         ),
