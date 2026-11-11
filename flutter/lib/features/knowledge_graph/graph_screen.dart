@@ -36,6 +36,8 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _profileOpen = false;
   var _drawerRaised = false;
   PlacedNode? _highlighted;
+  /// Last tile the user explicitly tapped (survives center-highlight overwrites).
+  String? _tappedTileId;
   GraphLayout? _layout;
   Size _viewport = Size.zero;
 
@@ -81,6 +83,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
+    _tappedTileId = null;
     // Focus is laid out at the canvas center; translate so that lands in view.
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
@@ -113,11 +116,13 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
 
   void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
     final graph = context.read<GraphController>();
-    // Second tap on the already-centered tile → open it as focus.
-    if (_highlighted?.id == node.id && node.id != graph.focusId) {
+    // Second tap on the same tile → open it as focus (don't rely on center-highlight).
+    if (_tappedTileId == node.id && node.id != graph.focusId) {
+      _tappedTileId = null;
       unawaited(_openRelatedTopic(graph, node));
       return;
     }
+    _tappedTileId = node.id == graph.focusId ? null : node.id;
     _panTargetId = node.id;
     if (_highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
@@ -139,6 +144,8 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     if (pin != null && node?.id == pin) {
       _panTargetId = null;
     }
+    // Don't let sticky center-highlight steal away from an explicit tile tap.
+    if (_tappedTileId != null && node?.id != _tappedTileId) return;
     if (node?.id == _highlighted?.id &&
         node?.title == _highlighted?.title &&
         node?.description == _highlighted?.description) {
@@ -586,6 +593,15 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
             _panController.stop();
             _panAnimation = null;
             _panTargetId = null;
+          },
+          onInteractionUpdate: (details) {
+            // Real pan/zoom (not a tap) — drop the second-tap open candidate.
+            if (_tappedTileId == null) return;
+            if (details.pointerCount > 1 ||
+                details.scale != 1.0 ||
+                details.focalPointDelta.distanceSquared > 4) {
+              _tappedTileId = null;
+            }
           },
           child: SizedBox(
             width: layout.width,
