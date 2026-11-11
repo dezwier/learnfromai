@@ -89,6 +89,15 @@ def topic_stems(key: str) -> set[str]:
             stems.add(base + "ians")
             stems.add(base)
             stems.add(base + "s")
+        if item.endswith("oda") and len(item) > 4:
+            # Theropoda ↔ Theropods; Sauropoda ↔ Sauropods.
+            base = item[:-1]  # theropod
+            stems.add(base)
+            stems.add(base + "s")
+        if item.endswith("ods") and len(item) > 4:
+            base = item[:-1]  # theropod
+            stems.add(base)
+            stems.add(base + "a")  # theropoda
         if item.endswith("s") and len(item) > 2 and not item.endswith("ss"):
             stems.add(item[:-1])
         else:
