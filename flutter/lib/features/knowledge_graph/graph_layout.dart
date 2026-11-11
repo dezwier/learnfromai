@@ -26,23 +26,25 @@ class GraphNode {
   final int? q;
   final int? r;
 
-  NodeRole get role {
-    switch (kind) {
-      case 'parent':
-        return NodeRole.parent;
-      case 'sibling':
-        return NodeRole.sibling;
-      case 'child':
-        return NodeRole.child;
-      case 'related':
-        return NodeRole.related;
-      case 'extended':
-        return NodeRole.extended;
-      default:
-        if (depth < 0) return NodeRole.parent;
-        if (depth > 0) return NodeRole.child;
-        return NodeRole.focus;
-    }
+  NodeRole get role => roleFromKind(kind);
+}
+
+NodeRole roleFromKind(String kind) {
+  switch (kind) {
+    case 'parent':
+      return NodeRole.parent;
+    case 'sibling':
+      return NodeRole.sibling;
+    case 'child':
+      return NodeRole.child;
+    case 'related':
+      return NodeRole.related;
+    case 'extended':
+      return NodeRole.extended;
+    case 'focus':
+      return NodeRole.focus;
+    default:
+      return NodeRole.extended;
   }
 }
 
@@ -402,6 +404,80 @@ GraphLayout layoutWorld(
       ),
   ];
   return GraphLayout(nodes: placed, width: canvasW, height: canvasH);
+}
+
+/// Pull direct neighbors into ring-1/2 display slots around [focusId] so colored
+/// tiles sit close. World (q,r) stay unchanged — this is view-only packing.
+Map<String, Offset> clusterNeighborCenters({
+  required List<PlacedNode> nodes,
+  required List<GraphEdge> edges,
+  required String? focusId,
+  required double hexRadius,
+}) {
+  final byId = {for (final node in nodes) node.id: node};
+  final result = {for (final node in nodes) node.id: node.center};
+  if (focusId == null) return result;
+  final focus = byId[focusId];
+  if (focus == null) return result;
+
+  final neighborIds = <String>{};
+  for (final edge in edges) {
+    if (edge.source == focusId) neighborIds.add(edge.target);
+    if (edge.target == focusId) neighborIds.add(edge.source);
+  }
+  final ordered = [
+    for (final id in neighborIds)
+      if (byId.containsKey(id) && id != focusId) id,
+  ]..sort((a, b) {
+      final ka = kindRelativeToFocus(nodeId: a, focusId: focusId, edges: edges);
+      final kb = kindRelativeToFocus(nodeId: b, focusId: focusId, edges: edges);
+      const rank = {'parent': 0, 'child': 1, 'sibling': 2, 'related': 3};
+      final c = (rank[ka] ?? 9).compareTo(rank[kb] ?? 9);
+      if (c != 0) return c;
+      return a.compareTo(b);
+    });
+
+  final used = <(int, int)>{(0, 0)};
+  for (final id in ordered) {
+    final current = byId[id]!.center - focus.center;
+    final preferred = pixelToAxial(current, hexRadius);
+    (int, int)? slot;
+    for (var ring = 1; ring <= 3 && slot == null; ring++) {
+      final cells = <(int, int)>[
+        for (var i = 0; i < ring * 6; i++) _ringCell(ring, i),
+      ]..sort((a, b) {
+          final da = (a.$1 - preferred.$1).abs() + (a.$2 - preferred.$2).abs();
+          final db = (b.$1 - preferred.$1).abs() + (b.$2 - preferred.$2).abs();
+          return da.compareTo(db);
+        });
+      for (final cell in cells) {
+        if (used.add(cell)) {
+          slot = cell;
+          break;
+        }
+      }
+    }
+    if (slot == null) continue;
+    result[id] = focus.center + axialToPixel(slot.$1, slot.$2, hexRadius);
+  }
+  return result;
+}
+
+(int, int) _ringCell(int ring, int index) {
+  // Walk the ring starting at (ring, 0).
+  var q = ring;
+  var r = 0;
+  const dirs = [(0, -1), (-1, 0), (-1, 1), (0, 1), (1, 0), (1, -1)];
+  var step = 0;
+  for (final d in dirs) {
+    for (var i = 0; i < ring; i++) {
+      if (step == index) return (q, r);
+      q += d.$1;
+      r += d.$2;
+      step++;
+    }
+  }
+  return (q, r);
 }
 
 /// Relation of [nodeId] to [focusId] from directed neighborhood edges.

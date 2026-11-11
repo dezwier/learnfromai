@@ -31,17 +31,16 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
   var _searchOpen = false;
   var _profileOpen = false;
   AnimationController? _camera;
-  Animation<Matrix4>? _cameraAnim;
+  Offset _camFrom = Offset.zero;
+  Offset _camTo = Offset.zero;
+  double _camScaleFrom = 1;
+  double _camScaleTo = 1;
+  var _cameraListening = false;
 
   @override
   void initState() {
     super.initState();
-    _camera = AnimationController(vsync: this, duration: const Duration(milliseconds: 420))
-      ..addListener(() {
-        final anim = _cameraAnim;
-        if (anim == null) return;
-        _transform.value = anim.value;
-      });
+    _camera = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
       _resumed = true;
@@ -59,44 +58,72 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
     super.dispose();
   }
 
-  void _flyToFocusIfNeeded({
+  void _applyCamera(double t) {
+    final tt = Curves.easeInOutCubic.transform(t.clamp(0.0, 1.0));
+    final scale = _camScaleFrom + (_camScaleTo - _camScaleFrom) * tt;
+    final tx = _camFrom.dx + (_camTo.dx - _camFrom.dx) * tt;
+    final ty = _camFrom.dy + (_camTo.dy - _camFrom.dy) * tt;
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
+  void _scheduleFlyToFocus({
     required String? focusId,
     required GraphLayout layout,
     required Size viewport,
   }) {
-    if (focusId == null || _transformFocusId == focusId) return;
-    _transformFocusId = focusId;
+    // World origin sits at canvas center; identity transform shows empty corner → black.
+    final targetKey = focusId ?? '__origin__';
+    if (_transformFocusId == targetKey) return;
+    _transformFocusId = targetKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _flyTo(focusId: focusId, layout: layout, viewport: viewport);
+    });
+  }
+
+  void _flyTo({
+    required String? focusId,
+    required GraphLayout layout,
+    required Size viewport,
+  }) {
+    if (layout.nodes.isEmpty || viewport.isEmpty) return;
     PlacedNode? target;
-    for (final node in layout.nodes) {
-      if (node.id == focusId) {
-        target = node;
-        break;
+    if (focusId != null) {
+      for (final node in layout.nodes) {
+        if (node.id == focusId) {
+          target = node;
+          break;
+        }
       }
     }
-    final end = Matrix4.identity();
-    if (target == null) {
-      end.translateByDouble(
-        (viewport.width - layout.width) / 2,
-        (viewport.height - layout.height) / 2,
-        0,
-        1,
-      );
-    } else {
-      final scale = _transform.value.getMaxScaleOnAxis().clamp(0.55, 2.4);
-      final tx = viewport.width / 2 - target.center.dx * scale;
-      final ty = viewport.height / 2 - target.center.dy * scale;
-      end
-        ..translateByDouble(tx, ty, 0, 1)
-        ..scaleByDouble(scale, scale, scale, 1);
-    }
+    final focusPoint = target?.center ?? Offset(layout.width / 2, layout.height / 2);
+    final scale = _transform.value.getMaxScaleOnAxis().clamp(0.55, 2.4);
+    final endTx = viewport.width / 2 - focusPoint.dx * scale;
+    final endTy = viewport.height / 2 - focusPoint.dy * scale;
+
+    final currentScale = _transform.value.getMaxScaleOnAxis();
+    final translation = _transform.value.getTranslation();
+    _camFrom = Offset(translation.x, translation.y);
+    _camScaleFrom = currentScale <= 0 ? 1.0 : currentScale;
+    _camTo = Offset(endTx, endTy);
+    _camScaleTo = scale;
+
     final cam = _camera;
     if (cam == null) {
-      _transform.value = end;
+      _applyCamera(1);
       return;
     }
-    _cameraAnim = Matrix4Tween(begin: _transform.value.clone(), end: end).animate(
-      CurvedAnimation(parent: cam, curve: Curves.easeInOutCubic),
-    );
+    if (!_cameraListening) {
+      _cameraListening = true;
+      cam.addListener(() => _applyCamera(cam.value));
+    }
+    // First paint: jump so we never flash a black empty corner.
+    if (_camFrom == Offset.zero && _camScaleFrom == 1.0 && translation.x == 0 && translation.y == 0) {
+      _applyCamera(1);
+      return;
+    }
     cam.forward(from: 0);
   }
 
@@ -398,7 +425,7 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         final layout = _layoutFor(graph, viewport);
-        _flyToFocusIfNeeded(
+        _scheduleFlyToFocus(
           focusId: graph.focusId,
           layout: layout,
           viewport: viewport,
@@ -409,7 +436,9 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
           minScale: 0.45,
           maxScale: 3.5,
           boundaryMargin: const EdgeInsets.all(480),
-          onInteractionEnd: (_) => _requestMapForViewport(graph, layout, viewport),
+          onInteractionEnd: (_) {
+            _requestMapForViewport(graph, layout, viewport);
+          },
           child: SizedBox(
             width: layout.width,
             height: layout.height,
@@ -420,6 +449,9 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
               transform: _transform,
               viewport: viewport,
               onOpen: graph.openNode,
+              onSettledCenter: (id) {
+                if (id != null) graph.prefetchNeighborhood(id);
+              },
             ),
           ),
         );
@@ -611,6 +643,7 @@ class _GraphView extends StatefulWidget {
     required this.transform,
     required this.viewport,
     required this.onOpen,
+    required this.onSettledCenter,
   });
 
   final GraphLayout layout;
@@ -619,13 +652,17 @@ class _GraphView extends StatefulWidget {
   final TransformationController transform;
   final Size viewport;
   final ValueChanged<String> onOpen;
+  final ValueChanged<String?> onSettledCenter;
 
   @override
   State<_GraphView> createState() => _GraphViewState();
 }
 
 class _GraphViewState extends State<_GraphView> {
-  String? _centerId;
+  final ValueNotifier<String?> _centerId = ValueNotifier<String?>(null);
+  Timer? _centerThrottle;
+  Timer? _settleTimer;
+  var _dragging = false;
 
   @override
   void initState() {
@@ -641,57 +678,107 @@ class _GraphViewState extends State<_GraphView> {
       oldWidget.transform.removeListener(_onTransform);
       widget.transform.addListener(_onTransform);
     }
-    if (oldWidget.layout != widget.layout ||
-        oldWidget.viewport != widget.viewport ||
-        oldWidget.focusId != widget.focusId) {
+    if (oldWidget.layout != widget.layout || oldWidget.viewport != widget.viewport) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _onTransform());
     }
   }
 
   @override
   void dispose() {
+    _centerThrottle?.cancel();
+    _settleTimer?.cancel();
     widget.transform.removeListener(_onTransform);
+    _centerId.dispose();
     super.dispose();
   }
 
   void _onTransform() {
     if (!mounted) return;
+    // Detect active pan/zoom via frequent transform ticks; settle after quiet.
+    _dragging = true;
+    _settleTimer?.cancel();
+    _settleTimer = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      setState(() => _dragging = false);
+      widget.onSettledCenter(_centerId.value);
+    });
+    _centerThrottle?.cancel();
+    _centerThrottle = Timer(const Duration(milliseconds: 64), _updateCenter);
+  }
+
+  void _updateCenter() {
+    if (!mounted) return;
     final next = _tileAtViewportCenter(
       layout: widget.layout,
       transform: widget.transform.value,
       viewport: widget.viewport,
-      currentId: _centerId,
+      currentId: _centerId.value,
     );
-    if (next == _centerId) return;
-    setState(() => _centerId = next);
+    if (next == _centerId.value) return;
+    _centerId.value = next;
   }
 
   @override
   Widget build(BuildContext context) {
     const shadowPad = 14.0;
+    final graph = context.read<GraphController>();
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          for (final node in widget.layout.nodes)
-            Positioned(
-              left: node.x - shadowPad,
-              top: node.y - shadowPad,
-              width: node.width + shadowPad * 2,
-              height: node.height + shadowPad * 2,
-              child: Padding(
-                padding: const EdgeInsets.all(shadowPad),
-                child: _NodeCard(
-                  node: node,
-                  focused: node.id == widget.focusId,
-                  pending: node.id == widget.pendingId,
-                  centerHighlight: node.id == _centerId,
-                  onTap: () => widget.onOpen(node.id),
-                ),
+      child: ListenableBuilder(
+        listenable: Listenable.merge([_centerId, graph.neighborhoodEpoch]),
+        builder: (context, _) {
+          final edges = [
+            for (final raw in graph.worldEdges)
+              GraphEdge(
+                source: raw['source'] ?? '',
+                target: raw['target'] ?? '',
+                type: raw['type'] ?? 'related',
               ),
-            ),
-        ],
+          ];
+          final colorFocusId = _centerId.value ?? widget.focusId;
+          final radius = widget.layout.nodes.isEmpty ? 52.0 : widget.layout.nodes.first.radius;
+          // Keep world seats while dragging so pan stays smooth; cluster when settled.
+          final centers = _dragging
+              ? {for (final node in widget.layout.nodes) node.id: node.center}
+              : clusterNeighborCenters(
+                  nodes: widget.layout.nodes,
+                  edges: edges,
+                  focusId: colorFocusId,
+                  hexRadius: radius,
+                );
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              for (final node in widget.layout.nodes)
+                AnimatedPositioned(
+                  key: ValueKey(node.id),
+                  duration: _dragging ? Duration.zero : const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  left: centers[node.id]!.dx - node.width / 2 - shadowPad,
+                  top: centers[node.id]!.dy - node.height / 2 - shadowPad,
+                  width: node.width + shadowPad * 2,
+                  height: node.height + shadowPad * 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(shadowPad),
+                    child: _NodeCard(
+                      node: node,
+                      role: roleFromKind(
+                        kindRelativeToFocus(
+                          nodeId: node.id,
+                          focusId: colorFocusId,
+                          edges: edges,
+                        ),
+                      ),
+                      focused: node.id == widget.focusId,
+                      pending: node.id == widget.pendingId,
+                      centerHighlight: node.id == _centerId.value,
+                      onTap: () => widget.onOpen(node.id),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -759,6 +846,7 @@ Color _intensifyFill(Color base, double amount, {required bool dark}) {
 class _NodeCard extends StatelessWidget {
   const _NodeCard({
     required this.node,
+    required this.role,
     required this.focused,
     required this.pending,
     required this.centerHighlight,
@@ -766,6 +854,7 @@ class _NodeCard extends StatelessWidget {
   });
 
   final PlacedNode node;
+  final NodeRole role;
   final bool focused;
   final bool pending;
   final bool centerHighlight;
@@ -777,7 +866,7 @@ class _NodeCard extends StatelessWidget {
     final dark = scheme.brightness == Brightness.dark;
     final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
-        : roleFill(node.role, scheme);
+        : roleFill(role, scheme);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: (centerHighlight || focused) ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
