@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections import deque
 from uuid import UUID
 
+from sqlalchemy import func, or_
 from sqlmodel import Session, col, select
 
 from app.core.time import utcnow
-from app.features.knowledge_graph.identity import canonical_key_for
+from app.features.knowledge_graph.identity import canonical_key_for, same_topic, topic_stems
 from app.features.knowledge_graph.node_models import (
     KnowledgeEdge,
     KnowledgeNode,
@@ -84,10 +85,49 @@ def ensure_focus_node(session: Session, *, topic: str | None = None, node_id: UU
             if row.name.lower() == name.lower():
                 return row
         return existing[0]
+    near = _near_name_candidates(session, name)
+    for row in near:
+        if same_topic(row.name, name):
+            return row
     row = KnowledgeNode(name=name[:1].upper() + name[1:] if name else name, name_key=key, description=None)
     session.add(row)
     session.flush()
     return row
+
+
+def _near_name_candidates(session: Session, name: str, *, limit: int = 24) -> list[KnowledgeNode]:
+    """Existing nodes whose titles look close enough to ask sameness / same_topic."""
+    needle = name.strip()
+    if not needle:
+        return []
+    key = canonical_key_for(needle)
+    clauses = [
+        func.lower(KnowledgeNode.name).like(f"%{needle.lower()}%"),
+        col(KnowledgeNode.name_key).like(f"%{key}%"),
+    ]
+    # Morph stems (dinosaur from Dinosauria, the-last-dance from …Documentary).
+    for stem in sorted(topic_stems(key), key=len, reverse=True)[:8]:
+        if len(stem) < 4:
+            continue
+        clauses.append(col(KnowledgeNode.name_key).like(f"%{stem}%"))
+        clauses.append(func.lower(KnowledgeNode.name).like(f"%{stem.replace('-', ' ')}%"))
+    rows = list(
+        session.exec(
+            select(KnowledgeNode)
+            .where(or_(*clauses))
+            .order_by(KnowledgeNode.name)
+            .limit(max(1, min(limit, 40)))
+        ).all()
+    )
+    # Prefer exact / same_topic hits first for stable merges.
+    rows.sort(
+        key=lambda row: (
+            0 if row.name_key == key or same_topic(row.name, needle) else 1,
+            abs(len(row.name_key) - len(key)),
+            row.name.lower(),
+        )
+    )
+    return rows
 
 
 def set_progress(session: Session, job: GenerationJob, *, stage: str, message: str, fraction: float) -> None:
@@ -145,6 +185,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     set_progress(session, job, stage="merge", message="Merging topics into the shared graph…", fraction=0.35)
     linked: dict[str, list[UUID]] = {bucket: [] for bucket in BUCKETS}
     seen_names: set[str] = {canonical_key_for(focus.name)}
+    seen_titles: list[str] = [focus.name]
     total = sum(len(neighborhood.get(bucket) or []) for bucket in BUCKETS) or 1
     done = 0
     for bucket in BUCKETS:
@@ -156,9 +197,10 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
             if not name:
                 continue
             key = canonical_key_for(name)
-            if key == canonical_key_for(focus.name) or key in seen_names:
+            if key in seen_names or any(same_topic(name, prior) for prior in seen_titles):
                 continue
             seen_names.add(key)
+            seen_titles.append(name)
             set_progress(
                 session,
                 job,
@@ -174,6 +216,8 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
                 name=name,
                 description=item.get("description"),
             )
+            if node.id == focus.id or any(node.id == other for other in linked[bucket]):
+                continue
             _ensure_pair(session, focus.id, node.id, relation)
             linked[bucket].append(node.id)
             done += 1
@@ -200,9 +244,10 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
                 if not name:
                     continue
                 key = canonical_key_for(name)
-                if key == canonical_key_for(focus.name) or key in seen_names:
+                if key in seen_names or any(same_topic(name, prior) for prior in seen_titles):
                     continue
                 seen_names.add(key)
+                seen_titles.append(name)
                 node = _upsert_named(
                     session,
                     llm=llm,
@@ -211,6 +256,8 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
                     name=name,
                     description=item.get("description"),
                 )
+                if node.id == focus.id or node.id in linked[bucket]:
+                    continue
                 _ensure_pair(session, focus.id, node.id, relation)
                 linked[bucket].append(node.id)
         session.commit()
@@ -235,18 +282,13 @@ def _upsert_named(
     key = canonical_key_for(name)
     desc = str(description).strip() if description else None
     existing = list(session.exec(select(KnowledgeNode).where(KnowledgeNode.name_key == key)).all())
-    if preferred is not None and preferred.name_key == key:
+    if preferred is not None and (preferred.name_key == key or same_topic(preferred.name, name)):
         if desc and not preferred.description:
             preferred.description = desc
             preferred.name = name
             session.add(preferred)
             session.flush()
         return preferred
-    if not existing:
-        row = KnowledgeNode(name=name, name_key=key, description=desc)
-        session.add(row)
-        session.flush()
-        return row
     if len(existing) == 1 and (
         not desc
         or not existing[0].description
@@ -261,25 +303,46 @@ def _upsert_named(
             session.flush()
         return row
 
-    candidates = [
-        {
-            "key": "c0",
-            "name": name,
-            "description": desc,
-            "existing": [{"id": str(row.id), "name": row.name, "description": row.description} for row in existing],
-        }
-    ]
-    matched, usage = llm.match_topics(candidates)
-    record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
-    chosen = parse_uuid((matched.get("matches") or {}).get("c0"))
-    if chosen is not None:
-        row = session.get(KnowledgeNode, chosen)
-        if row is not None:
+    # Exact key collisions plus near-title neighbors (plural/taxon/media variants).
+    near = existing or []
+    seen_ids = {row.id for row in near}
+    for row in _near_name_candidates(session, name):
+        if row.id in seen_ids:
+            continue
+        near.append(row)
+        seen_ids.add(row.id)
+    # Morphological / media-suffix near-duplicates share a concept. Exact same
+    # name_key with differing descriptions can still be true homonyms (Bass fish
+    # vs Bass pitch), so those go through the LLM sameness check below.
+    for row in near:
+        if row.name_key != key and same_topic(row.name, name):
             if desc and not row.description:
                 row.description = desc
                 session.add(row)
                 session.flush()
             return row
+
+    if near:
+        candidates = [
+            {
+                "key": "c0",
+                "name": name,
+                "description": desc,
+                "existing": [{"id": str(row.id), "name": row.name, "description": row.description} for row in near],
+            }
+        ]
+        matched, usage = llm.match_topics(candidates)
+        record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
+        chosen = parse_uuid((matched.get("matches") or {}).get("c0"))
+        if chosen is not None:
+            row = session.get(KnowledgeNode, chosen)
+            if row is not None:
+                if desc and not row.description:
+                    row.description = desc
+                    session.add(row)
+                    session.flush()
+                return row
+
     row = KnowledgeNode(name=name, name_key=key, description=desc)
     session.add(row)
     session.flush()

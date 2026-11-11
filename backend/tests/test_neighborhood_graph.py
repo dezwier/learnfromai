@@ -173,3 +173,46 @@ def test_name_collision_can_insert_second_node(session, user):
     session.commit()
     assert second.id != first.id
     assert session.exec(select(func.count()).select_from(KnowledgeNode)).one() == 2
+
+
+def test_near_duplicate_titles_map_together(session, user):
+    from app.features.knowledge_graph.neighborhood import _upsert_named, ensure_focus_node
+    from app.features.platform.neighborhood_llm import FakeNeighborhoodLLM
+
+    dinosaurs = KnowledgeNode(
+        name="Dinosaurs",
+        name_key="dinosaurs",
+        description="Extinct Mesozoic reptiles.",
+    )
+    last_dance = KnowledgeNode(
+        name="The Last Dance",
+        name_key="the-last-dance",
+        description="A documentary miniseries about Michael Jordan.",
+    )
+    session.add_all([dinosaurs, last_dance])
+    session.commit()
+
+    llm = FakeNeighborhoodLLM()
+    singular = _upsert_named(
+        session,
+        llm=llm,
+        user_id=user.id,
+        job_id=None,
+        name="Dinosaur",
+        description="An extinct reptile clade.",
+    )
+    documentary = _upsert_named(
+        session,
+        llm=llm,
+        user_id=user.id,
+        job_id=None,
+        name="The Last Dance Documentary",
+        description="Documentary about the 1990s Chicago Bulls.",
+    )
+    focus = ensure_focus_node(session, topic="Dinosauria")
+    session.commit()
+
+    assert singular.id == dinosaurs.id
+    assert documentary.id == last_dance.id
+    assert focus.id == dinosaurs.id
+    assert session.exec(select(func.count()).select_from(KnowledgeNode)).one() == 2

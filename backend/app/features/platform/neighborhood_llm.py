@@ -16,8 +16,8 @@ from app.features.knowledge_graph.identity import canonical_key_for
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NEIGHBORHOOD = "neighborhood_v1"
-PROMPT_SAMENESS = "sameness_v1"
+PROMPT_NEIGHBORHOOD = "neighborhood_v2"
+PROMPT_SAMENESS = "sameness_v2"
 INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
 
@@ -99,16 +99,20 @@ class FakeNeighborhoodLLM:
         return payload, _usage("fake")
 
     def match_topics(self, candidates: list[dict]) -> tuple[dict, dict]:
+        from app.features.knowledge_graph.identity import same_topic
+
         matches: dict[str, str | None] = {}
         for item in candidates:
             key = str(item.get("key") or "")
             existing = item.get("existing") or []
+            name = str(item.get("name") or "")
             chosen = None
             for row in existing:
                 if not isinstance(row, dict):
                     continue
-                # Same key + overlapping description words => same concept for tests.
-                if canonical_key_for(str(row.get("name") or "")) == canonical_key_for(str(item.get("name") or "")):
+                other = str(row.get("name") or "")
+                # Exact key or morphological / media-suffix near-duplicate for tests.
+                if canonical_key_for(other) == canonical_key_for(name) or same_topic(other, name):
                     chosen = str(row.get("id"))
                     break
             matches[key] = chosen
@@ -131,8 +135,14 @@ class GeminiNeighborhoodLLM:
             "focus is {name, description}. Each other key is an array of {name, description}. "
             f"Exact sizes: parents={counts.get('parents', 2)}, siblings={counts.get('siblings', 3)}, "
             f"children={counts.get('children', 4)}, acquaintances={counts.get('acquaintances', 4)}. "
-            "Names are canonical standalone titles. Descriptions are one or two sentences that stand alone "
-            "and must not refer to the seed topic by name or as 'this topic'. "
+            "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
+            "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
+            "one for Ornithischia/Ornithischians, one for a work and the same title with a medium qualifier "
+            "(The Last Dance, not also The Last Dance Documentary). "
+            "Never emit singular and plural, vernacular and scientific taxon labels, or title-vs-title+Documentary/"
+            "Film/Series/Album/Podcast/Show as separate topics in this response. "
+            "Descriptions are one or two sentences that stand alone and must not refer to the seed topic by name "
+            "or as 'this topic'. "
             "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
             "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
             "No duplicates across buckets. Seed topic: "
@@ -143,9 +153,16 @@ class GeminiNeighborhoodLLM:
 
     def match_topics(self, candidates: list[dict]) -> tuple[dict, dict]:
         prompt = (
-            "Decide which existing topics match each candidate conceptually. Return JSON "
-            '{"matches": {"<key>": "<uuid-or-null>"}}. Use an existing id only when it is the same '
-            "concept as the candidate despite wording differences. Otherwise null.\n"
+            "Decide which existing topics are the same concept as each candidate. Return JSON "
+            '{"matches": {"<key>": "<uuid-or-null>"}}. '
+            "Match aggressively when wording differs but the real-world subject is the same. "
+            "Always treat these as the same concept: singular↔plural (Dinosaur/Dinosaurs), "
+            "common↔scientific taxon labels (Dinosaurs/Dinosauria, Ornithischia/Ornithischians), "
+            "and a work title ↔ the same title plus a medium qualifier "
+            "(The Last Dance / The Last Dance Documentary; also Film, Series, Album, Podcast, Show). "
+            "Pick the best existing id when several are close. "
+            "Return null only when they are clearly different subjects "
+            "(Bass the fish vs Bass the musical range).\n"
             + json.dumps({"candidates": candidates})
         )
         parsed, usage = self._json(prompt, PROMPT_SAMENESS)
