@@ -35,7 +35,9 @@ void main() {
     final tokens = MemoryTokenStore();
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
-    await tester.pumpWidget(AdaptiveMasteryApp(auth: auth, graph: GraphController()));
+    await tester.pumpWidget(
+      AdaptiveMasteryApp(auth: auth, graph: GraphController(), splashHold: Duration.zero),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsWidgets);
   });
@@ -349,5 +351,5 @@ AuthController _signedIn() {
 }
 
 Widget _app(AuthController auth, GraphController graph) {
-  return AdaptiveMasteryApp(auth: auth, graph: graph);
+  return AdaptiveMasteryApp(auth: auth, graph: graph, splashHold: Duration.zero);
 }
