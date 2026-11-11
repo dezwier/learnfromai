@@ -8,7 +8,6 @@ from uuid import UUID
 from sqlalchemy import func, or_
 from sqlmodel import Session, col, select
 
-from app.core.time import utcnow
 from app.features.knowledge_graph.identity import canonical_key_for, same_topic, topic_stems
 from app.features.knowledge_graph.node_models import (
     KnowledgeEdge,
@@ -16,6 +15,7 @@ from app.features.knowledge_graph.node_models import (
     KnowledgeRequest,
     KnowledgeRequestNode,
 )
+from app.features.platform.jobs import renew_lease
 from app.features.platform.llm import assert_user_quota, record_usage
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import BUCKETS, get_neighborhood_llm, parse_uuid
@@ -146,9 +146,8 @@ def _pack_existing(rows: list[KnowledgeNode]) -> list[dict]:
 
 def set_progress(session: Session, job: GenerationJob, *, stage: str, message: str, fraction: float) -> None:
     job.progress = {"stage": stage, "message": message, "fraction": max(0.0, min(1.0, fraction))}
-    job.updated_at = utcnow()
-    session.add(job)
-    session.commit()
+    # Renew while reporting progress so a second worker cannot restart the same job mid-flight.
+    renew_lease(session, job)
 
 
 def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
@@ -171,7 +170,11 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     # Collapse leftover near-duplicates from earlier generations before linking more.
     consolidate_near_duplicates(session)
     session.commit()
-    focus = ensure_focus_node(session, topic=topic, node_id=focus_id)
+    renew_lease(session, job)
+    # Consolidate may have deleted focus_id; fall back to topic lookup for the keeper.
+    focus = session.get(KnowledgeNode, focus_id) if focus_id is not None else None
+    if focus is None:
+        focus = ensure_focus_node(session, topic=topic, node_id=None)
     # Focus id may have moved if this topic was merged into a canonical node.
     if focus_id is not None and focus.id != focus_id:
         job.payload = {**(job.payload or {}), "focus_id": str(focus.id)}
@@ -185,8 +188,11 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": True}
 
     llm = get_neighborhood_llm()
+    # Keep the lease alive across Gemini attempt timeouts (each can take ~60s).
+    setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     set_progress(session, job, stage="generate", message="Asking the model for related topics…", fraction=0.15)
     neighborhood, usage = llm.generate_neighborhood(focus.name if not topic else topic, counts)
+    renew_lease(session, job)
     record_usage(session, user_id=user_id, job_id=job.id, task="neighborhood", provider=llm.name, usage=usage)
     session.commit()
 
@@ -227,6 +233,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         set_progress(session, job, stage="repair", message="Filling missing related topics…", fraction=0.85)
         repair_counts = {bucket: short.get(bucket, 0) for bucket in BUCKETS}
         repair, repair_usage = llm.generate_neighborhood(focus.name, repair_counts)
+        renew_lease(session, job)
         record_usage(
             session, user_id=user_id, job_id=job.id, task="neighborhood_repair", provider=llm.name, usage=repair_usage
         )

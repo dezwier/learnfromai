@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     llm_daily_tokens_user_limit: int = 200_000
     graph_expansion_max_nodes: int = 80
     job_worker_concurrency: int = 2
-    job_lease_seconds: int = 60
+    # Long enough for Gemini timeouts + consolidate/merge; progress also renews the lease.
+    job_lease_seconds: int = 600
     job_max_attempts: int = 5
     job_idle_seconds: float = 1.0
     llm_provider: str = "gemini"
