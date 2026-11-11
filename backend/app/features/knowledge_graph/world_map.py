@@ -155,9 +155,8 @@ def ensure_world_placed(session: Session) -> int:
             break
         _commit(node, cell, depths.get(node.id, 0))
 
-    # 4) Pull soft links close, then any remaining far neighbors within 2 hexes.
+    # 4) Pull parent-less siblings/acquaintances that drifted far from their anchors.
     placed += _tighten_linked_roots(session, nodes, by_id, parents_of, soft_links, occupied)
-    placed += _tighten_far_edges(session, nodes, by_id, neighbors, occupied, max_dist=2)
 
     for node in nodes:
         if node.map_depth is None and node.id in depths:
@@ -393,57 +392,6 @@ def _tighten_linked_roots(
         node.q, node.r = cell
         occupied.add(cell)
         session.add(node)
-        moved += 1
-    return moved
-
-
-def _tighten_far_edges(
-    session: Session,
-    nodes: list[KnowledgeNode],
-    by_id: dict[UUID, KnowledgeNode],
-    neighbors: dict[UUID, list[UUID]],
-    occupied: set[tuple[int, int]],
-    *,
-    max_dist: int,
-) -> int:
-    """If two linked nodes sit farther than max_dist, move the higher-id one closer."""
-    moved = 0
-    pairs: list[tuple[UUID, UUID]] = []
-    seen: set[tuple[UUID, UUID]] = set()
-    for a, nbs in neighbors.items():
-        for b in nbs:
-            pair = (a, b) if str(a) < str(b) else (b, a)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            pairs.append(pair)
-    for a_id, b_id in sorted(pairs, key=lambda p: (str(p[0]), str(p[1]))):
-        a = by_id.get(a_id)
-        b = by_id.get(b_id)
-        if a is None or b is None or a.q is None or a.r is None or b.q is None or b.r is None:
-            continue
-        if cube_distance(a.q - b.q, a.r - b.r) <= max_dist:
-            continue
-        # Move the lexicographically larger id so roots/low ids stay put when possible.
-        mover, anchor = (b, a) if str(b.id) > str(a.id) else (a, b)
-        occupied.discard((mover.q, mover.r))
-        cell = _place_near_anchor(occupied, anchor.q, anchor.r, outward=False)
-        if cell is None or cube_distance(cell[0] - anchor.q, cell[1] - anchor.r) > max_dist:
-            # Force search only rings 1..max_dist.
-            cell = None
-            for radius in range(1, max_dist + 1):
-                for cand in ring_around(anchor.q, anchor.r, radius):
-                    if cand not in occupied:
-                        cell = cand
-                        break
-                if cell is not None:
-                    break
-        if cell is None:
-            occupied.add((mover.q, mover.r))
-            continue
-        mover.q, mover.r = cell
-        occupied.add(cell)
-        session.add(mover)
         moved += 1
     return moved
 

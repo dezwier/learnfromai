@@ -106,8 +106,6 @@ class GraphController extends ChangeNotifier {
   final Map<String, WorldTopic> worldById = {};
   /// Edges among known world nodes (merged from map + focus payloads).
   final List<Map<String, String>> worldEdges = [];
-  /// Bumps when neighborhood edges refresh without a full graph rebuild.
-  final ValueNotifier<int> neighborhoodEpoch = ValueNotifier(0);
   bool loading = false;
   bool refreshing = false;
   bool working = false;
@@ -121,8 +119,6 @@ class GraphController extends ChangeNotifier {
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
   int _suggestToken = 0;
   int _mapToken = 0;
-  int _prefetchToken = 0;
-  String? _lastPrefetchId;
   (int, int, int, int)? lastMapWindow;
 
   String? get focusId {
@@ -226,29 +222,6 @@ class GraphController extends ChangeNotifier {
     if (focusId == id && categoryGraph != null) return;
     pendingNodeId = id;
     await _focus(body: {'node_id': id});
-  }
-
-  /// Load neighborhood edges for [id] without changing focus or flying the camera.
-  /// Used while panning so parent/child/sibling/related colors stay accurate.
-  Future<void> prefetchNeighborhood(String id) async {
-    if (id.isEmpty || _lastPrefetchId == id || refreshing || loading || working) return;
-    _lastPrefetchId = id;
-    final token = ++_prefetchToken;
-    final beforeCount = worldById.length;
-    try {
-      final payload = await _get('/knowledge/graph/$id');
-      if (token != _prefetchToken) return;
-      _mergeNodes(payload['nodes']);
-      _mergeEdges(payload['edges']);
-      neighborhoodEpoch.value++;
-      // Only rebuild the world layout when new placed tiles appear.
-      if (worldById.length != beforeCount) {
-        notifyListeners();
-      }
-    } on ApiException {
-      if (token != _prefetchToken) return;
-      // Keep current colors if prefetch fails.
-    }
   }
 
   /// Open an existing node via GET graph — merge into world, no full rebuild.
