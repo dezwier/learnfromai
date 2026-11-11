@@ -427,25 +427,62 @@ GraphLayout layoutGraph(
 
   final directs = <(GraphNode, NodeRole)>[
     for (final node in parents) (node, NodeRole.parent),
-    for (final node in children) (node, NodeRole.child),
     for (final node in siblings) (node, NodeRole.sibling),
+    for (final node in children) (node, NodeRole.child),
     for (final node in related) (node, NodeRole.related),
   ];
   final directIds = {for (final item in directs) item.$1.id};
-  // extended id → preferred direct neighbor it hangs off.
+  // Prefer parent/sibling vias when an extended node touches several directs.
+  const viaPreference = [
+    NodeRole.parent,
+    NodeRole.sibling,
+    NodeRole.child,
+    NodeRole.related,
+  ];
+  int viaRank(NodeRole? role) {
+    final i = viaPreference.indexOf(role ?? NodeRole.related);
+    return i < 0 ? viaPreference.length : i;
+  }
+
   final viaDirect = <String, String>{};
   for (final edge in edges) {
-    if (directIds.contains(edge.source) &&
-        byId[edge.target]?.role == NodeRole.extended) {
-      viaDirect.putIfAbsent(edge.target, () => edge.source);
-    } else if (directIds.contains(edge.target) &&
-        byId[edge.source]?.role == NodeRole.extended) {
-      viaDirect.putIfAbsent(edge.source, () => edge.target);
+    String? extendedId;
+    String? directId;
+    if (directIds.contains(edge.source) && byId[edge.target]?.role == NodeRole.extended) {
+      directId = edge.source;
+      extendedId = edge.target;
+    } else if (directIds.contains(edge.target) && byId[edge.source]?.role == NodeRole.extended) {
+      directId = edge.target;
+      extendedId = edge.source;
+    }
+    if (extendedId == null || directId == null) continue;
+    final current = viaDirect[extendedId];
+    if (current == null || viaRank(byId[directId]?.role) < viaRank(byId[current]?.role)) {
+      viaDirect[extendedId] = directId;
     }
   }
 
   final slotBudget = _viewportSlotBudget(width, height, minDirect: directs.length);
-  final fillers = extended.take(math.max(0, slotBudget - directs.length)).toList();
+  final fillerSlots = math.max(0, slotBudget - directs.length);
+  // Round-robin fillers by via role so parents/siblings get outer tiles too.
+  final pools = <NodeRole, List<GraphNode>>{
+    for (final role in viaPreference) role: <GraphNode>[],
+  };
+  for (final node in extended) {
+    final viaId = viaDirect[node.id];
+    final viaRole = viaId == null ? NodeRole.related : (byId[viaId]?.role ?? NodeRole.related);
+    final key = viaPreference.contains(viaRole) ? viaRole : NodeRole.related;
+    pools[key]!.add(node);
+  }
+  final fillers = <GraphNode>[];
+  while (fillers.length < fillerSlots && pools.values.any((list) => list.isNotEmpty)) {
+    for (final role in viaPreference) {
+      final bucket = pools[role]!;
+      if (bucket.isEmpty) continue;
+      fillers.add(bucket.removeAt(0));
+      if (fillers.length >= fillerSlots) break;
+    }
+  }
 
   // Neighbors sit on the first free cells around the 4-flower (same thin gap
   // as hex-to-hex), not on ring 2 as if a 7-flower still occupied the center.

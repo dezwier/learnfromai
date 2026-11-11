@@ -115,4 +115,52 @@ void main() {
     expect(byId['ext-a1']!.viaRole, NodeRole.child);
     expect(byId['ext-b1']!.viaRole, NodeRole.child);
   });
+
+  test('extended fillers round-robin across parent and sibling vias', () {
+    const viewport = Size(390, 700);
+    final layout = layoutGraph(
+      const [
+        GraphNode(id: 'focus', title: 'Dinosaur', depth: 0, kind: 'focus'),
+        GraphNode(id: 'parent', title: 'Reptile', depth: -1, kind: 'parent'),
+        GraphNode(id: 'sibling', title: 'Mammals', depth: 0, kind: 'sibling'),
+        GraphNode(id: 'child', title: 'Saurischia', depth: 1, kind: 'child'),
+        GraphNode(id: 'related', title: 'Mesozoic', depth: 0, kind: 'related'),
+        GraphNode(id: 'ext-p1', title: 'Amniote', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-p2', title: 'Vertebrate', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-s1', title: 'Birds', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-c1', title: 'Theropoda', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-c2', title: 'Sauropoda', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-c3', title: 'Ornithischia', depth: 0, kind: 'extended'),
+        GraphNode(id: 'ext-r1', title: 'Fossils', depth: 0, kind: 'extended'),
+      ],
+      const [
+        GraphEdge(source: 'focus', target: 'parent', type: 'parent'),
+        GraphEdge(source: 'focus', target: 'sibling', type: 'sibling'),
+        GraphEdge(source: 'focus', target: 'child', type: 'child'),
+        GraphEdge(source: 'focus', target: 'related', type: 'acquaintance'),
+        GraphEdge(source: 'parent', target: 'ext-p1', type: 'parent'),
+        GraphEdge(source: 'parent', target: 'ext-p2', type: 'parent'),
+        GraphEdge(source: 'sibling', target: 'ext-s1', type: 'sibling'),
+        GraphEdge(source: 'child', target: 'ext-c1', type: 'child'),
+        GraphEdge(source: 'child', target: 'ext-c2', type: 'child'),
+        GraphEdge(source: 'child', target: 'ext-c3', type: 'child'),
+        GraphEdge(source: 'related', target: 'ext-r1', type: 'acquaintance'),
+      ],
+      focusId: 'focus',
+      viewport: viewport,
+    );
+
+    final byId = {for (final node in layout.nodes) node.id: node};
+    final viaCounts = <NodeRole, int>{};
+    for (final node in layout.nodes) {
+      if (node.role != NodeRole.extended) continue;
+      final via = node.viaRole;
+      if (via == null) continue;
+      viaCounts[via] = (viaCounts[via] ?? 0) + 1;
+    }
+    expect(viaCounts[NodeRole.parent] ?? 0, greaterThanOrEqualTo(1));
+    expect(viaCounts[NodeRole.sibling] ?? 0, greaterThanOrEqualTo(1));
+    expect(byId.containsKey('ext-p1'), isTrue);
+    expect(byId.containsKey('ext-s1'), isTrue);
+  });
 }

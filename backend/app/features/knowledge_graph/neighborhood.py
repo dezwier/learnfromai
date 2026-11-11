@@ -355,9 +355,25 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
             depths.setdefault(other.id, 0)
 
     direct_ids = [node_id for node_id in nodes if node_id != focus.id]
-    extended: list[KnowledgeNode] = []
+    # Collect extended candidates per via-kind, then round-robin so parents/siblings
+    # are not starved by child/acquaintance fan-out.
+    via_order = ("parent", "sibling", "child", "related")
+    pools: dict[str, list[KnowledgeNode]] = {kind: [] for kind in via_order}
     seen_extended: set[UUID] = set()
-    for direct_id in direct_ids:
+    directs_sorted = sorted(
+        direct_ids,
+        key=lambda node_id: (
+            via_order.index(kinds.get(node_id, "related"))
+            if kinds.get(node_id, "related") in via_order
+            else 9,
+            nodes[node_id].name.lower(),
+            str(node_id),
+        ),
+    )
+    for direct_id in directs_sorted:
+        via_kind = kinds.get(direct_id, "related")
+        if via_kind not in pools:
+            via_kind = "related"
         for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == direct_id)).all():
             if edge.to_id in nodes or edge.to_id in seen_extended:
                 continue
@@ -365,11 +381,17 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
             if other is None:
                 continue
             seen_extended.add(other.id)
-            extended.append(other)
+            pools[via_kind].append(other)
+
+    extended: list[KnowledgeNode] = []
+    while len(extended) < max_extended and any(pools.values()):
+        for via_kind in via_order:
+            bucket = pools[via_kind]
+            if not bucket:
+                continue
+            extended.append(bucket.pop(0))
             if len(extended) >= max_extended:
                 break
-        if len(extended) >= max_extended:
-            break
 
     for other in extended:
         nodes[other.id] = other
