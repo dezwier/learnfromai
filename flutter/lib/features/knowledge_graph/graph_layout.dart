@@ -499,7 +499,7 @@ GraphLayout layoutGraph(
   // Zoom to the focus flower + ring 2, then push in further so outer hexes
   // may sit outside the viewport. Focus stays at the canvas center.
   const pad = 8.0;
-  const defaultZoomIn = 1.35;
+  const defaultZoomIn = 1.8;
   final ring2Half = math.max(focusBounds.width, focusBounds.height) / 2 + 2 * math.sqrt(3);
   final fitRing2 = math.min(
     (width - 2 * pad) / (2 * ring2Half),

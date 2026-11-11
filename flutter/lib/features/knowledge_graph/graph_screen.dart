@@ -188,8 +188,10 @@ class _GraphScreenState extends State<GraphScreen> {
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
-      resizeToAvoidBottomInset: true,
+      // Keep the graph still when the keyboard opens; search floats above it.
+      resizeToAvoidBottomInset: false,
       appBar: GradientTopBar(
         title: 'Graph',
         actions: [
@@ -243,16 +245,6 @@ class _GraphScreenState extends State<GraphScreen> {
                 );
               },
             ),
-      bottomSheet: _searchOpen
-          ? _SearchBar(
-              controller: _search,
-              focusNode: _searchFocus,
-              suggestions: graph.suggestions,
-              onChanged: (value) => _onSearchChanged(graph, value),
-              onSubmit: () => _submitSearch(graph),
-              onPick: (choice) => _pickSuggestion(graph, choice),
-            )
-          : null,
       body: Stack(
         children: [
           Column(
@@ -307,8 +299,22 @@ class _GraphScreenState extends State<GraphScreen> {
           if (graph.working)
             Positioned(
               left: 16,
-              bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
+              bottom: 16 + keyboard,
               child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
+            ),
+          if (_searchOpen)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: keyboard,
+              child: _SearchBar(
+                controller: _search,
+                focusNode: _searchFocus,
+                suggestions: graph.suggestions,
+                onChanged: (value) => _onSearchChanged(graph, value),
+                onSubmit: () => _submitSearch(graph),
+                onPick: (choice) => _pickSuggestion(graph, choice),
+              ),
             ),
         ],
       ),
@@ -614,8 +620,10 @@ class _NodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fill = pending ? const Color(0xFFDDE7F4) : roleFill(node.role, scheme);
     final dark = scheme.brightness == Brightness.dark;
+    final fill = pending
+        ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
+        : roleFill(node.role, scheme);
     final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
     if (node.isFlower) {
       return GestureDetector(
@@ -656,16 +664,19 @@ class _NodeCard extends StatelessWidget {
                       SizedBox(height: node.radius * 0.03),
                       SizedBox(
                         height: descBudget,
-                        child: _FittingLabel(
-                          text: node.description!.trim(),
-                          maxLines: 5,
-                          minFontSize: 10,
-                          maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
-                          align: Alignment.topCenter,
-                          style: TextStyle(
-                            height: 1.28,
-                            fontWeight: FontWeight.w400,
-                            color: scheme.onSurface.withValues(alpha: 0.72),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: node.radius * 0.18),
+                          child: _FittingLabel(
+                            text: node.description!.trim(),
+                            maxLines: 6,
+                            minFontSize: 12,
+                            maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
+                            align: Alignment.topCenter,
+                            style: TextStyle(
+                              height: 1.28,
+                              fontWeight: FontWeight.w400,
+                              color: scheme.onSurface.withValues(alpha: 0.72),
+                            ),
                           ),
                         ),
                       ),
@@ -692,7 +703,7 @@ class _NodeCard extends StatelessWidget {
             child: _FittingLabel(
               text: node.title,
               maxLines: 4,
-              minFontSize: 8,
+              minFontSize: 10,
               maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
               hyphenateWords: true,
               style: TextStyle(
