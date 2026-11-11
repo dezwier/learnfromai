@@ -175,6 +175,60 @@ def test_name_collision_can_insert_second_node(session, user):
     assert session.exec(select(func.count()).select_from(KnowledgeNode)).one() == 2
 
 
+def test_build_subgraph_hides_near_duplicate_neighbors(session, user):
+    from app.features.knowledge_graph.neighborhood import build_subgraph
+
+    focus = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles.")
+    twin = KnowledgeNode(name="Dinosaur", name_key="dinosaur", description="Singular form.")
+    child = KnowledgeNode(name="Theropods", name_key="theropods", description="Bipedal dinosaurs.")
+    session.add_all([focus, twin, child])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=focus.id, relation="child", to_id=twin.id),
+            KnowledgeEdge(from_id=twin.id, relation="parent", to_id=focus.id),
+            KnowledgeEdge(from_id=focus.id, relation="child", to_id=child.id),
+            KnowledgeEdge(from_id=child.id, relation="parent", to_id=focus.id),
+        ]
+    )
+    session.commit()
+
+    payload = build_subgraph(session, focus, max_extended=12)
+    titles = {node["title"] for node in payload["nodes"]}
+    assert titles == {"Dinosaurs", "Theropods"}
+
+
+def test_consolidate_merges_existing_near_duplicates(session, user):
+    from app.features.knowledge_graph.neighborhood import consolidate_near_duplicates
+
+    keep = KnowledgeNode(name="The Last Dance", name_key="the-last-dance", description="Bulls documentary.")
+    drop = KnowledgeNode(
+        name="The Last Dance Documentary",
+        name_key="the-last-dance-documentary",
+        description=None,
+    )
+    other = KnowledgeNode(name="Basketball", name_key="basketball", description="Sport.")
+    session.add_all([keep, drop, other])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=drop.id, relation="parent", to_id=other.id),
+            KnowledgeEdge(from_id=other.id, relation="child", to_id=drop.id),
+        ]
+    )
+    session.commit()
+
+    assert consolidate_near_duplicates(session) == 1
+    session.commit()
+    names = {row.name for row in session.exec(select(KnowledgeNode)).all()}
+    assert names == {"The Last Dance", "Basketball"}
+    edges = list(session.exec(select(KnowledgeEdge)).all())
+    assert {(edge.from_id, edge.relation, edge.to_id) for edge in edges} == {
+        (keep.id, "parent", other.id),
+        (other.id, "child", keep.id),
+    }
+
+
 def test_near_duplicate_titles_map_together(session, user):
     from app.features.knowledge_graph.neighborhood import _upsert_named, ensure_focus_node
     from app.features.platform.neighborhood_llm import FakeNeighborhoodLLM

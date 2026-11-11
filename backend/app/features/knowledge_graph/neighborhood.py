@@ -154,7 +154,14 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     focus_id = parse_uuid(payload.get("focus_id"))
     topic = str(payload.get("topic") or "").strip() or None
     set_progress(session, job, stage="resolve", message="Resolving topic…", fraction=0.05)
+    # Collapse leftover near-duplicates from earlier generations before linking more.
+    consolidate_near_duplicates(session)
+    session.commit()
     focus = ensure_focus_node(session, topic=topic, node_id=focus_id)
+    # Focus id may have moved if this topic was merged into a canonical node.
+    if focus_id is not None and focus.id != focus_id:
+        job.payload = {**(job.payload or {}), "focus_id": str(focus.id)}
+        session.add(job)
     session.commit()
 
     if is_complete(session, focus.id, counts):
@@ -267,6 +274,114 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     set_progress(session, job, stage="done", message="Neighborhood ready", fraction=1.0)
     session.commit()
     return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": False}
+
+
+def consolidate_near_duplicates(session: Session) -> int:
+    """Merge existing same_topic nodes into one canonical row. Returns merges performed."""
+    rows = list(session.exec(select(KnowledgeNode).order_by(KnowledgeNode.created_at, KnowledgeNode.name)).all())
+    if len(rows) < 2:
+        return 0
+    edge_counts: dict[UUID, int] = {}
+    for edge in session.exec(select(KnowledgeEdge)).all():
+        edge_counts[edge.from_id] = edge_counts.get(edge.from_id, 0) + 1
+        edge_counts[edge.to_id] = edge_counts.get(edge.to_id, 0) + 1
+
+    claimed: set[UUID] = set()
+    merges = 0
+    for index, keep in enumerate(rows):
+        if keep.id in claimed:
+            continue
+        cluster = [keep]
+        for other in rows[index + 1 :]:
+            if other.id in claimed:
+                continue
+            if same_topic(keep.name, other.name):
+                cluster.append(other)
+        if len(cluster) == 1:
+            continue
+        media_suffixes = (
+            "documentary", "documentaries", "film", "films", "movie", "movies",
+            "series", "show", "shows", "album", "albums", "podcast", "podcasts", "book", "books",
+        )
+
+        def _keeper_score(row: KnowledgeNode) -> tuple:
+            media = any(row.name_key.endswith(f"-{suffix}") for suffix in media_suffixes)
+            plural = row.name_key.endswith("s") and not row.name_key.endswith(("ss", "us", "is", "ies"))
+            # Canonical title first (no medium suffix), then connectivity / description quality.
+            return (
+                0 if media else 1,
+                1 if plural else 0,
+                edge_counts.get(row.id, 0),
+                1 if row.description else 0,
+                len(row.description or ""),
+                -row.created_at.timestamp() if row.created_at else 0,
+            )
+
+        keeper = max(cluster, key=_keeper_score)
+        for drop in cluster:
+            claimed.add(drop.id)
+            if drop.id == keeper.id:
+                continue
+            _merge_node_into(session, keep=keeper, drop=drop)
+            merges += 1
+            edge_counts[keeper.id] = edge_counts.get(keeper.id, 0) + edge_counts.get(drop.id, 0)
+    if merges:
+        session.flush()
+    return merges
+
+
+def _merge_node_into(session: Session, *, keep: KnowledgeNode, drop: KnowledgeNode) -> None:
+    """Rewire edges/requests from drop onto keep, then delete drop."""
+    if keep.id == drop.id:
+        return
+    if drop.description and not keep.description:
+        keep.description = drop.description
+        session.add(keep)
+
+    outgoing = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == drop.id)).all())
+    incoming = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.to_id == drop.id)).all())
+    for edge in outgoing + incoming:
+        session.delete(edge)
+    session.flush()
+
+    for edge in outgoing:
+        if edge.to_id == keep.id or edge.to_id == drop.id:
+            continue
+        _add_edge(session, keep.id, edge.relation, edge.to_id)
+    for edge in incoming:
+        if edge.from_id == keep.id or edge.from_id == drop.id:
+            continue
+        _add_edge(session, edge.from_id, edge.relation, keep.id)
+
+    for request in session.exec(select(KnowledgeRequest).where(KnowledgeRequest.focus_id == drop.id)).all():
+        request.focus_id = keep.id
+        session.add(request)
+
+    drop_rows = list(session.exec(select(KnowledgeRequestNode).where(KnowledgeRequestNode.node_id == drop.id)).all())
+    for row in drop_rows:
+        request_id = row.request_id
+        distance = row.distance
+        kind = row.kind
+        session.delete(row)
+        session.flush()
+        exists = session.exec(
+            select(KnowledgeRequestNode).where(
+                KnowledgeRequestNode.request_id == request_id,
+                KnowledgeRequestNode.node_id == keep.id,
+            )
+        ).first()
+        if exists is None:
+            session.add(
+                KnowledgeRequestNode(
+                    request_id=request_id,
+                    node_id=keep.id,
+                    distance=distance,
+                    kind=kind,
+                )
+            )
+            session.flush()
+    session.delete(drop)
+    session.flush()
 
 
 def _upsert_named(
@@ -407,6 +522,12 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
         other = session.get(KnowledgeNode, edge.to_id)
         if other is None:
             continue
+        # Hide near-duplicates of the focus (Dinosaur beside Dinosaurs, etc.).
+        if same_topic(other.name, focus.name):
+            continue
+        # Keep one title per near-duplicate cluster among directs.
+        if any(same_topic(other.name, prior.name) for prior in nodes.values() if prior.id != focus.id):
+            continue
         nodes[other.id] = other
         kind = KIND_FOR_RELATION.get(edge.relation, "related")
         kinds.setdefault(other.id, kind)
@@ -423,6 +544,7 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
     via_order = ("parent", "sibling", "child", "related")
     pools: dict[str, list[KnowledgeNode]] = {kind: [] for kind in via_order}
     seen_extended: set[UUID] = set()
+    seen_extended_nodes: list[KnowledgeNode] = []
     directs_sorted = sorted(
         direct_ids,
         key=lambda node_id: (
@@ -443,7 +565,14 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
             other = session.get(KnowledgeNode, edge.to_id)
             if other is None:
                 continue
+            if same_topic(other.name, focus.name):
+                continue
+            if any(same_topic(other.name, prior.name) for prior in nodes.values()):
+                continue
+            if any(same_topic(other.name, prior.name) for prior in seen_extended_nodes):
+                continue
             seen_extended.add(other.id)
+            seen_extended_nodes.append(other)
             pools[via_kind].append(other)
 
     extended: list[KnowledgeNode] = []
