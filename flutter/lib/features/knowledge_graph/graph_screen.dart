@@ -326,12 +326,18 @@ class _GraphScreenState extends State<GraphScreen> {
           viewport: viewport,
           canvas: Size(layout.width, layout.height),
         );
+        // Generous margins so zoomed-out pan is free on both axes (portrait
+        // viewports otherwise clamp vertical travel much harder than horizontal).
+        final panSlack = math.max(viewport.width, viewport.height);
         return InteractiveViewer(
           transformationController: _transform,
           constrained: false,
           minScale: 0.45,
           maxScale: 3.5,
-          boundaryMargin: const EdgeInsets.all(480),
+          boundaryMargin: EdgeInsets.symmetric(
+            horizontal: panSlack,
+            vertical: panSlack,
+          ),
           child: SizedBox(
             width: layout.width,
             height: layout.height,

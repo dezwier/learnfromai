@@ -584,7 +584,11 @@ GraphLayout layoutGraph(
   final contentW = math.max((maxX - minX) * scale, 1.0);
   final contentH = math.max((maxY - minY) * scale, 1.0);
   final canvasW = math.max(width, contentW + 2 * pad);
-  final canvasH = math.max(height, contentH + 2 * pad);
+  var canvasH = math.max(height, contentH + 2 * pad);
+  // Graph often spills wider than tall; pad height to match so up/down pan
+  // has similar room to left/right when zoomed out.
+  final spillX = math.max(0.0, canvasW - width);
+  canvasH = math.max(canvasH, height + spillX);
   final ox = canvasW / 2;
   final oy = canvasH / 2;
 
