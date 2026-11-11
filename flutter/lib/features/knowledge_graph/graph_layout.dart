@@ -525,13 +525,14 @@ GraphLayout layoutGraph(
   for (final node in fillers) {
     final anchorId = viaDirect[node.id];
     final anchor = anchorId == null ? null : cellByNodeId[anchorId];
+    final viaRole = anchorId == null ? null : byId[anchorId]?.role;
     var best = -1;
     var bestScore = -9999.0;
     for (var i = 0; i < cells.length; i++) {
       if (used.contains(i)) continue;
       final score = anchor == null
           ? _cellScore(cells[i], NodeRole.extended)
-          : _nearAnchorScore(cells[i], anchor, directCells);
+          : _nearAnchorScore(cells[i], anchor, directCells, viaRole: viaRole);
       if (score > bestScore) {
         bestScore = score;
         best = i;
@@ -653,20 +654,27 @@ List<_HexCell> _cellsOnRing(int ring) {
 }
 
 double _cellScore(_HexCell cell, NodeRole role) {
-  final c = axialToPixel(cell.q, cell.r, 1.0);
+  // Score against the flower centroid so "above/below/side" match the diamond.
+  final c = axialToPixel(cell.q, cell.r, 1.0) - flowerCentroidUnit;
   final angle = math.atan2(c.dy, c.dx);
   final north = _angleDist(angle, -math.pi / 2);
   final south = _angleDist(angle, math.pi / 2);
   final east = _angleDist(angle, 0);
   final west = _angleDist(angle, math.pi);
-  // Prefer the innermost free ring around the 4-flower.
-  final ringPenalty = (cell.ring - 1) * 1.8;
+  final ringPenalty = (cell.ring - 1) * 1.5;
+  final inNorth = c.dy < -0.2;
+  final inSouth = c.dy > 0.2;
+  final sideBand = c.dy.abs() < 1.35;
+  final inEast = c.dx > 0.45 && sideBand;
+  final inWest = c.dx < -0.45 && sideBand;
 
   return switch (role) {
-    NodeRole.parent => 4.0 - north - ringPenalty,
-    NodeRole.child => 4.0 - south - ringPenalty,
-    NodeRole.sibling => 4.0 - math.min(east, west) - ringPenalty,
-    NodeRole.related => 2.0 - ringPenalty * 0.5,
+    NodeRole.parent => 6.0 - north * 2.4 - ringPenalty + (inNorth ? 3.0 : -4.0),
+    NodeRole.child => 6.0 - south * 2.4 - ringPenalty + (inSouth ? 3.0 : -4.0),
+    NodeRole.sibling =>
+      6.0 - math.min(east, west) * 2.2 - ringPenalty + ((inEast || inWest) ? 3.0 : -2.5),
+    // Related fills around; keep north mostly for parents.
+    NodeRole.related => 3.0 - ringPenalty * 0.45 - (inNorth ? 1.6 : 0) + (inSouth || inEast || inWest ? 0.6 : 0),
     NodeRole.extended => 1.0 - ringPenalty * 0.35,
     NodeRole.focus => 0,
   };
@@ -679,12 +687,14 @@ int _cubeDist(_HexCell a, _HexCell b) {
   return (dq.abs() + dr.abs() + ds.abs()) ~/ 2;
 }
 
-/// Prefer hexes adjacent to [anchor], outward, and uniquely closer to that via.
+/// Prefer hexes adjacent to [anchor], outward, uniquely closer to that via,
+/// and still in the via role's compass sector (parents up, children down, …).
 double _nearAnchorScore(
   _HexCell cell,
   _HexCell anchor,
-  Map<String, _HexCell> directCells,
-) {
+  Map<String, _HexCell> directCells, {
+  NodeRole? viaRole,
+}) {
   final dist = _cubeDist(cell, anchor);
   final outwardBoost = cell.ring >= anchor.ring ? 1.2 : -1.0;
   var score = 12.0 - dist * 3.0 + outwardBoost - (cell.ring - 1) * 0.15;
@@ -696,6 +706,9 @@ double _nearAnchorScore(
     } else if (dOther == dist) {
       score -= 2.0;
     }
+  }
+  if (viaRole != null && viaRole != NodeRole.extended && viaRole != NodeRole.focus) {
+    score += _cellScore(cell, viaRole) * 0.4;
   }
   return score;
 }

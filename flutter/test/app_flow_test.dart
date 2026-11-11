@@ -274,14 +274,17 @@ void main() {
         GraphNode(id: '2', title: 'Dinosaur', depth: 0, kind: 'focus'),
         GraphNode(id: '3', title: 'Saurischia', depth: 1, kind: 'child'),
         GraphNode(id: '4', title: 'Mammals', depth: 0, kind: 'sibling'),
+        GraphNode(id: '5', title: 'Mesozoic', depth: 0, kind: 'related'),
       ],
       const [],
       focusId: '2',
       viewport: const Size(390, 700),
     );
     final byId = {for (final node in layout.nodes) node.id: node};
-    expect(byId['1']!.center.dy < byId['2']!.center.dy, isTrue);
-    expect(byId['2']!.center.dy < byId['3']!.center.dy, isTrue);
+    final focus = byId['2']!;
+    expect(byId['1']!.center.dy < focus.center.dy, isTrue);
+    expect(focus.center.dy < byId['3']!.center.dy, isTrue);
+    expect((byId['4']!.center.dx - focus.center.dx).abs(), greaterThan((byId['4']!.center.dy - focus.center.dy).abs()));
     expect(byId['4']!.role, NodeRole.sibling);
     expect(byId['2']!.isFlower, isTrue);
     // 4-cell diamond (top / two / bottom) spans ~2.5× a unit hex width.

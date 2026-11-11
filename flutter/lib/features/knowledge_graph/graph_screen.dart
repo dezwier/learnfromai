@@ -680,12 +680,15 @@ class _GraphViewState extends State<_GraphView> {
   @override
   Widget build(BuildContext context) {
     const shadowPad = 14.0;
+    // Largest (focus flower) under smaller hexes so outer tiles stay tappable.
+    final ordered = [...widget.layout.nodes]
+      ..sort((a, b) => (b.width * b.height).compareTo(a.width * a.height));
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          for (final node in widget.layout.nodes)
+          for (final node in ordered)
             Positioned(
               left: node.x - shadowPad,
               top: node.y - shadowPad,
@@ -810,11 +813,17 @@ class _NodeCard extends StatelessWidget {
                 dark: dark,
                 spotlight: spotlight,
               );
-        return GestureDetector(
-          onTap: onTap,
-          child: Transform.scale(
-            scale: scale,
-            child: child,
+        // Clip to hex/flower silhouette so the focus AABB cannot steal taps
+        // meant for neighbors-of-neighbors sitting in its bounding box.
+        return ClipPath(
+          clipper: node.isFlower ? const _FlowerTapClipper() : const _HexTapClipper(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Transform.scale(
+              scale: scale,
+              child: child,
+            ),
           ),
         );
       },
@@ -1017,6 +1026,39 @@ void _paintHexDepth(
   canvas.clipPath(path);
   canvas.drawRect(bounds, highlight);
   canvas.restore();
+}
+
+class _FlowerTapClipper extends CustomClipper<Path> {
+  const _FlowerTapClipper();
+
+  @override
+  Path getClip(Size size) {
+    final unit = hexFlowerBounds(1.0);
+    final lattice = math.min(size.width / unit.width, size.height / unit.height);
+    return hexFlowerPath(
+      latticeSize: lattice,
+      center: Offset(size.width / 2, size.height / 2),
+    );
+  }
+
+  @override
+  bool shouldReclip(covariant _FlowerTapClipper oldClipper) => false;
+}
+
+class _HexTapClipper extends CustomClipper<Path> {
+  const _HexTapClipper();
+
+  @override
+  Path getClip(Size size) {
+    final lattice = math.min(size.width / 2, size.height / math.sqrt(3));
+    return flatHexPath(
+      lattice * (1 - hexGapInset),
+      center: Offset(size.width / 2, size.height / 2),
+    );
+  }
+
+  @override
+  bool shouldReclip(covariant _HexTapClipper oldClipper) => false;
 }
 
 class _HexFlowerPainter extends CustomPainter {
