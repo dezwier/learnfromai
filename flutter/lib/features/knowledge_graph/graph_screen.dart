@@ -112,6 +112,12 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   }
 
   void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
+    final graph = context.read<GraphController>();
+    // Second tap on the already-centered tile → open it as focus.
+    if (_highlighted?.id == node.id && node.id != graph.focusId) {
+      unawaited(_openRelatedTopic(graph, node));
+      return;
+    }
     _panTargetId = node.id;
     if (_highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
@@ -151,18 +157,19 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
-    if (node.id == graph.focusId) {
-      setState(() {
-        _highlighted = node;
-        _drawerRaised = false;
-      });
+    // Keep the drawer on the destination topic while the graph loads — no blank gap.
+    setState(() => _highlighted = node);
+    if (node.id == graph.focusId) return;
+    await graph.openNode(node.id);
+    if (!mounted) return;
+    final focusId = graph.focusId;
+    final layout = _layout;
+    if (focusId == null || layout == null) return;
+    for (final n in layout.nodes) {
+      if (n.id != focusId) continue;
+      setState(() => _highlighted = n);
       return;
     }
-    setState(() {
-      _highlighted = null;
-      _drawerRaised = false;
-    });
-    await graph.openNode(node.id);
   }
 
   Future<void> _editHighlighted(GraphController graph) async {
@@ -415,6 +422,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 node: _highlighted!,
                 layout: _layout,
                 focusId: graph.focusId,
+                busy: graph.working || graph.refreshing || graph.loading,
                 canViewInGraph: canGoToHighlight,
                 onRaisedChanged: (raised) {
                   if (_drawerRaised == raised) return;
@@ -689,6 +697,7 @@ class _HighlightDrawer extends StatefulWidget {
     required this.onOpenRelated,
     this.layout,
     this.focusId,
+    this.busy = false,
   });
 
   /// Collapsed content height (above the home-indicator inset).
@@ -699,6 +708,7 @@ class _HighlightDrawer extends StatefulWidget {
   final PlacedNode node;
   final GraphLayout? layout;
   final String? focusId;
+  final bool busy;
   final bool canViewInGraph;
   final ValueChanged<bool> onRaisedChanged;
   final VoidCallback onViewInGraph;
@@ -1017,13 +1027,20 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                                 ),
                               ],
                             ),
-                            if (widget.layout != null) ...[
+                            if (widget.layout != null && !widget.busy) ...[
                               const SizedBox(height: 18),
                               _RelationsCard(
                                 node: widget.node,
                                 layout: widget.layout!,
                                 focusId: widget.focusId,
-                                onOpen: (item) => _collapseThen(() => widget.onOpenRelated(item)),
+                                onOpen: widget.onOpenRelated,
+                              ),
+                            ] else if (widget.busy) ...[
+                              const SizedBox(height: 18),
+                              const SizedBox(
+                                height: 160,
+                                width: double.infinity,
+                                child: PulsePlaceholder(borderRadius: BorderRadius.all(Radius.circular(16))),
                               ),
                             ],
                           ],
