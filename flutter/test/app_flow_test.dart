@@ -52,6 +52,9 @@ void main() {
             'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
           };
         }
+        if (path.startsWith('/knowledge/map')) {
+          return {'nodes': [], 'edges': [], 'window': {}};
+        }
         return {'focus_node_id': null, 'incomplete': false, 'nodes': [], 'edges': []};
       },
     );
@@ -63,15 +66,18 @@ void main() {
   testWidgets('graph shows parents, siblings, children, related', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
-    )..categoryGraph = _compact();
+      loader: (path) async {
+        if (path.startsWith('/knowledge/map')) return _compact();
+        return _compact();
+      },
+    )..seedForTest(graph: _compact());
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
     expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
     expect(find.byWidgetPredicate(_titleLooksLike('Mammals')), findsWidgets);
     expect(find.byWidgetPredicate(_titleLooksLike('Mesozoic')), findsWidgets);
-    expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
+    expect(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')), findsWidgets);
     expect(find.byTooltip('Search'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
     expect(find.text('0 / 100 XP'), findsOneWidget);
@@ -80,8 +86,11 @@ void main() {
   testWidgets('profile hud opens overlay with settings and logout', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
-    )..categoryGraph = _compact();
+      loader: (path) async {
+        if (path.startsWith('/knowledge/map')) return _compact();
+        return _compact();
+      },
+    )..seedForTest(graph: _compact());
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
@@ -108,6 +117,7 @@ void main() {
             'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
           };
         }
+        if (path.startsWith('/knowledge/map')) return _compact();
         if (path.startsWith('/knowledge/graph/')) return _compact();
         return {'focus_node_id': null, 'nodes': [], 'edges': []};
       },
@@ -159,8 +169,11 @@ void main() {
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
-    )..categoryGraph = _compact();
+      loader: (path) async {
+        if (path.startsWith('/knowledge/map')) return _compact();
+        return _compact();
+      },
+    )..seedForTest(graph: _compact());
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
@@ -178,8 +191,11 @@ void main() {
   testWidgets('panning the graph keeps search open', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
-    )..categoryGraph = _compact();
+      loader: (path) async {
+        if (path.startsWith('/knowledge/map')) return _compact();
+        return _compact();
+      },
+    )..seedForTest(graph: _compact());
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
@@ -205,14 +221,15 @@ void main() {
         if (path.startsWith('/knowledge/nodes')) {
           return {
             'nodes': [
-              {'id': '3', 'title': 'Saurischia', 'description': 'Lizard-hipped dinosaurs.'},
+              {'id': '3', 'title': 'Saurischia', 'description': 'Lizard-hipped dinosaurs.', 'q': 1, 'r': 0},
             ],
           };
         }
         if (path == '/knowledge/graph/3') return _saurischia();
+        if (path.startsWith('/knowledge/map')) return _saurischia();
         return _compact();
       },
-    )..categoryGraph = _compact();
+    )..seedForTest(graph: _compact());
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
@@ -238,9 +255,11 @@ void main() {
         if (id == '3') return _saurischia();
         return _compact();
       },
-      loader: (path) async => _compact(),
-    )
-      ..categoryGraph = _saurischia()
+      loader: (path) async {
+        if (path.startsWith('/knowledge/map')) return _compact();
+        return _compact();
+      },
+    )..seedForTest(graph: _saurischia())
       ..focusHistory.addAll(['2', '3']);
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
@@ -260,24 +279,20 @@ void main() {
     expect(tester.getSize(find.byType(PulsePlaceholder)), const Size(200, 120));
   });
 
-  test('graph places parents above, siblings beside, children below', () {
-    final layout = layoutGraph(
+  test('world layout places equal hexes from axial coords', () {
+    final layout = layoutWorld(
       const [
-        GraphNode(id: '1', title: 'Reptile', depth: -1, kind: 'parent'),
-        GraphNode(id: '2', title: 'Dinosaur', depth: 0, kind: 'focus'),
-        GraphNode(id: '3', title: 'Saurischia', depth: 1, kind: 'child'),
-        GraphNode(id: '4', title: 'Mammals', depth: 0, kind: 'sibling'),
+        GraphNode(id: '1', title: 'Science', depth: 0, q: 0, r: 0),
+        GraphNode(id: '2', title: 'Biology', depth: 1, q: 1, r: 0),
+        GraphNode(id: '3', title: 'Zoology', depth: 2, q: 2, r: 0),
       ],
-      const [],
-      focusId: '2',
       viewport: const Size(390, 700),
     );
     final byId = {for (final node in layout.nodes) node.id: node};
-    expect(byId['1']!.center.dy < byId['2']!.center.dy, isTrue);
-    expect(byId['2']!.center.dy < byId['3']!.center.dy, isTrue);
-    expect(byId['4']!.role, NodeRole.sibling);
-    expect(byId['2']!.isFlower, isTrue);
-    expect(byId['2']!.width / byId['4']!.width, closeTo(2.5, 0.05));
+    expect(byId['1']!.isFlower, isFalse);
+    expect(byId['2']!.width, closeTo(byId['1']!.width, 0.01));
+    expect(byId['2']!.center.dx > byId['1']!.center.dx, isTrue);
+    expect(byId['3']!.center.dx > byId['2']!.center.dx, isTrue);
   });
 
   test('api client maps the error envelope', () {
@@ -301,18 +316,20 @@ Map<String, dynamic> _compact() {
     'focus_node_id': '2',
     'incomplete': false,
     'nodes': [
-      {'id': '1', 'title': 'Reptiles', 'depth': -1, 'distance': 1, 'kind': 'parent'},
+      {'id': '1', 'title': 'Reptiles', 'depth': 0, 'distance': 0, 'kind': 'parent', 'q': 0, 'r': 0},
       {
         'id': '2',
         'title': 'Dinosaurs',
-        'depth': 0,
-        'distance': 0,
+        'depth': 1,
+        'distance': 1,
         'kind': 'focus',
         'description': 'Extinct Mesozoic reptiles known from fossils worldwide.',
+        'q': 1,
+        'r': 0,
       },
-      {'id': '3', 'title': 'Saurischia', 'depth': 1, 'distance': 1, 'kind': 'child'},
-      {'id': '4', 'title': 'Mammals', 'depth': 0, 'distance': 1, 'kind': 'sibling'},
-      {'id': '5', 'title': 'Mesozoic', 'depth': 0, 'distance': 1, 'kind': 'related'},
+      {'id': '3', 'title': 'Saurischia', 'depth': 2, 'distance': 2, 'kind': 'child', 'q': 2, 'r': 0},
+      {'id': '4', 'title': 'Mammals', 'depth': 1, 'distance': 1, 'kind': 'sibling', 'q': 0, 'r': 1},
+      {'id': '5', 'title': 'Mesozoic', 'depth': 1, 'distance': 1, 'kind': 'related', 'q': 1, 'r': -1},
     ],
     'edges': [
       {'source': '2', 'target': '1', 'type': 'parent'},
@@ -328,9 +345,9 @@ Map<String, dynamic> _saurischia() {
     'focus_node_id': '3',
     'incomplete': false,
     'nodes': [
-      {'id': '2', 'title': 'Dinosaurs', 'depth': -1, 'distance': 1, 'kind': 'parent'},
-      {'id': '3', 'title': 'Saurischia', 'depth': 0, 'distance': 0, 'kind': 'focus'},
-      {'id': '8', 'title': 'Theropods', 'depth': 1, 'distance': 1, 'kind': 'child'},
+      {'id': '2', 'title': 'Dinosaurs', 'depth': 1, 'distance': 1, 'kind': 'parent', 'q': 1, 'r': 0},
+      {'id': '3', 'title': 'Saurischia', 'depth': 2, 'distance': 2, 'kind': 'focus', 'q': 2, 'r': 0},
+      {'id': '8', 'title': 'Theropods', 'depth': 3, 'distance': 3, 'kind': 'child', 'q': 3, 'r': 0},
     ],
     'edges': [
       {'source': '3', 'target': '2', 'type': 'parent'},

@@ -17,6 +17,7 @@ from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
 from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
+from app.features.knowledge_graph.world_map import map_window
 from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
@@ -153,6 +154,26 @@ def knowledge_nodes(
 ):
     _ = user
     return {"nodes": search_nodes(session, q, limit=limit)}
+
+
+@router.get("/knowledge/map")
+def knowledge_map(
+    qmin: int = -8,
+    qmax: int = 8,
+    rmin: int = -8,
+    rmax: int = 8,
+    margin: int = 2,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    if qmax < qmin or rmax < rmin:
+        raise AppError("VALIDATION_ERROR", "Invalid map window", 422)
+    if (qmax - qmin) > 80 or (rmax - rmin) > 80:
+        raise AppError("VALIDATION_ERROR", "Map window too large", 422)
+    payload = map_window(session, qmin=qmin, qmax=qmax, rmin=rmin, rmax=rmax, margin=max(0, min(margin, 6)))
+    session.commit()
+    return payload
 
 
 @router.get("/knowledge/graph")

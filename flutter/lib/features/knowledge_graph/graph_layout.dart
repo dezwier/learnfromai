@@ -12,6 +12,8 @@ class GraphNode {
     this.distance = 0,
     this.kind = 'focus',
     this.description,
+    this.q,
+    this.r,
   });
 
   final String id;
@@ -20,6 +22,9 @@ class GraphNode {
   final int distance;
   final String kind;
   final String? description;
+  /// Stable axial hex on the shared world map (when known).
+  final int? q;
+  final int? r;
 
   NodeRole get role {
     switch (kind) {
@@ -64,6 +69,8 @@ class PlacedNode {
     required this.radius,
     this.isFlower = false,
     this.description,
+    this.q,
+    this.r,
   });
 
   final String id;
@@ -81,6 +88,8 @@ class PlacedNode {
   /// Focus is the solid union of 7 unit hexes (no internal gaps).
   final bool isFlower;
   final String? description;
+  final int? q;
+  final int? r;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -353,6 +362,75 @@ Size hexFlowerBounds(double unitRadius) {
 /// Tight honeycomb on a flat-top axial lattice.
 /// Focus is one solid 7-hex flower; direct neighbors on ring 2+;
 /// neighbors-of-neighbors sit next to the direct neighbor they hang off.
+/// Place equal hexes from persisted axial (q, r). Selection is visual only.
+GraphLayout layoutWorld(
+  List<GraphNode> nodes, {
+  required Size viewport,
+  double hexRadius = 52,
+  double pad = 120,
+}) {
+  final width = math.max(viewport.width, 1.0);
+  final height = math.max(viewport.height, 1.0);
+  final withCoords = [
+    for (final node in nodes)
+      if (node.q != null && node.r != null) node,
+  ];
+  if (withCoords.isEmpty) {
+    return GraphLayout(nodes: const [], width: width, height: height);
+  }
+
+  final centers = <(GraphNode, Offset)>[
+    for (final node in withCoords) (node, axialToPixel(node.q!, node.r!, hexRadius)),
+  ];
+  var minX = centers.first.$2.dx;
+  var maxX = centers.first.$2.dx;
+  var minY = centers.first.$2.dy;
+  var maxY = centers.first.$2.dy;
+  final half = flatHexBounds(hexRadius);
+  for (final c in centers) {
+    minX = math.min(minX, c.$2.dx - half.width / 2);
+    maxX = math.max(maxX, c.$2.dx + half.width / 2);
+    minY = math.min(minY, c.$2.dy - half.height / 2);
+    maxY = math.max(maxY, c.$2.dy + half.height / 2);
+  }
+
+  final contentW = math.max(maxX - minX, 1.0);
+  final contentH = math.max(maxY - minY, 1.0);
+  final canvasW = math.max(width, contentW + 2 * pad);
+  final canvasH = math.max(height, contentH + 2 * pad);
+  final ox = (canvasW - contentW) / 2 - minX;
+  final oy = (canvasH - contentH) / 2 - minY;
+
+  final placed = <PlacedNode>[
+    for (final c in centers)
+      _hex(c.$1, cx: c.$2.dx + ox, cy: c.$2.dy + oy, radius: hexRadius),
+  ];
+  return GraphLayout(nodes: placed, width: canvasW, height: canvasH);
+}
+
+Color depthFill(int depth, ColorScheme scheme) {
+  final dark = scheme.brightness == Brightness.dark;
+  final band = depth.clamp(0, 5);
+  if (dark) {
+    return switch (band) {
+      0 => const Color(0xFF4A4E55),
+      1 => const Color(0xFF2C455C),
+      2 => const Color(0xFF2A453C),
+      3 => const Color(0xFF5A4528),
+      4 => const Color(0xFF5A3038),
+      _ => const Color(0xFF3C4046),
+    };
+  }
+  return switch (band) {
+    0 => const Color(0xFFE4E6EA),
+    1 => const Color(0xFF8AAFCF),
+    2 => const Color(0xFF97BF88),
+    3 => const Color(0xFFDCAD6A),
+    4 => const Color(0xFFD98E96),
+    _ => const Color(0xFFADB3BE),
+  };
+}
+
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
   List<GraphEdge> edges, {
@@ -544,6 +622,33 @@ Offset axialToPixel(int q, int r, double size) {
   return Offset(x, y);
 }
 
+(int, int) pixelToAxial(Offset point, double size) {
+  if (size <= 0) return (0, 0);
+  final q = (2 / 3 * point.dx) / size;
+  final r = (-1 / 3 * point.dx + math.sqrt(3) / 3 * point.dy) / size;
+  return _axialRound(q, r);
+}
+
+(int, int) _axialRound(double q, double r) {
+  var x = q;
+  var z = r;
+  var y = -x - z;
+  var rx = x.round();
+  var ry = y.round();
+  var rz = z.round();
+  final xDiff = (rx - x).abs();
+  final yDiff = (ry - y).abs();
+  final zDiff = (rz - z).abs();
+  if (xDiff > yDiff && xDiff > zDiff) {
+    rx = -ry - rz;
+  } else if (yDiff > zDiff) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+  return (rx, rz);
+}
+
 List<_HexCell> _ringCells({required int fromRing, required int count}) {
   final out = <_HexCell>[];
   var ring = fromRing;
@@ -660,6 +765,8 @@ PlacedNode _hex(GraphNode node, {required double cx, required double cy, require
     role: node.role,
     description: node.description,
     radius: radius,
+    q: node.q,
+    r: node.r,
     x: cx - bounds.width / 2,
     y: cy - bounds.height / 2,
     width: bounds.width,
@@ -679,6 +786,8 @@ PlacedNode _flower(GraphNode node, {required double cx, required double cy, requ
     description: node.description,
     radius: latticeSize,
     isFlower: true,
+    q: node.q,
+    r: node.r,
     x: cx - bounds.width / 2,
     y: cy - bounds.height / 2,
     width: bounds.width,

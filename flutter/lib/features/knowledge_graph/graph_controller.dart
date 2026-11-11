@@ -4,11 +4,52 @@ import '../../core/networking/api_client.dart';
 import '../../core/networking/api_exception.dart';
 
 class TopicChoice {
-  const TopicChoice({required this.id, required this.title, this.description});
+  const TopicChoice({required this.id, required this.title, this.description, this.q, this.r});
 
   final String id;
   final String title;
   final String? description;
+  final int? q;
+  final int? r;
+}
+
+class WorldTopic {
+  const WorldTopic({
+    required this.id,
+    required this.title,
+    this.description,
+    this.depth = 0,
+    this.kind = 'topic',
+    this.q,
+    this.r,
+  });
+
+  final String id;
+  final String title;
+  final String? description;
+  final int depth;
+  final String kind;
+  final int? q;
+  final int? r;
+
+  WorldTopic copyWith({
+    String? title,
+    String? description,
+    int? depth,
+    String? kind,
+    int? q,
+    int? r,
+  }) {
+    return WorldTopic(
+      id: id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      depth: depth ?? this.depth,
+      kind: kind ?? this.kind,
+      q: q ?? this.q,
+      r: r ?? this.r,
+    );
+  }
 }
 
 class NeighborhoodPrefs {
@@ -60,10 +101,13 @@ class GraphController extends ChangeNotifier {
   final Future<Map<String, dynamic>> Function(String path, {Object? body})? patcher;
   final Future<Map<String, dynamic>> Function(String jobId)? jobLoader;
 
+  /// Last focus payload (compat + description kinds). World tiles live in [worldById].
   Map<String, dynamic>? categoryGraph;
+  final Map<String, WorldTopic> worldById = {};
   bool loading = false;
   bool refreshing = false;
   bool working = false;
+  bool mapLoading = false;
   String? pendingNodeId;
   String? error;
   String? progressMessage;
@@ -72,6 +116,8 @@ class GraphController extends ChangeNotifier {
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
   int _suggestToken = 0;
+  int _mapToken = 0;
+  (int, int, int, int)? lastMapWindow;
 
   String? get focusId {
     final raw = categoryGraph?['focus_node_id'];
@@ -81,10 +127,49 @@ class GraphController extends ChangeNotifier {
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
+  bool get hasWorldNodes => worldById.values.any((n) => n.q != null && n.r != null);
+
+  List<WorldTopic> get worldTopics => worldById.values.toList(growable: false);
+
   Future<void> resume() async {
-    if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing || working) return;
+    if (categoryGraph != null || worldById.isNotEmpty || candidates.isNotEmpty || loading || refreshing || working) {
+      return;
+    }
     await loadPreferences();
-    await _focus(body: const {});
+    await fetchMap(qmin: -6, qmax: 6, rmin: -6, rmax: 6);
+    if (!hasWorldNodes) {
+      await _focus(body: const {});
+    }
+  }
+
+  Future<void> fetchMap({
+    required int qmin,
+    required int qmax,
+    required int rmin,
+    required int rmax,
+    int margin = 2,
+  }) async {
+    final window = (qmin, qmax, rmin, rmax);
+    if (lastMapWindow == window && worldById.isNotEmpty) return;
+    final token = ++_mapToken;
+    mapLoading = true;
+    notifyListeners();
+    try {
+      final raw = await _get(
+        '/knowledge/map?qmin=$qmin&qmax=$qmax&rmin=$rmin&rmax=$rmax&margin=$margin',
+      );
+      if (token != _mapToken) return;
+      _mergeNodes(raw['nodes']);
+      lastMapWindow = window;
+    } on ApiException catch (exc) {
+      if (token != _mapToken) return;
+      error = exc.message;
+    } finally {
+      if (token == _mapToken) {
+        mapLoading = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> search(String topic) async {
@@ -130,13 +215,13 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<void> openNode(String id) async {
-    if (refreshing || loading || working) return; // one expand at a time; graph stays pannable
+    if (refreshing || loading || working) return;
     if (focusId == id && categoryGraph != null) return;
     pendingNodeId = id;
     await _focus(body: {'node_id': id});
   }
 
-  /// Open an existing node via GET graph — no expand/LLM job.
+  /// Open an existing node via GET graph — merge into world, no full rebuild.
   Future<void> openExisting(String id) async {
     if (refreshing || loading || working) return;
     if (focusId == id && categoryGraph != null) {
@@ -144,7 +229,7 @@ class GraphController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final first = categoryGraph == null;
+    final first = !hasWorldNodes && categoryGraph == null;
     loading = first;
     refreshing = !first;
     pendingNodeId = id;
@@ -154,11 +239,13 @@ class GraphController extends ChangeNotifier {
     progressMessage = null;
     notifyListeners();
     try {
-      categoryGraph = await _get('/knowledge/graph/$id');
+      final payload = await _get('/knowledge/graph/$id');
+      _applyGraphPayload(payload);
       final focus = focusId;
       if (focus != null && (focusHistory.isEmpty || focusHistory.last != focus)) {
         focusHistory.add(focus);
       }
+      await _prefetchAroundFocus();
     } on ApiException catch (exc) {
       error = exc.message;
     } finally {
@@ -214,7 +301,7 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<void> _focus({required Map<String, dynamic> body, bool record = true}) async {
-    final first = categoryGraph == null;
+    final first = !hasWorldNodes && categoryGraph == null;
     loading = first;
     refreshing = !first;
     error = null;
@@ -231,7 +318,10 @@ class GraphController extends ChangeNotifier {
         if (focus == null) {
           throw ApiException(500, 'JOB', 'Neighborhood job finished without a focus');
         }
-        categoryGraph = await _get('/knowledge/graph/$focus');
+        final graph = await _get('/knowledge/graph/$focus');
+        _applyGraphPayload(graph);
+      } else if (payload['nodes'] is List) {
+        _applyGraphPayload(payload);
       } else {
         categoryGraph = payload;
       }
@@ -239,6 +329,7 @@ class GraphController extends ChangeNotifier {
       if (record && id != null && (focusHistory.isEmpty || focusHistory.last != id)) {
         focusHistory.add(id);
       }
+      await _prefetchAroundFocus();
     } on ApiException catch (exc) {
       if (exc.status == 409) {
         candidates = _choices(exc.details);
@@ -252,6 +343,55 @@ class GraphController extends ChangeNotifier {
       pendingNodeId = null;
       progressMessage = null;
       notifyListeners();
+    }
+  }
+
+  Future<void> _prefetchAroundFocus() async {
+    final id = focusId;
+    if (id == null) return;
+    final topic = worldById[id];
+    if (topic?.q == null || topic?.r == null) return;
+    final q = topic!.q!;
+    final r = topic.r!;
+    await fetchMap(qmin: q - 5, qmax: q + 5, rmin: r - 5, rmax: r + 5);
+  }
+
+  void _applyGraphPayload(Map<String, dynamic> payload) {
+    categoryGraph = payload;
+    _mergeNodes(payload['nodes']);
+  }
+
+  void _mergeNodes(Object? raw) {
+    if (raw is! List) return;
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final id = item['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      final prev = worldById[id];
+      worldById[id] = WorldTopic(
+        id: id,
+        title: item['title']?.toString() ?? prev?.title ?? 'Topic',
+        description: item['description']?.toString() ?? prev?.description,
+        depth: (item['depth'] as num?)?.toInt() ?? prev?.depth ?? 0,
+        kind: item['kind']?.toString() ?? prev?.kind ?? 'topic',
+        q: (item['q'] as num?)?.toInt() ?? prev?.q,
+        r: (item['r'] as num?)?.toInt() ?? prev?.r,
+      );
+    }
+  }
+
+  /// Test helper: seed world + focus payload without network.
+  @visibleForTesting
+  void seedForTest({
+    required Map<String, dynamic> graph,
+    List<WorldTopic> world = const [],
+  }) {
+    categoryGraph = graph;
+    worldById
+      ..clear()
+      ..addEntries(world.map((t) => MapEntry(t.id, t)));
+    if (world.isEmpty) {
+      _mergeNodes(graph['nodes']);
     }
   }
 
@@ -320,6 +460,8 @@ class GraphController extends ChangeNotifier {
             id: (item['id'] ?? item['node_id'] ?? item['wikidata_qid']).toString(),
             title: item['title']?.toString() ?? item['name']?.toString() ?? 'Topic',
             description: item['description']?.toString(),
+            q: (item['q'] as num?)?.toInt(),
+            r: (item['r'] as num?)?.toInt(),
           ),
     ];
   }
