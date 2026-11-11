@@ -4,11 +4,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/theme/theme_controller.dart';
-import '../../core/widgets/gradient_top_bar.dart';
 import '../../core/widgets/pulse_placeholder.dart';
 import '../../core/widgets/study_card.dart';
-import '../auth/auth_controller.dart';
+import '../profile/profile_hud.dart';
+import '../profile/profile_screen.dart';
 import 'graph_controller.dart';
 import 'graph_layout.dart';
 import 'title_wrap.dart';
@@ -30,6 +29,7 @@ class _GraphScreenState extends State<GraphScreen> {
   var _searchOutsideMoved = false;
   var _resumed = false;
   var _searchOpen = false;
+  var _profileOpen = false;
 
   @override
   void initState() {
@@ -117,133 +117,37 @@ class _GraphScreenState extends State<GraphScreen> {
     await graph.openExisting(choice.id);
   }
 
-  Future<void> _openPrefs(GraphController graph) async {
-    var draft = graph.prefs;
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheet) {
-            Widget stepper(String label, int value, int min, int max, ValueChanged<int> onChanged) {
-              return ListTile(
-                title: Text(label),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      onPressed: value > min ? () => setSheet(() => onChanged(value - 1)) : null,
-                      icon: const Icon(Icons.remove),
-                    ),
-                    Text('$value'),
-                    IconButton(
-                      onPressed: value < max ? () => setSheet(() => onChanged(value + 1)) : null,
-                      icon: const Icon(Icons.add),
-                    ),
-                  ],
-                ),
-              );
-            }
+  void _openProfile() {
+    _dismissSearch();
+    setState(() => _profileOpen = true);
+  }
 
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const ListTile(
-                      title: Text('Neighborhood size'),
-                      subtitle: Text('How many related topics to fetch around a focus.'),
-                    ),
-                    stepper('Parents', draft.parents, 1, 2, (value) => draft = draft.copyWith(parents: value)),
-                    stepper('Siblings', draft.siblings, 2, 3, (value) => draft = draft.copyWith(siblings: value)),
-                    stepper('Children', draft.children, 3, 5, (value) => draft = draft.copyWith(children: value)),
-                    stepper(
-                      'Related',
-                      draft.acquaintances,
-                      3,
-                      5,
-                      (value) => draft = draft.copyWith(acquaintances: value),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: FilledButton(
-                        onPressed: () async {
-                          Navigator.of(context).pop();
-                          await graph.savePreferences(draft);
-                        },
-                        child: const Text('Save'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
+  void _closeProfile() {
+    if (!_profileOpen) return;
+    setState(() => _profileOpen = false);
   }
 
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       // Keep the graph still when the keyboard opens; search floats above it.
       resizeToAvoidBottomInset: false,
-      appBar: GradientTopBar(
-        title: 'Graph',
-        actions: [
-          if (graph.canGoBack)
-            IconButton(
-              tooltip: 'Previous topic',
-              onPressed: () => graph.back(),
-              icon: const Icon(Icons.arrow_back),
-            ),
-          IconButton(
-            tooltip: 'Neighborhood settings',
-            onPressed: () => _openPrefs(graph),
-            icon: const Icon(Icons.tune),
-          ),
-          IconButton(
-            tooltip: 'Theme',
-            onPressed: () {
-              final themes = context.read<ThemeController>();
-              final next = switch (themes.mode) {
-                ThemeMode.system => ThemeMode.light,
-                ThemeMode.light => ThemeMode.dark,
-                ThemeMode.dark => ThemeMode.system,
-              };
-              themes.setMode(next);
-            },
-            icon: const Icon(Icons.brightness_6),
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: () => context.read<AuthController>().signOut(),
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
-      floatingActionButton: _searchOpen
+      floatingActionButton: (_searchOpen || _profileOpen)
           ? null
-          : Builder(
-              builder: (context) {
-                final scheme = Theme.of(context).colorScheme;
-                return FloatingActionButton.small(
-                  heroTag: 'graph-search',
-                  tooltip: 'Search',
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  foregroundColor: scheme.onSurfaceVariant,
-                  elevation: 1.5,
-                  focusElevation: 2,
-                  hoverElevation: 2,
-                  highlightElevation: 2,
-                  onPressed: _openSearch,
-                  child: const Icon(Icons.search, size: 20),
-                );
-              },
+          : FloatingActionButton.small(
+              heroTag: 'graph-search',
+              tooltip: 'Search',
+              backgroundColor: scheme.surfaceContainerHighest,
+              foregroundColor: scheme.onSurfaceVariant,
+              elevation: 1.5,
+              focusElevation: 2,
+              hoverElevation: 2,
+              highlightElevation: 2,
+              onPressed: _openSearch,
+              child: const Icon(Icons.search, size: 20),
             ),
       body: Stack(
         children: [
@@ -296,6 +200,30 @@ class _GraphScreenState extends State<GraphScreen> {
               ),
             ],
           ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Flexible(child: ProfileHud(onTap: _openProfile)),
+                  if (graph.canGoBack) ...[
+                    const Spacer(),
+                    Material(
+                      color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
+                      shape: const CircleBorder(),
+                      elevation: 1.5,
+                      child: IconButton(
+                        tooltip: 'Previous topic',
+                        onPressed: () => graph.back(),
+                        icon: const Icon(Icons.arrow_back),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
           if (graph.working)
             Positioned(
               left: 16,
@@ -315,6 +243,10 @@ class _GraphScreenState extends State<GraphScreen> {
                 onSubmit: () => _submitSearch(graph),
                 onPick: (choice) => _pickSuggestion(graph, choice),
               ),
+            ),
+          if (_profileOpen)
+            Positioned.fill(
+              child: ProfileScreen(onClose: _closeProfile),
             ),
         ],
       ),
@@ -510,14 +442,22 @@ class _SearchBar extends StatelessWidget {
                       return ListTile(
                         dense: true,
                         leading: Icon(Icons.north_west, size: 16, color: scheme.onSurfaceVariant),
-                        title: Text(choice.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        title: Text(
+                          choice.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontFamily: 'tt_ramilas'),
+                        ),
                         subtitle: (subtitle == null || subtitle.isEmpty)
                             ? null
                             : Text(
                                 subtitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                                style: textTheme.bodySmall?.copyWith(
+                                  fontFamily: 'tt_ramilas',
+                                  color: scheme.onSurfaceVariant,
+                                ),
                               ),
                         onTap: () => onPick(choice),
                       );
@@ -654,6 +594,7 @@ class _NodeCard extends StatelessWidget {
                         hyphenateWords: true,
                         align: Alignment.bottomCenter,
                         style: TextStyle(
+                          fontFamily: 'tt_ramilas',
                           height: 1.1,
                           fontWeight: FontWeight.w700,
                           color: scheme.onSurface,
@@ -673,6 +614,7 @@ class _NodeCard extends StatelessWidget {
                             maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
                             align: Alignment.topCenter,
                             style: TextStyle(
+                              fontFamily: 'tt_ramilas',
                               height: 1.28,
                               fontWeight: FontWeight.w400,
                               color: scheme.onSurface.withValues(alpha: 0.72),
@@ -707,6 +649,7 @@ class _NodeCard extends StatelessWidget {
               maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
               hyphenateWords: true,
               style: TextStyle(
+                fontFamily: 'tt_ramilas',
                 height: 1.15,
                 fontWeight: FontWeight.w500,
                 color: scheme.onSurface.withValues(alpha: 0.9),

@@ -5,18 +5,56 @@ import '../../core/networking/api_exception.dart';
 import 'auth_gateway.dart';
 
 class UserProfile {
-  UserProfile({required this.id, required this.displayName, required this.timezone});
+  UserProfile({
+    required this.id,
+    required this.displayName,
+    required this.timezone,
+    this.email,
+    this.username,
+    this.fullName,
+    this.photoUrl,
+  });
 
   final String id;
   final String displayName;
   final String timezone;
+  final String? email;
+  final String? username;
+  final String? fullName;
+  final String? photoUrl;
+
+  String get hudName {
+    final user = username?.trim();
+    if (user != null && user.isNotEmpty) return _titleCase(user);
+    final full = fullName?.trim();
+    if (full != null && full.isNotEmpty) return _titleCase(full);
+    return _titleCase(displayName);
+  }
+
+  String get initial {
+    final name = hudName.trim();
+    if (name.isEmpty) return 'L';
+    return name.substring(0, 1).toUpperCase();
+  }
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       id: json['id'].toString(),
       displayName: (json['display_name'] ?? json['email'] ?? 'Learner').toString(),
       timezone: (json['timezone'] ?? 'UTC').toString(),
+      email: json['email']?.toString(),
+      username: json['username']?.toString(),
+      fullName: json['full_name']?.toString(),
+      photoUrl: json['photo_url']?.toString(),
     );
+  }
+
+  static String _titleCase(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 }
 
@@ -83,6 +121,43 @@ class AuthController extends ChangeNotifier {
     } finally {
       loading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> updateProfile({
+    String? username,
+    String? fullName,
+    String? photoUrl,
+  }) async {
+    final body = <String, dynamic>{};
+    if (username != null) body['username'] = username;
+    if (fullName != null) body['full_name'] = fullName;
+    if (photoUrl != null) body['photo_url'] = photoUrl;
+    if (body.isEmpty) return;
+    final raw = Map<String, dynamic>.from(await api.patch('/me', body: body) as Map);
+    user = UserProfile.fromJson(raw);
+    notifyListeners();
+  }
+
+  Future<void> updateAccount({
+    String? email,
+    String? currentPassword,
+    String? newPassword,
+  }) async {
+    final currentEmail = user?.email;
+    if (email != null && email.trim().isNotEmpty && email.trim() != currentEmail) {
+      if (currentEmail == null || currentPassword == null || currentPassword.isEmpty) {
+        throw StateError('Current password is required to change email');
+      }
+      await gateway.reauthenticate(email: currentEmail, password: currentPassword);
+      await gateway.updateEmail(email.trim());
+    }
+    if (newPassword != null && newPassword.isNotEmpty) {
+      if (currentEmail == null || currentPassword == null || currentPassword.isEmpty) {
+        throw StateError('Current password is required to change password');
+      }
+      await gateway.reauthenticate(email: currentEmail, password: currentPassword);
+      await gateway.updatePassword(newPassword);
     }
   }
 

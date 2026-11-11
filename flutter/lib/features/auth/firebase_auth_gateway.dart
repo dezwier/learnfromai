@@ -13,6 +13,12 @@ class FirebaseAuthGateway implements AuthGateway {
     _ready = true;
   }
 
+  User _requireUser() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Not signed in');
+    return user;
+  }
+
   @override
   Future<void> signIn(String email, String password) async {
     await _ensure();
@@ -29,5 +35,27 @@ class FirebaseAuthGateway implements AuthGateway {
   Future<void> signOut() async {
     if (!_ready) return;
     await FirebaseAuth.instance.signOut();
+  }
+
+  @override
+  Future<void> reauthenticate({required String email, required String password}) async {
+    await _ensure();
+    final user = _requireUser();
+    final credential = EmailAuthProvider.credential(email: email, password: password);
+    await user.reauthenticateWithCredential(credential);
+  }
+
+  @override
+  Future<void> updateEmail(String email) async {
+    await _ensure();
+    final user = _requireUser();
+    await user.verifyBeforeUpdateEmail(email);
+  }
+
+  @override
+  Future<void> updatePassword(String newPassword) async {
+    await _ensure();
+    final user = _requireUser();
+    await user.updatePassword(newPassword);
   }
 }

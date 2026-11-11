@@ -12,6 +12,7 @@ from app.core.errors import AppError, forbidden, not_found
 from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
+from app.features.accounts.profile import merge_profile_prefs, profile_fields
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
 from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
 from app.features.knowledge_graph.search import search_nodes
@@ -41,6 +42,14 @@ class PreferencesBody(BaseModel):
     neighborhood: dict[str, Any] | None = None
 
 
+class MePatchBody(BaseModel):
+    username: str | None = Field(default=None, max_length=200)
+    full_name: str | None = Field(default=None, max_length=200)
+    photo_url: str | None = Field(default=None, max_length=2000)
+    display_name: str | None = Field(default=None, max_length=200)
+    timezone: str | None = Field(default=None, max_length=64)
+
+
 @router.post("/auth/firebase")
 def auth_firebase(body: FirebaseBody, session: Session = Depends(get_session)):
     user, token = exchange_firebase_token(session, body.id_token)
@@ -50,6 +59,31 @@ def auth_firebase(body: FirebaseBody, session: Session = Depends(get_session)):
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
+    return _user_payload(user)
+
+
+@router.patch("/me")
+def patch_me(
+    body: MePatchBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    updates = body.model_dump(exclude_unset=True)
+    if "display_name" in updates and updates["display_name"] is not None:
+        user.display_name = str(updates["display_name"]).strip() or user.display_name
+    if "timezone" in updates and updates["timezone"]:
+        user.timezone = str(updates["timezone"]).strip() or user.timezone
+    if "full_name" in updates and updates["full_name"] is not None:
+        # Keep legacy display_name in sync with full name when provided.
+        name = str(updates["full_name"]).strip()
+        if name:
+            user.display_name = name
+    profile_updates = {key: updates[key] for key in ("username", "full_name", "photo_url") if key in updates}
+    if profile_updates:
+        user.preferences = merge_profile_prefs(user.preferences, profile_updates)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
     return _user_payload(user)
 
 
@@ -176,10 +210,14 @@ def delete_node(concept_id: UUID, user: User = Depends(get_current_user), sessio
 
 
 def _user_payload(user: User) -> dict:
+    profile = profile_fields(user)
     return {
         "id": str(user.id),
-        "email": user.email,
-        "display_name": user.display_name,
+        "email": profile["email"],
+        "display_name": profile["display_name"],
+        "username": profile["username"],
+        "full_name": profile["full_name"],
+        "photo_url": profile["photo_url"],
         "timezone": user.timezone,
         "preferences": {"neighborhood": neighborhood_counts(user)},
     }

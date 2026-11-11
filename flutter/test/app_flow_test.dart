@@ -19,6 +19,15 @@ class _Gateway implements AuthGateway {
 
   @override
   Future<void> signOut() async {}
+
+  @override
+  Future<void> updateEmail(String email) async {}
+
+  @override
+  Future<void> updatePassword(String newPassword) async {}
+
+  @override
+  Future<void> reauthenticate({required String email, required String password}) async {}
 }
 
 void main() {
@@ -64,6 +73,30 @@ void main() {
     expect(find.byWidgetPredicate(_titleLooksLike('Mesozoic')), findsWidgets);
     expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
     expect(find.byTooltip('Search'), findsOneWidget);
+    expect(find.text('Ada'), findsOneWidget);
+    expect(find.text('0 / 100 XP'), findsOneWidget);
+  });
+
+  testWidgets('profile hud opens overlay with settings and logout', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Ada'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Logout'), findsOneWidget);
+    expect(find.text('Progress'), findsOneWidget);
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('App'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Account'), findsOneWidget);
+    expect(find.text('Neighborhood size'), findsOneWidget);
   });
 
   testWidgets('job progress barrier appears while generating', (tester) async {
