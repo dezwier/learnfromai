@@ -44,9 +44,6 @@ def search_nodes(session: Session, query: str, *, limit: int = 8) -> list[dict]:
             "id": str(row.id),
             "title": row.name,
             "description": row.description,
-            "q": row.q,
-            "r": row.r,
-            "depth": row.map_depth if row.map_depth is not None else 0,
         }
-        for row in rows[:limit]
+        for row in rows
     ]

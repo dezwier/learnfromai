@@ -18,10 +18,6 @@ class KnowledgeNode(SQLModel, table=True):
     name: str
     name_key: str = Field(index=True)
     description: str | None = None
-    # Stable flat-top axial hex position on the shared world map.
-    q: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
-    r: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
-    map_depth: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 

@@ -118,9 +118,6 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     session.commit()
 
     if is_complete(session, focus.id, counts):
-        from app.features.knowledge_graph.world_map import ensure_world_placed
-
-        ensure_world_placed(session)
         set_progress(session, job, stage="done", message="Neighborhood already complete", fraction=1.0)
         request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
         session.commit()
@@ -219,9 +216,6 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         session.commit()
 
     set_progress(session, job, stage="persist", message="Saving neighborhood…", fraction=0.95)
-    from app.features.knowledge_graph.world_map import ensure_world_placed
-
-    ensure_world_placed(session)
     request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
     set_progress(session, job, stage="done", message="Neighborhood ready", fraction=1.0)
     session.commit()
@@ -342,10 +336,6 @@ def _persist_request(
 
 def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int = 36) -> dict:
     """Direct neighborhood first, then unique neighbors-of-neighbors as `extended`."""
-    from app.features.knowledge_graph.world_map import ensure_world_placed, node_coords_payload
-
-    ensure_world_placed(session)
-    session.refresh(focus)
     kinds: dict[UUID, str] = {focus.id: "focus"}
     depths: dict[UUID, int] = {focus.id: 0}
     nodes: dict[UUID, KnowledgeNode] = {focus.id: focus}
@@ -407,17 +397,14 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
     node_payload = []
     for node_id in sorted(ids, key=sort_key):
         node = nodes[node_id]
-        coords = node_coords_payload(node)
         node_payload.append(
             {
                 "id": str(node.id),
                 "title": node.name,
                 "description": node.description,
-                "depth": coords["depth"],
+                "depth": depths.get(node_id, 0),
                 "distance": distances.get(node_id, 0 if node_id == focus.id else 2 if kinds.get(node_id) == "extended" else 1),
                 "kind": kinds.get(node_id, "related"),
-                "q": coords["q"],
-                "r": coords["r"],
             }
         )
     # Outbound from focus + links from directs into extended (for client context).

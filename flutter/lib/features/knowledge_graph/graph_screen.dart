@@ -50,91 +50,19 @@ class _GraphScreenState extends State<GraphScreen> {
     super.dispose();
   }
 
-  void _flyToFocusIfNeeded({
+  void _resetTransformIfFocusChanged({
     required String? focusId,
-    required GraphLayout layout,
     required Size viewport,
+    required Size canvas,
   }) {
-    if (focusId == null || _transformFocusId == focusId) return;
+    if (_transformFocusId == focusId) return;
     _transformFocusId = focusId;
-    PlacedNode? target;
-    for (final node in layout.nodes) {
-      if (node.id == focusId) {
-        target = node;
-        break;
-      }
-    }
-    final matrix = Matrix4.identity();
-    if (target == null) {
-      matrix.translateByDouble(
-        (viewport.width - layout.width) / 2,
-        (viewport.height - layout.height) / 2,
-        0,
-        1,
-      );
-      _transform.value = matrix;
-      return;
-    }
-    final scale = _transform.value.getMaxScaleOnAxis().clamp(0.45, 3.5);
-    final tx = viewport.width / 2 - target.center.dx * scale;
-    final ty = viewport.height / 2 - target.center.dy * scale;
-    matrix
-      ..translateByDouble(tx, ty, 0, 1)
-      ..scaleByDouble(scale, scale, scale, 1);
-    _transform.value = matrix;
-  }
-
-  void _requestMapForViewport(GraphController graph, GraphLayout layout, Size viewport) {
-    if (layout.nodes.isEmpty) return;
-    Matrix4 inverse;
-    try {
-      inverse = Matrix4.inverted(_transform.value);
-    } catch (_) {
-      return;
-    }
-    final topLeft = MatrixUtils.transformPoint(inverse, Offset.zero);
-    final bottomRight = MatrixUtils.transformPoint(
-      inverse,
-      Offset(viewport.width, viewport.height),
+    // Focus is laid out at the canvas center; translate so that lands in view.
+    _transform.value = Matrix4.translationValues(
+      (viewport.width - canvas.width) / 2,
+      (viewport.height - canvas.height) / 2,
+      0,
     );
-    final radius = layout.nodes.first.radius;
-    var qmin = 1 << 20;
-    var qmax = -(1 << 20);
-    var rmin = 1 << 20;
-    var rmax = -(1 << 20);
-    var any = false;
-    for (final node in layout.nodes) {
-      if (node.q == null || node.r == null) continue;
-      final c = node.center;
-      if (c.dx < topLeft.dx - radius * 2 ||
-          c.dx > bottomRight.dx + radius * 2 ||
-          c.dy < topLeft.dy - radius * 2 ||
-          c.dy > bottomRight.dy + radius * 2) {
-        continue;
-      }
-      any = true;
-      qmin = math.min(qmin, node.q!);
-      qmax = math.max(qmax, node.q!);
-      rmin = math.min(rmin, node.r!);
-      rmax = math.max(rmax, node.r!);
-    }
-    if (!any) {
-      final topic = graph.worldById[graph.focusId];
-      if (topic?.q != null && topic?.r != null) {
-        qmin = topic!.q! - 5;
-        qmax = topic.q! + 5;
-        rmin = topic.r! - 5;
-        rmax = topic.r! + 5;
-      } else {
-        return;
-      }
-    } else {
-      qmin -= 3;
-      qmax += 3;
-      rmin -= 3;
-      rmax += 3;
-    }
-    graph.fetchMap(qmin: qmin, qmax: qmax, rmin: rmin, rmax: rmax);
   }
 
   void _openSearch() {
@@ -339,10 +267,13 @@ class _GraphScreenState extends State<GraphScreen> {
     );
   }
 
-  bool _hasNodes(GraphController graph) => graph.hasWorldNodes;
+  bool _hasNodes(GraphController graph) {
+    final nodes = graph.categoryGraph?['nodes'];
+    return nodes is List && nodes.isNotEmpty;
+  }
 
   Widget _body(BuildContext context, GraphController graph) {
-    if (graph.loading && !graph.hasWorldNodes) {
+    if (graph.loading && graph.categoryGraph == null) {
       return const Padding(padding: studyPagePadding, child: PulsePlaceholder.map());
     }
     if (graph.candidates.isNotEmpty) {
@@ -373,7 +304,7 @@ class _GraphScreenState extends State<GraphScreen> {
           StudyCard(
             eyebrow: 'GRAPH',
             title: 'Explore the graph',
-            subtitle: 'Search a topic. The shared hex world grows around roots at the center.',
+            subtitle: 'Search a topic to see parents, siblings, children, and related neighbors.',
           ),
         ],
       );
@@ -382,10 +313,10 @@ class _GraphScreenState extends State<GraphScreen> {
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         final layout = _layoutFor(graph, viewport);
-        _flyToFocusIfNeeded(
+        _resetTransformIfFocusChanged(
           focusId: graph.focusId,
-          layout: layout,
           viewport: viewport,
+          canvas: Size(layout.width, layout.height),
         );
         return InteractiveViewer(
           transformationController: _transform,
@@ -393,7 +324,6 @@ class _GraphScreenState extends State<GraphScreen> {
           minScale: 0.45,
           maxScale: 3.5,
           boundaryMargin: const EdgeInsets.all(480),
-          onInteractionEnd: (_) => _requestMapForViewport(graph, layout, viewport),
           child: SizedBox(
             width: layout.width,
             height: layout.height,
@@ -412,24 +342,33 @@ class _GraphScreenState extends State<GraphScreen> {
   }
 
   GraphLayout _layoutFor(GraphController graph, Size viewport) {
-    final nodes = [
-      for (final topic in graph.worldTopics)
-        if (topic.q != null && topic.r != null)
-          GraphNode(
-            id: topic.id,
-            title: topic.title,
-            depth: topic.depth,
-            distance: topic.depth,
-            kind: topic.id == graph.focusId ? 'focus' : topic.kind,
-            description: topic.description,
-            q: topic.q,
-            r: topic.r,
-          ),
-    ];
-    if (nodes.isEmpty) {
+    final payload = graph.categoryGraph;
+    if (payload == null) {
       return GraphLayout(nodes: const [], width: viewport.width, height: viewport.height);
     }
-    return layoutWorld(nodes, viewport: viewport);
+    final nodes = [
+      for (final raw in (payload['nodes'] as List?) ?? const [])
+        if (raw is Map)
+          GraphNode(
+            id: raw['id'].toString(),
+            title: raw['title']?.toString() ?? '',
+            depth: (raw['depth'] as num?)?.toInt() ?? 0,
+            distance: (raw['distance'] as num?)?.toInt() ?? 0,
+            kind: raw['kind']?.toString() ?? 'focus',
+            description: raw['description']?.toString(),
+          ),
+    ];
+    final edges = [
+      for (final raw in (payload['edges'] as List?) ?? const [])
+        if (raw is Map)
+          GraphEdge(
+            source: raw['source'].toString(),
+            target: raw['target'].toString(),
+            type: raw['type']?.toString() ?? 'child',
+          ),
+    ];
+    final focus = graph.focusId ?? (nodes.isEmpty ? '' : nodes.first.id);
+    return layoutGraph(nodes, edges, focusId: focus, viewport: viewport);
   }
 }
 
@@ -752,21 +691,30 @@ class _NodeCard extends StatelessWidget {
     final dark = scheme.brightness == Brightness.dark;
     final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
-        : depthFill(node.depth, scheme);
+        : roleFill(node.role, scheme);
+    final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: (centerHighlight || focused) ? 1.0 : 0.0),
+      tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       builder: (context, spotlight, _) {
-        // Equal hex world: selection is shadow/intensity only (no focus flower).
-        final fill = focused ? base : _intensifyFill(base, spotlight, dark: dark);
-        final scale = 1.0 + 0.045 * spotlight;
-        final child = _tileCard(
-          scheme: scheme,
-          fill: fill,
-          dark: dark,
-          spotlight: focused ? math.max(spotlight, 0.85) : spotlight,
-        );
+        // Focus flower: shadow only — color/scale look wrong on the big tile.
+        final fill = node.isFlower ? base : _intensifyFill(base, spotlight, dark: dark);
+        final scale = node.isFlower ? 1.0 : 1.0 + 0.045 * spotlight;
+        final child = node.isFlower
+            ? _flowerCard(
+                scheme: scheme,
+                fill: fill,
+                dark: dark,
+                spotlight: spotlight,
+                showDescription: showDescription,
+              )
+            : _tileCard(
+                scheme: scheme,
+                fill: fill,
+                dark: dark,
+                spotlight: spotlight,
+              );
         return GestureDetector(
           onTap: onTap,
           child: Transform.scale(

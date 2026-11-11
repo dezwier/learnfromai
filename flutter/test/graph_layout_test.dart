@@ -5,23 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('world layout keeps equal hexes on axial coords', () {
-    final layout = layoutWorld(
-      const [
-        GraphNode(id: 'root', title: 'Science', depth: 0, q: 0, r: 0),
-        GraphNode(id: 'child', title: 'Biology', depth: 1, q: 1, r: 0),
-      ],
-      viewport: const Size(390, 700),
-      hexRadius: 40,
-    );
-    final byId = {for (final node in layout.nodes) node.id: node};
-    expect(byId['root']!.isFlower, isFalse);
-    expect(byId['child']!.width, closeTo(byId['root']!.width, 0.01));
-    expect(byId['child']!.q, 1);
-    expect(byId['child']!.r, 0);
-    expect(hitTestNode(layout, byId['root']!.center), 'root');
-  });
-
   test('focus is a solid 7-hex flower with parallel outer inset', () {
     const viewport = Size(390, 700);
     final layout = layoutGraph(
