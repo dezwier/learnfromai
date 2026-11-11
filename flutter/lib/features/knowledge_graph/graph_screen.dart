@@ -34,7 +34,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
-  var _drawerExpanded = false;
+  var _drawerRaised = false;
   PlacedNode? _highlighted;
   Size _viewport = Size.zero;
 
@@ -116,7 +116,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description) {
       setState(() {
-        if (_highlighted?.id != node.id) _drawerExpanded = false;
+        if (_highlighted?.id != node.id) _drawerRaised = false;
         _highlighted = node;
       });
     }
@@ -136,7 +136,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
       return;
     }
     setState(() {
-      if (_highlighted?.id != node?.id) _drawerExpanded = false;
+      if (_highlighted?.id != node?.id) _drawerRaised = false;
       _highlighted = node;
     });
   }
@@ -241,7 +241,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     if (!ok || !mounted) return;
     setState(() {
       _highlighted = null;
-      _drawerExpanded = false;
+      _drawerRaised = false;
     });
   }
 
@@ -314,14 +314,12 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
     final drawerVisible = !_profileOpen && !_searchOpen && _highlighted != null;
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    final collapsedDrawer = _HighlightDrawer.collapsedHeight(safeBottom);
-    final drawerClearance = drawerVisible
-        ? (_drawerExpanded ? screenHeight * 0.95 : collapsedDrawer) + 12
-        : 16.0;
+    final drawerClearance =
+        drawerVisible ? _HighlightDrawer.collapsedHeight(safeBottom) + 12 : 16.0;
     final floatBottom = drawerClearance + keyboard;
     final canGoToHighlight =
         !_searchOpen && !_profileOpen && _highlighted != null && _highlighted!.id != graph.focusId;
+    final showFloats = !_searchOpen && !_profileOpen && !_drawerRaised;
     return Scaffold(
       // Keep the graph still when the keyboard opens; search floats above it.
       resizeToAvoidBottomInset: false,
@@ -394,26 +392,28 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
               ),
             ),
           if (drawerVisible)
-            Positioned.fill(
+            Align(
+              alignment: Alignment.bottomCenter,
               child: _HighlightDrawer(
+                key: ValueKey(_highlighted!.id),
                 node: _highlighted!,
                 canViewInGraph: canGoToHighlight,
-                onExpandedChanged: (expanded) {
-                  if (_drawerExpanded == expanded) return;
-                  setState(() => _drawerExpanded = expanded);
+                onRaisedChanged: (raised) {
+                  if (_drawerRaised == raised) return;
+                  setState(() => _drawerRaised = raised);
                 },
                 onViewInGraph: () => _goToHighlighted(graph),
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
               ),
             ),
-          if (graph.working)
+          if (graph.working && showFloats)
             Positioned(
               left: 16,
               bottom: floatBottom,
               child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
             ),
-          if (!_searchOpen && !_profileOpen)
+          if (showFloats)
             Positioned(
               right: 16,
               bottom: floatBottom,
@@ -659,9 +659,10 @@ class _ProgressChip extends StatelessWidget {
 
 class _HighlightDrawer extends StatefulWidget {
   const _HighlightDrawer({
+    super.key,
     required this.node,
     required this.canViewInGraph,
-    required this.onExpandedChanged,
+    required this.onRaisedChanged,
     required this.onViewInGraph,
     required this.onEdit,
     required this.onDelete,
@@ -674,7 +675,7 @@ class _HighlightDrawer extends StatefulWidget {
 
   final PlacedNode node;
   final bool canViewInGraph;
-  final ValueChanged<bool> onExpandedChanged;
+  final ValueChanged<bool> onRaisedChanged;
   final VoidCallback onViewInGraph;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -683,122 +684,180 @@ class _HighlightDrawer extends StatefulWidget {
   State<_HighlightDrawer> createState() => _HighlightDrawerState();
 }
 
-class _HighlightDrawerState extends State<_HighlightDrawer> {
-  final _sheet = DraggableScrollableController();
-  var _expanded = false;
+class _HighlightDrawerState extends State<_HighlightDrawer>
+    with SingleTickerProviderStateMixin {
+  /// 0 = collapsed, 1 = fully expanded (90% of screen).
+  late final AnimationController _extent;
+  final _bodyScroll = ScrollController();
+  var _reportedRaised = false;
+
+  bool get _expanded => _extent.value > 0.5;
+  bool get _fullyOpen => _extent.value > 0.98;
+
+  @override
+  void initState() {
+    super.initState();
+    _extent = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+      value: 0,
+    )..addListener(_onExtentTick);
+  }
 
   @override
   void dispose() {
-    _sheet.dispose();
+    _extent.removeListener(_onExtentTick);
+    _extent.dispose();
+    _bodyScroll.dispose();
     super.dispose();
   }
 
-  void _onSheetSize(double size, double collapsed) {
-    final next = size > collapsed + 0.08;
-    if (next == _expanded) return;
-    _expanded = next;
-    widget.onExpandedChanged(next);
+  void _onExtentTick() {
+    if (!mounted) return;
+    setState(() {});
+    final raised = _extent.value > 0.08;
+    if (raised == _reportedRaised) return;
+    _reportedRaised = raised;
+    widget.onRaisedChanged(raised);
   }
 
-  Future<void> _toggle(double collapsed, double expanded) async {
-    final target = _expanded ? collapsed : expanded;
-    await _sheet.animateTo(
-      target,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-    );
+  double _collapsedPx(BuildContext context) {
+    return _HighlightDrawer.collapsedHeight(MediaQuery.paddingOf(context).bottom);
+  }
+
+  double _expandedPx(BuildContext context) {
+    return MediaQuery.sizeOf(context).height * 0.90;
+  }
+
+  double _heightFor(BuildContext context, double t) {
+    final collapsed = _collapsedPx(context);
+    final expanded = _expandedPx(context);
+    return collapsed + (expanded - collapsed) * t.clamp(0.0, 1.0);
+  }
+
+  void _applyDragDy(double dy) {
+    final range = _expandedPx(context) - _collapsedPx(context);
+    if (range <= 0) return;
+    _extent.value = (_extent.value - dy / range).clamp(0.0, 1.0);
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    final dy = details.delta.dy;
+    if (dy > 0) {
+      // Finger down: always drag the drawer down (collapse), never scroll content.
+      if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
+        _bodyScroll.jumpTo(0);
+      }
+      _applyDragDy(dy);
+      return;
+    }
+    // Finger up: scroll content when fully open, otherwise expand the drawer.
+    if (_fullyOpen && _bodyScroll.hasClients) {
+      final max = _bodyScroll.position.maxScrollExtent;
+      if (_bodyScroll.offset < max) {
+        _bodyScroll.jumpTo((_bodyScroll.offset - dy).clamp(0.0, max));
+        return;
+      }
+    }
+    _applyDragDy(dy);
+  }
+
+  void _snap({double velocity = 0}) {
+    final open = velocity < -400 || (velocity <= 400 && _extent.value >= 0.35);
+    _extent.animateTo(open ? 1 : 0, curve: Curves.easeOutCubic);
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    _snap(velocity: details.primaryVelocity ?? 0);
+  }
+
+  void _toggle() {
+    if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
+      _bodyScroll.jumpTo(0);
+    }
+    _extent.animateTo(_expanded ? 0 : 1, curve: Curves.easeOutCubic);
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final media = MediaQuery.of(context);
-    final screenHeight = media.size.height;
-    final bottom = media.padding.bottom;
-    final collapsedPx = _HighlightDrawer.collapsedHeight(bottom);
-    final collapsed = (collapsedPx / screenHeight).clamp(0.12, 0.45);
-    const expanded = 0.95;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    final height = _heightFor(context, _extent.value);
     final desc = (widget.node.description ?? '').trim();
+    final expanded = _expanded;
 
-    return NotificationListener<DraggableScrollableNotification>(
-      onNotification: (notification) {
-        _onSheetSize(notification.extent, collapsed);
-        return false;
-      },
-      child: DraggableScrollableSheet(
-        controller: _sheet,
-        initialChildSize: collapsed,
-        minChildSize: collapsed,
-        maxChildSize: expanded,
-        snap: true,
-        snapSizes: [collapsed, expanded],
-        builder: (context, scrollController) {
-          return Material(
-            elevation: 10,
-            shadowColor: Colors.black.withValues(alpha: 0.28),
-            color: scheme.surface.withValues(alpha: 0.97),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _toggle(collapsed, expanded),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: scheme.onSurface.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _expanded ? 'Swipe down to collapse' : 'Swipe up for full details',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.45),
-                              ),
-                        ),
-                      ],
+    return Material(
+      elevation: 10,
+      shadowColor: Colors.black.withValues(alpha: 0.28),
+      color: scheme.surface.withValues(alpha: 0.97),
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragUpdate: _onDragUpdate,
+          onVerticalDragEnd: _onDragEnd,
+          child: Column(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragUpdate: _onDragUpdate,
+                onVerticalDragEnd: _onDragEnd,
+                onTap: _toggle,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: scheme.onSurface.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
                     ),
                   ),
                 ),
-                Expanded(
-                  child: ListView(
-                    controller: scrollController,
-                    padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + bottom),
-                    children: [
-                      Text(
-                        widget.node.title,
-                        style: TextStyle(
-                          fontFamily: 'tt_ramilas',
-                          fontWeight: FontWeight.w700,
-                          fontSize: _expanded ? 28 : 22,
-                          height: 1.15,
-                          color: scheme.onSurface,
-                        ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: _bodyScroll,
+                  // Drag is owned by the parent GestureDetector so swipe-down
+                  // always moves the drawer; we jump the offset manually on swipe-up.
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + bottom),
+                  children: [
+                    Text(
+                      widget.node.title,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramilas',
+                        fontWeight: FontWeight.w700,
+                        fontSize: expanded ? 28 : 22,
+                        height: 1.15,
+                        color: scheme.onSurface,
                       ),
-                      const SizedBox(height: 10),
-                      if (desc.isNotEmpty)
-                        Text(
-                          desc,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.78),
-                                height: 1.4,
-                              ),
-                        )
-                      else
-                        Text(
-                          'No description yet.',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.45),
-                                fontStyle: FontStyle.italic,
-                              ),
-                        ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (desc.isNotEmpty)
+                      Text(
+                        desc,
+                        maxLines: expanded ? null : 3,
+                        overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.78),
+                              height: 1.4,
+                            ),
+                      )
+                    else
+                      Text(
+                        'No description yet.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.45),
+                              fontStyle: FontStyle.italic,
+                            ),
+                      ),
+                    if (expanded) ...[
                       const SizedBox(height: 20),
                       Wrap(
                         spacing: 10,
@@ -827,12 +886,12 @@ class _HighlightDrawerState extends State<_HighlightDrawer> {
                         ],
                       ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
