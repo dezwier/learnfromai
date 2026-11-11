@@ -137,17 +137,38 @@ class _GraphScreenState extends State<GraphScreen> {
       resizeToAvoidBottomInset: false,
       floatingActionButton: (_searchOpen || _profileOpen)
           ? null
-          : FloatingActionButton.small(
-              heroTag: 'graph-search',
-              tooltip: 'Search',
-              backgroundColor: scheme.surfaceContainerHighest,
-              foregroundColor: scheme.onSurfaceVariant,
-              elevation: 1.5,
-              focusElevation: 2,
-              hoverElevation: 2,
-              highlightElevation: 2,
-              onPressed: _openSearch,
-              child: const Icon(Icons.search, size: 20),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (graph.canGoBack) ...[
+                  FloatingActionButton.small(
+                    heroTag: 'graph-back',
+                    tooltip: 'Previous topic',
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    foregroundColor: scheme.onSurfaceVariant,
+                    elevation: 1.5,
+                    focusElevation: 2,
+                    hoverElevation: 2,
+                    highlightElevation: 2,
+                    onPressed: () => graph.back(),
+                    child: const Icon(Icons.arrow_back, size: 20),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                FloatingActionButton.small(
+                  heroTag: 'graph-search',
+                  tooltip: 'Search',
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  foregroundColor: scheme.onSurfaceVariant,
+                  elevation: 1.5,
+                  focusElevation: 2,
+                  hoverElevation: 2,
+                  highlightElevation: 2,
+                  onPressed: _openSearch,
+                  child: const Icon(Icons.search, size: 20),
+                ),
+              ],
             ),
       body: Stack(
         children: [
@@ -200,30 +221,23 @@ class _GraphScreenState extends State<GraphScreen> {
               ),
             ],
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Flexible(child: ProfileHud(onTap: _openProfile)),
-                  if (graph.canGoBack) ...[
-                    const Spacer(),
-                    Material(
-                      color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
-                      shape: const CircleBorder(),
-                      elevation: 1.5,
-                      child: IconButton(
-                        tooltip: 'Previous topic',
-                        onPressed: () => graph.back(),
-                        icon: const Icon(Icons.arrow_back),
-                      ),
-                    ),
-                  ],
-                ],
+          if (!_profileOpen) const ProfileTopFade(),
+          if (!_profileOpen)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ProfileHud(onTap: _openProfile),
+                  ),
+                ),
               ),
             ),
-          ),
           if (graph.working)
             Positioned(
               left: 16,
@@ -317,6 +331,8 @@ class _GraphScreenState extends State<GraphScreen> {
               layout: layout,
               focusId: graph.focusId,
               pendingId: graph.refreshing ? graph.pendingNodeId : null,
+              transform: _transform,
+              viewport: viewport,
               onOpen: graph.openNode,
             ),
           ),
@@ -501,28 +517,78 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
-class _GraphView extends StatelessWidget {
+class _GraphView extends StatefulWidget {
   const _GraphView({
     required this.layout,
     required this.focusId,
     required this.pendingId,
+    required this.transform,
+    required this.viewport,
     required this.onOpen,
   });
 
   final GraphLayout layout;
   final String? focusId;
   final String? pendingId;
+  final TransformationController transform;
+  final Size viewport;
   final ValueChanged<String> onOpen;
 
   @override
+  State<_GraphView> createState() => _GraphViewState();
+}
+
+class _GraphViewState extends State<_GraphView> {
+  String? _centerId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.transform.addListener(_onTransform);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onTransform());
+  }
+
+  @override
+  void didUpdateWidget(covariant _GraphView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.transform != widget.transform) {
+      oldWidget.transform.removeListener(_onTransform);
+      widget.transform.addListener(_onTransform);
+    }
+    if (oldWidget.layout != widget.layout ||
+        oldWidget.viewport != widget.viewport ||
+        oldWidget.focusId != widget.focusId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onTransform());
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.transform.removeListener(_onTransform);
+    super.dispose();
+  }
+
+  void _onTransform() {
+    if (!mounted) return;
+    final next = _tileAtViewportCenter(
+      layout: widget.layout,
+      transform: widget.transform.value,
+      viewport: widget.viewport,
+      currentId: _centerId,
+    );
+    if (next == _centerId) return;
+    setState(() => _centerId = next);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const shadowPad = 10.0;
+    const shadowPad = 14.0;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          for (final node in layout.nodes)
+          for (final node in widget.layout.nodes)
             Positioned(
               left: node.x - shadowPad,
               top: node.y - shadowPad,
@@ -532,9 +598,10 @@ class _GraphView extends StatelessWidget {
                 padding: const EdgeInsets.all(shadowPad),
                 child: _NodeCard(
                   node: node,
-                  focused: node.id == focusId,
-                  pending: node.id == pendingId,
-                  onTap: () => onOpen(node.id),
+                  focused: node.id == widget.focusId,
+                  pending: node.id == widget.pendingId,
+                  centerHighlight: node.id == _centerId,
+                  onTap: () => widget.onOpen(node.id),
                 ),
               ),
             ),
@@ -544,116 +611,254 @@ class _GraphView extends StatelessWidget {
   }
 }
 
+/// Pick the tile covering the viewport center, with sticky hysteresis to avoid flicker.
+String? _tileAtViewportCenter({
+  required GraphLayout layout,
+  required Matrix4 transform,
+  required Size viewport,
+  required String? currentId,
+}) {
+  if (layout.nodes.isEmpty || viewport.isEmpty) return null;
+  Matrix4 inverse;
+  try {
+    inverse = Matrix4.inverted(transform);
+  } catch (_) {
+    return currentId;
+  }
+  final center = MatrixUtils.transformPoint(
+    inverse,
+    Offset(viewport.width / 2, viewport.height / 2),
+  );
+
+  for (final node in layout.nodes) {
+    if (node.contains(center)) return node.id;
+  }
+
+  PlacedNode? best;
+  var bestDist = double.infinity;
+  for (final node in layout.nodes) {
+    final dist = (node.center - center).distance;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = node;
+    }
+  }
+  if (best == null) return currentId;
+
+  if (currentId != null) {
+    for (final node in layout.nodes) {
+      if (node.id != currentId) continue;
+      final stick = (node.isFlower ? node.radius * 1.1 : node.radius * 0.55);
+      final currentDist = (node.center - center).distance;
+      if (bestDist > currentDist - stick) return currentId;
+      break;
+    }
+  }
+  return best.id;
+}
+
+Color _intensifyFill(Color base, double amount, {required bool dark}) {
+  if (amount <= 0) return base;
+  final hsl = HSLColor.fromColor(base);
+  final boosted = dark
+      ? hsl
+          .withLightness((hsl.lightness + 0.14 * amount).clamp(0.0, 1.0))
+          .withSaturation((hsl.saturation + 0.08 * amount).clamp(0.0, 1.0))
+      : hsl
+          .withLightness((hsl.lightness - 0.10 * amount).clamp(0.0, 1.0))
+          .withSaturation((hsl.saturation + 0.18 * amount).clamp(0.0, 1.0));
+  return Color.lerp(base, boosted.toColor(), amount)!;
+}
+
 class _NodeCard extends StatelessWidget {
   const _NodeCard({
     required this.node,
     required this.focused,
     required this.pending,
+    required this.centerHighlight,
     required this.onTap,
   });
 
   final PlacedNode node;
   final bool focused;
   final bool pending;
+  final bool centerHighlight;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
-    final fill = pending
+    final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
         : roleFill(node.role, scheme);
     final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
-    if (node.isFlower) {
-      return GestureDetector(
-        onTap: onTap,
-        child: CustomPaint(
-          painter: _HexFlowerPainter(color: fill, dark: dark),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: node.radius * 0.55,
-              vertical: node.radius * 0.7,
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final titleBudget =
-                    showDescription ? constraints.maxHeight * 0.26 : constraints.maxHeight;
-                final descBudget = constraints.maxHeight * 0.64;
-                return Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: titleBudget,
-                      child: _FittingLabel(
-                        text: node.title,
-                        maxLines: 3,
-                        minFontSize: 12,
-                        maxFontSize: (node.radius * 0.5).clamp(18.0, 30.0),
-                        hyphenateWords: true,
-                        align: Alignment.bottomCenter,
-                        style: TextStyle(
-                          fontFamily: 'tt_ramilas',
-                          height: 1.1,
-                          fontWeight: FontWeight.w700,
-                          color: scheme.onSurface,
-                        ),
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, spotlight, _) {
+        // Focus flower: shadow only — color/scale look wrong on the big tile.
+        final fill = node.isFlower ? base : _intensifyFill(base, spotlight, dark: dark);
+        final scale = node.isFlower ? 1.0 : 1.0 + 0.045 * spotlight;
+        final child = node.isFlower
+            ? _flowerCard(
+                scheme: scheme,
+                fill: fill,
+                dark: dark,
+                spotlight: spotlight,
+                showDescription: showDescription,
+              )
+            : _tileCard(
+                scheme: scheme,
+                fill: fill,
+                dark: dark,
+                spotlight: spotlight,
+              );
+        return GestureDetector(
+          onTap: onTap,
+          child: Transform.scale(
+            scale: scale,
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _flowerCard({
+    required ColorScheme scheme,
+    required Color fill,
+    required bool dark,
+    required double spotlight,
+    required bool showDescription,
+  }) {
+    return CustomPaint(
+      painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: node.radius * 0.58,
+          vertical: node.radius * 0.95,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final scaler = MediaQuery.textScalerOf(context);
+            final maxW = constraints.maxWidth;
+            final maxH = constraints.maxHeight;
+            if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
+
+            const titleMaxLines = 3;
+            final titleStyleBase = TextStyle(
+              fontFamily: 'tt_ramilas',
+              height: 1.1,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
+            );
+            final gap = node.radius * 0.06;
+            final descPad = node.radius * 0.18;
+
+            // Description keeps one fixed style; only line count adapts.
+            final descFontSize = (node.radius * 0.28).clamp(13.0, 17.0);
+            final descStyle = TextStyle(
+              fontFamily: 'tt_ramilas',
+              height: 1.28,
+              fontWeight: FontWeight.w400,
+              fontSize: descFontSize,
+              color: scheme.onSurface.withValues(alpha: 0.72),
+            );
+            final descLineHeight = scaler.scale(descFontSize) * 1.28;
+
+            // Keep air inside the hex so title+desc stay centered, not edge-hugging.
+            final contentBudget = maxH * 0.88;
+            final reserveDesc = showDescription ? gap + descLineHeight * 2 : 0.0;
+            final titleMaxH = (contentBudget - reserveDesc).clamp(14.0, contentBudget);
+            final titleLaid = layoutTitle(
+              text: node.title,
+              style: titleStyleBase,
+              maxWidth: maxW,
+              maxHeight: titleMaxH,
+              maxLines: titleMaxLines,
+              minFontSize: 12,
+              maxFontSize: (node.radius * 0.5).clamp(18.0, 30.0),
+              textScaler: scaler,
+              hyphenateAtMinSize: true,
+            );
+            final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
+            final titlePainter = TextPainter(
+              text: TextSpan(text: titleLaid.text, style: titleStyle),
+              textDirection: TextDirection.ltr,
+              textAlign: TextAlign.center,
+              textScaler: scaler,
+              maxLines: titleMaxLines,
+            )..layout(maxWidth: maxW);
+
+            final descMaxLines = showDescription
+                ? ((contentBudget - titlePainter.height - gap) / descLineHeight)
+                    .floor()
+                    .clamp(1, 6)
+                : 0;
+
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    titleLaid.text,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    maxLines: titleMaxLines,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle,
+                  ),
+                  if (showDescription && descMaxLines > 0) ...[
+                    SizedBox(height: gap),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: descPad),
+                      child: Text(
+                        node.description!.trim(),
+                        textAlign: TextAlign.center,
+                        softWrap: true,
+                        maxLines: descMaxLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: descStyle,
                       ),
                     ),
-                    if (showDescription) ...[
-                      SizedBox(height: node.radius * 0.03),
-                      SizedBox(
-                        height: descBudget,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: node.radius * 0.18),
-                          child: _FittingLabel(
-                            text: node.description!.trim(),
-                            maxLines: 6,
-                            minFontSize: 12,
-                            maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
-                            align: Alignment.topCenter,
-                            style: TextStyle(
-                              fontFamily: 'tt_ramilas',
-                              height: 1.28,
-                              fontWeight: FontWeight.w400,
-                              color: scheme.onSurface.withValues(alpha: 0.72),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
                   ],
-                );
-              },
-            ),
-          ),
-        ),
-      );
-    }
-
-    return GestureDetector(
-      onTap: onTap,
-      child: CustomPaint(
-        painter: _HexTilePainter(color: fill, dark: dark),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: node.radius * 0.34,
-            vertical: node.radius * 0.24,
-          ),
-          child: Center(
-            child: _FittingLabel(
-              text: node.title,
-              maxLines: 4,
-              minFontSize: 10,
-              maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
-              hyphenateWords: true,
-              style: TextStyle(
-                fontFamily: 'tt_ramilas',
-                height: 1.15,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurface.withValues(alpha: 0.9),
+                ],
               ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _tileCard({
+    required ColorScheme scheme,
+    required Color fill,
+    required bool dark,
+    required double spotlight,
+  }) {
+    return CustomPaint(
+      painter: _HexTilePainter(color: fill, dark: dark, spotlight: spotlight),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: node.radius * 0.34,
+          vertical: node.radius * 0.24,
+        ),
+        child: Center(
+          child: _FittingLabel(
+            text: node.title,
+            maxLines: 4,
+            minFontSize: 10,
+            maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
+            hyphenateWords: true,
+            style: TextStyle(
+              fontFamily: 'tt_ramilas',
+              height: 1.15,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface.withValues(alpha: 0.9),
             ),
           ),
         ),
@@ -723,12 +928,28 @@ class _FittingLabel extends StatelessWidget {
   }
 }
 
-void _paintHexDepth(Canvas canvas, Path path, Color color, {required bool dark}) {
-  if (dark) {
-    // Very soft white lift — just enough to read on dark backgrounds.
-    canvas.drawShadow(path, Colors.white.withValues(alpha: 0.18), 4, false);
-  } else {
-    canvas.drawShadow(path, const Color(0xFF000000), 5, true);
+void _paintHexDepth(
+  Canvas canvas,
+  Path path,
+  Color color, {
+  required bool dark,
+  double spotlight = 0,
+}) {
+  final lift = spotlight.clamp(0.0, 1.0);
+  // Soft halo in every direction (drawShadow only falls downward).
+  final halo = Paint()
+    ..color = dark
+        ? Colors.white.withValues(alpha: 0.12 + 0.14 * lift)
+        : Colors.black.withValues(alpha: 0.12 + 0.12 * lift)
+    ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4.5 + 4.0 * lift);
+  canvas.drawPath(path, halo);
+  if (lift > 0.05) {
+    final outer = Paint()
+      ..color = dark
+          ? Colors.white.withValues(alpha: 0.06 * lift)
+          : Colors.black.withValues(alpha: 0.06 * lift)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 8 + 4 * lift);
+    canvas.drawPath(path, outer);
   }
   canvas.drawPath(path, Paint()..color = color);
   final bounds = path.getBounds();
@@ -756,10 +977,11 @@ void _paintHexDepth(Canvas canvas, Path path, Color color, {required bool dark})
 }
 
 class _HexFlowerPainter extends CustomPainter {
-  _HexFlowerPainter({required this.color, required this.dark});
+  _HexFlowerPainter({required this.color, required this.dark, this.spotlight = 0});
 
   final Color color;
   final bool dark;
+  final double spotlight;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -768,19 +990,22 @@ class _HexFlowerPainter extends CustomPainter {
       latticeSize: lattice,
       center: Offset(size.width / 2, size.height / 2),
     );
-    _paintHexDepth(canvas, path, color, dark: dark);
+    _paintHexDepth(canvas, path, color, dark: dark, spotlight: spotlight);
   }
 
   @override
   bool shouldRepaint(covariant _HexFlowerPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.dark != dark;
+      oldDelegate.color != color ||
+      oldDelegate.dark != dark ||
+      oldDelegate.spotlight != spotlight;
 }
 
 class _HexTilePainter extends CustomPainter {
-  _HexTilePainter({required this.color, required this.dark});
+  _HexTilePainter({required this.color, required this.dark, this.spotlight = 0});
 
   final Color color;
   final bool dark;
+  final double spotlight;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -789,10 +1014,12 @@ class _HexTilePainter extends CustomPainter {
       lattice * (1 - hexGapInset),
       center: Offset(size.width / 2, size.height / 2),
     );
-    _paintHexDepth(canvas, path, color, dark: dark);
+    _paintHexDepth(canvas, path, color, dark: dark, spotlight: spotlight);
   }
 
   @override
   bool shouldRepaint(covariant _HexTilePainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.dark != dark;
+      oldDelegate.color != color ||
+      oldDelegate.dark != dark ||
+      oldDelegate.spotlight != spotlight;
 }

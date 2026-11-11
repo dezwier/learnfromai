@@ -696,14 +696,13 @@ String? hitTestNode(GraphLayout layout, Offset point) {
 Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
-    // Soft pastel blue / green / red / yellow-orange;
-    // lighter grey focus; mid grey for neighbors-of-neighbors.
-    NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFFB9D4F0),
-    NodeRole.focus => dark ? const Color(0xFF4A4E55) : const Color(0xFFE8EAEE),
-    NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFEBB8C0),
-    NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFFB6E2D2),
-    NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFF0C99A),
-    NodeRole.extended => dark ? const Color(0xFF3C4046) : const Color(0xFFD8DCE2),
+    // Light: blue / red / warm green / yellow-orange / light grey / darker grey.
+    NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFF8AAFCF),
+    NodeRole.focus => dark ? const Color(0xFF4A4E55) : const Color(0xFFE4E6EA),
+    NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFD98E96),
+    NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFF97BF88),
+    NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFDCAD6A),
+    NodeRole.extended => dark ? const Color(0xFF3C4046) : const Color(0xFFADB3BE),
   };
 }
 

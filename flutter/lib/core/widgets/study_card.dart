@@ -8,7 +8,7 @@ class StudyCard extends StatelessWidget {
     required this.title,
     this.eyebrow,
     this.subtitle,
-    this.tint = const Color(0xFF1F4B6E),
+    this.tint = const Color(0xFF7A8088),
     this.footer,
     this.onTap,
     this.dense = false,

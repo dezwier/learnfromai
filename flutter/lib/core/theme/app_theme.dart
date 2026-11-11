@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 ThemeData buildTheme({Brightness brightness = Brightness.light}) {
-  const accent = Color(0xFF1F4B6E);
+  // Fancy neutral silver — not blue.
+  const accent = Color(0xFF7A8088);
   final dark = brightness == Brightness.dark;
   final paper = dark ? const Color(0xFF16181C) : const Color(0xFFF4F1EA);
   final ink = dark ? const Color(0xFFF4F1EA) : const Color(0xFF1C2430);
@@ -11,6 +12,7 @@ ThemeData buildTheme({Brightness brightness = Brightness.light}) {
     colorScheme: ColorScheme.fromSeed(seedColor: accent, brightness: brightness).copyWith(
       surface: paper,
       primary: accent,
+      onPrimary: dark ? const Color(0xFF121417) : const Color(0xFFF7F6F4),
       onSurface: ink,
     ),
     scaffoldBackgroundColor: paper,
@@ -26,7 +28,10 @@ ThemeData buildTheme({Brightness brightness = Brightness.light}) {
     ),
     cardTheme: CardThemeData(color: paper, elevation: 0, margin: EdgeInsets.zero),
     appBarTheme: AppBarTheme(backgroundColor: paper, foregroundColor: ink, elevation: 0, scrolledUnderElevation: 0),
-    navigationBarTheme: NavigationBarThemeData(backgroundColor: paper, indicatorColor: const Color(0xFFD5E3EE)),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: paper,
+      indicatorColor: dark ? const Color(0xFF3A3E44) : const Color(0xFFD8DCE2),
+    ),
     inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
   );
 }
