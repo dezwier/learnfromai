@@ -16,8 +16,8 @@ from app.features.knowledge_graph.identity import canonical_key_for
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NEIGHBORHOOD = "neighborhood_v2"
-PROMPT_SAMENESS = "sameness_v2"
+PROMPT_NEIGHBORHOOD = "neighborhood_v3"
+PROMPT_SAMENESS = "sameness_v3"
 INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
 
@@ -139,8 +139,10 @@ class GeminiNeighborhoodLLM:
             "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
             "one for Ornithischia/Ornithischians, one for a work and the same title with a medium qualifier "
             "(The Last Dance, not also The Last Dance Documentary). "
-            "Never emit singular and plural, vernacular and scientific taxon labels, or title-vs-title+Documentary/"
-            "Film/Series/Album/Podcast/Show as separate topics in this response. "
+            "Never emit singular and plural, vernacular and scientific taxon labels, British/American spelling "
+            "pairs (Paleontology/Palaeontology, Archaeology/Archeology), or title-vs-title+Documentary/"
+            "Film/Series/Album/Podcast/Show as separate topics in this response. Prefer the simpler/"
+            "American spelling when both exist. "
             "Descriptions are one or two sentences that stand alone and must not refer to the seed topic by name "
             "or as 'this topic'. "
             "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
@@ -158,6 +160,7 @@ class GeminiNeighborhoodLLM:
             "Match aggressively when wording differs but the real-world subject is the same. "
             "Always treat these as the same concept: singular↔plural (Dinosaur/Dinosaurs), "
             "common↔scientific taxon labels (Dinosaurs/Dinosauria, Ornithischia/Ornithischians), "
+            "British↔American spelling (Paleontology/Palaeontology, Archaeology/Archeology), "
             "and a work title ↔ the same title plus a medium qualifier "
             "(The Last Dance / The Last Dance Documentary; also Film, Series, Album, Podcast, Show). "
             "Pick the best existing id when several are close. "

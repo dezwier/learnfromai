@@ -305,11 +305,16 @@ def consolidate_near_duplicates(session: Session) -> int:
         )
 
         def _keeper_score(row: KnowledgeNode) -> tuple:
+            from app.features.knowledge_graph.identity import fold_spelling
+
             media = any(row.name_key.endswith(f"-{suffix}") for suffix in media_suffixes)
             plural = row.name_key.endswith("s") and not row.name_key.endswith(("ss", "us", "is", "ies"))
+            # Prefer American/simple spelling (paleontology over palaeontology).
+            simple_spelling = 1 if fold_spelling(row.name_key) == row.name_key else 0
             # Canonical title first (no medium suffix), then connectivity / description quality.
             return (
                 0 if media else 1,
+                simple_spelling,
                 1 if plural else 0,
                 edge_counts.get(row.id, 0),
                 1 if row.description else 0,

@@ -60,9 +60,17 @@ def _strip_media_suffix(key: str) -> str:
     return key
 
 
+def fold_spelling(key: str) -> str:
+    """Collapse common British/American spelling digraphs into one key form.
+
+    palaeontology → paleontology, archaeology → archeology, oestrogen → estrogen.
+    """
+    return key.replace("ae", "e").replace("oe", "e")
+
+
 def topic_stems(key: str) -> set[str]:
     """Cheap morphological variants for singular/plural and common taxon endings."""
-    stems = {key, _strip_media_suffix(key)}
+    stems = {key, _strip_media_suffix(key), fold_spelling(key), fold_spelling(_strip_media_suffix(key))}
     for item in list(stems):
         if item.endswith("ies") and len(item) > 4:
             stems.add(item[:-3] + "y")
@@ -85,14 +93,15 @@ def topic_stems(key: str) -> set[str]:
             stems.add(item[:-1])
         else:
             stems.add(item + "s")
+        stems.add(fold_spelling(item))
     return {stem for stem in stems if stem}
 
 
 def same_topic(left: str, right: str) -> bool:
-    """True when two titles name the same node (plural, taxon form, or media suffix)."""
+    """True when two titles name the same node (plural, taxon, media, or spelling variant)."""
     a = canonical_key_for(left)
     b = canonical_key_for(right)
-    if a == b:
+    if a == b or fold_spelling(a) == fold_spelling(b):
         return True
     return bool(topic_stems(a) & topic_stems(b))
 
