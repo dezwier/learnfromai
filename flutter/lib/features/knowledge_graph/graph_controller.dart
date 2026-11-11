@@ -104,6 +104,8 @@ class GraphController extends ChangeNotifier {
   /// Last focus payload (compat + description kinds). World tiles live in [worldById].
   Map<String, dynamic>? categoryGraph;
   final Map<String, WorldTopic> worldById = {};
+  /// Edges among known world nodes (merged from map + focus payloads).
+  final List<Map<String, String>> worldEdges = [];
   bool loading = false;
   bool refreshing = false;
   bool working = false;
@@ -160,6 +162,7 @@ class GraphController extends ChangeNotifier {
       );
       if (token != _mapToken) return;
       _mergeNodes(raw['nodes']);
+      _mergeEdges(raw['edges']);
       lastMapWindow = window;
     } on ApiException catch (exc) {
       if (token != _mapToken) return;
@@ -359,6 +362,7 @@ class GraphController extends ChangeNotifier {
   void _applyGraphPayload(Map<String, dynamic> payload) {
     categoryGraph = payload;
     _mergeNodes(payload['nodes']);
+    _mergeEdges(payload['edges']);
   }
 
   void _mergeNodes(Object? raw) {
@@ -380,6 +384,24 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  void _mergeEdges(Object? raw) {
+    if (raw is! List) return;
+    final seen = {
+      for (final e in worldEdges) '${e['source']}|${e['type']}|${e['target']}',
+    };
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final source = item['source']?.toString();
+      final target = item['target']?.toString();
+      final type = item['type']?.toString() ?? 'related';
+      if (source == null || target == null) continue;
+      final key = '$source|$type|$target';
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      worldEdges.add({'source': source, 'target': target, 'type': type});
+    }
+  }
+
   /// Test helper: seed world + focus payload without network.
   @visibleForTesting
   void seedForTest({
@@ -390,9 +412,11 @@ class GraphController extends ChangeNotifier {
     worldById
       ..clear()
       ..addEntries(world.map((t) => MapEntry(t.id, t)));
+    worldEdges.clear();
     if (world.isEmpty) {
       _mergeNodes(graph['nodes']);
     }
+    _mergeEdges(graph['edges']);
   }
 
   Future<void> _waitForJob(String jobId) async {

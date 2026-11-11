@@ -50,6 +50,26 @@ def test_roots_center_children_outward(session):
     assert ensure_world_placed(session) == 0
 
 
+def test_siblings_place_near_focus_not_at_origin(session):
+    focus = KnowledgeNode(id=uuid4(), name="Dinosaurs", name_key="dinosaurs", q=3, r=0, map_depth=1)
+    sibling = KnowledgeNode(id=uuid4(), name="Mammals", name_key="mammals")
+    session.add_all([focus, sibling])
+    session.flush()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=focus.id, relation="sibling", to_id=sibling.id),
+            KnowledgeEdge(from_id=sibling.id, relation="sibling", to_id=focus.id),
+        ]
+    )
+    session.commit()
+
+    ensure_world_placed(session)
+    session.commit()
+    session.refresh(sibling)
+    assert sibling.q is not None and sibling.r is not None
+    assert cube_distance(sibling.q - focus.q, sibling.r - focus.r) <= 2
+
+
 def test_map_window_filters_and_includes_edges(client, auth, session):
     a = KnowledgeNode(id=uuid4(), name="A", name_key="a", q=0, r=0, map_depth=0)
     b = KnowledgeNode(id=uuid4(), name="B", name_key="b", q=1, r=0, map_depth=1)

@@ -362,12 +362,13 @@ Size hexFlowerBounds(double unitRadius) {
 /// Tight honeycomb on a flat-top axial lattice.
 /// Focus is one solid 7-hex flower; direct neighbors on ring 2+;
 /// neighbors-of-neighbors sit next to the direct neighbor they hang off.
-/// Place equal hexes from persisted axial (q, r). Selection is visual only.
+/// Place equal hexes from persisted axial (q, r).
+/// Origin (0,0) is fixed at the canvas center so loading more tiles does not jump.
 GraphLayout layoutWorld(
   List<GraphNode> nodes, {
   required Size viewport,
   double hexRadius = 52,
-  double pad = 120,
+  int minRing = 12,
 }) {
   final width = math.max(viewport.width, 1.0);
   final height = math.max(viewport.height, 1.0);
@@ -379,33 +380,67 @@ GraphLayout layoutWorld(
     return GraphLayout(nodes: const [], width: width, height: height);
   }
 
-  final centers = <(GraphNode, Offset)>[
-    for (final node in withCoords) (node, axialToPixel(node.q!, node.r!, hexRadius)),
-  ];
-  var minX = centers.first.$2.dx;
-  var maxX = centers.first.$2.dx;
-  var minY = centers.first.$2.dy;
-  var maxY = centers.first.$2.dy;
-  final half = flatHexBounds(hexRadius);
-  for (final c in centers) {
-    minX = math.min(minX, c.$2.dx - half.width / 2);
-    maxX = math.max(maxX, c.$2.dx + half.width / 2);
-    minY = math.min(minY, c.$2.dy - half.height / 2);
-    maxY = math.max(maxY, c.$2.dy + half.height / 2);
+  var maxRing = minRing;
+  for (final node in withCoords) {
+    final ring = (node.q!.abs() + node.r!.abs() + (node.q! + node.r!).abs()) ~/ 2;
+    if (ring + 4 > maxRing) maxRing = ring + 4;
   }
-
-  final contentW = math.max(maxX - minX, 1.0);
-  final contentH = math.max(maxY - minY, 1.0);
-  final canvasW = math.max(width, contentW + 2 * pad);
-  final canvasH = math.max(height, contentH + 2 * pad);
-  final ox = (canvasW - contentW) / 2 - minX;
-  final oy = (canvasH - contentH) / 2 - minY;
+  final half = flatHexBounds(hexRadius);
+  final span = axialToPixel(maxRing, 0, hexRadius).dx.abs() + half.width;
+  final canvasW = math.max(width, span * 2);
+  final canvasH = math.max(height, span * 2);
+  final ox = canvasW / 2;
+  final oy = canvasH / 2;
 
   final placed = <PlacedNode>[
-    for (final c in centers)
-      _hex(c.$1, cx: c.$2.dx + ox, cy: c.$2.dy + oy, radius: hexRadius),
+    for (final node in withCoords)
+      _hex(
+        node,
+        cx: axialToPixel(node.q!, node.r!, hexRadius).dx + ox,
+        cy: axialToPixel(node.q!, node.r!, hexRadius).dy + oy,
+        radius: hexRadius,
+      ),
   ];
   return GraphLayout(nodes: placed, width: canvasW, height: canvasH);
+}
+
+/// Relation of [nodeId] to [focusId] from directed neighborhood edges.
+String kindRelativeToFocus({
+  required String nodeId,
+  required String? focusId,
+  required List<GraphEdge> edges,
+}) {
+  if (focusId == null || focusId.isEmpty) return 'extended';
+  if (nodeId == focusId) return 'focus';
+  for (final edge in edges) {
+    if (edge.source != focusId || edge.target != nodeId) continue;
+    switch (edge.type) {
+      case 'parent':
+        return 'parent';
+      case 'child':
+        return 'child';
+      case 'sibling':
+        return 'sibling';
+      case 'acquaintance':
+      case 'related':
+        return 'related';
+    }
+  }
+  for (final edge in edges) {
+    if (edge.source != nodeId || edge.target != focusId) continue;
+    switch (edge.type) {
+      case 'parent':
+        return 'child';
+      case 'child':
+        return 'parent';
+      case 'sibling':
+        return 'sibling';
+      case 'acquaintance':
+      case 'related':
+        return 'related';
+    }
+  }
+  return 'extended';
 }
 
 Color depthFill(int depth, ColorScheme scheme) {
