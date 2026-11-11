@@ -19,11 +19,15 @@ class GraphScreen extends StatefulWidget {
   State<GraphScreen> createState() => _GraphScreenState();
 }
 
-class _GraphScreenState extends State<GraphScreen> {
+class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStateMixin {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
+  late final AnimationController _panController;
+  Animation<Matrix4>? _panAnimation;
   String? _transformFocusId;
+  /// While set, ignore center-highlight updates that aren't this id (avoids drawer flicker mid-pan).
+  String? _panTargetId;
   Timer? _suggestDebounce;
   Offset? _searchOutsideDown;
   var _searchOutsideMoved = false;
@@ -31,10 +35,15 @@ class _GraphScreenState extends State<GraphScreen> {
   var _searchOpen = false;
   var _profileOpen = false;
   PlacedNode? _highlighted;
+  Size _viewport = Size.zero;
 
   @override
   void initState() {
     super.initState();
+    _panController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    )..addListener(_onPanTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
       _resumed = true;
@@ -45,10 +54,19 @@ class _GraphScreenState extends State<GraphScreen> {
   @override
   void dispose() {
     _suggestDebounce?.cancel();
+    _panController
+      ..removeListener(_onPanTick)
+      ..dispose();
     _search.dispose();
     _searchFocus.dispose();
     _transform.dispose();
     super.dispose();
+  }
+
+  void _onPanTick() {
+    final anim = _panAnimation;
+    if (anim == null) return;
+    _transform.value = anim.value;
   }
 
   void _resetTransformIfFocusChanged({
@@ -58,12 +76,68 @@ class _GraphScreenState extends State<GraphScreen> {
   }) {
     if (_transformFocusId == focusId) return;
     _transformFocusId = focusId;
+    _panController.stop();
+    _panAnimation = null;
+    _panTargetId = null;
     // Focus is laid out at the canvas center; translate so that lands in view.
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
       (viewport.height - canvas.height) / 2,
       0,
     );
+  }
+
+  Matrix4 _matrixCentering(Offset scenePoint, Size viewport, {required double scale}) {
+    return Matrix4.identity()
+      ..translateByDouble(viewport.width / 2, viewport.height / 2, 0, 1)
+      ..scaleByDouble(scale, scale, scale, 1)
+      ..translateByDouble(-scenePoint.dx, -scenePoint.dy, 0, 1);
+  }
+
+  Future<void> _animatePanTo(Offset scenePoint, Size viewport) async {
+    if (viewport.isEmpty) return;
+    final scale = _transform.value.getMaxScaleOnAxis();
+    final begin = _transform.value.clone();
+    final end = _matrixCentering(scenePoint, viewport, scale: scale);
+    _panController.stop();
+    _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
+      CurvedAnimation(parent: _panController, curve: Curves.easeInOutCubic),
+    );
+    await _panController.forward(from: 0);
+    if (!mounted) return;
+    _panTargetId = null;
+    _panAnimation = null;
+  }
+
+  void _selectNode(PlacedNode node) {
+    _panTargetId = node.id;
+    if (_highlighted?.id != node.id ||
+        _highlighted?.title != node.title ||
+        _highlighted?.description != node.description) {
+      setState(() => _highlighted = node);
+    }
+    unawaited(_animatePanTo(node.center, _viewport));
+  }
+
+  void _onHighlightFromCenter(PlacedNode? node) {
+    if (!mounted) return;
+    final pin = _panTargetId;
+    if (pin != null && node?.id != pin) return;
+    if (pin != null && node?.id == pin) {
+      _panTargetId = null;
+    }
+    if (node?.id == _highlighted?.id &&
+        node?.title == _highlighted?.title &&
+        node?.description == _highlighted?.description) {
+      return;
+    }
+    setState(() => _highlighted = node);
+  }
+
+  Future<void> _goToHighlighted(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null || node.id == graph.focusId) return;
+    await graph.openNode(node.id);
   }
 
   void _openSearch() {
@@ -137,6 +211,8 @@ class _GraphScreenState extends State<GraphScreen> {
     final drawerVisible = !_profileOpen && !_searchOpen && _highlighted != null;
     final drawerClearance = drawerVisible ? _HighlightDrawer.totalHeight(safeBottom) + 12 : 16.0;
     final floatBottom = drawerClearance + keyboard;
+    final canGoToHighlight =
+        !_searchOpen && !_profileOpen && _highlighted != null && _highlighted!.id != graph.focusId;
     return Scaffold(
       // Keep the graph still when the keyboard opens; search floats above it.
       resizeToAvoidBottomInset: false,
@@ -229,6 +305,21 @@ class _GraphScreenState extends State<GraphScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  if (canGoToHighlight) ...[
+                    FloatingActionButton.small(
+                      heroTag: 'graph-go',
+                      tooltip: 'Go to topic',
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
+                      elevation: 1.5,
+                      focusElevation: 2,
+                      hoverElevation: 2,
+                      highlightElevation: 2,
+                      onPressed: graph.working ? null : () => _goToHighlighted(graph),
+                      child: const Icon(Icons.arrow_forward, size: 20),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                   if (graph.canGoBack) ...[
                     FloatingActionButton.small(
                       heroTag: 'graph-back',
@@ -327,6 +418,7 @@ class _GraphScreenState extends State<GraphScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+        _viewport = viewport;
         final layout = _layoutFor(graph, viewport);
         _resetTransformIfFocusChanged(
           focusId: graph.focusId,
@@ -345,25 +437,24 @@ class _GraphScreenState extends State<GraphScreen> {
             horizontal: panSlack,
             vertical: panSlack,
           ),
+          onInteractionStart: (_) {
+            if (!_panController.isAnimating) return;
+            _panController.stop();
+            _panAnimation = null;
+            _panTargetId = null;
+          },
           child: SizedBox(
             width: layout.width,
             height: layout.height,
             child: _GraphView(
               layout: layout,
               focusId: graph.focusId,
+              highlightId: _highlighted?.id,
               pendingId: graph.refreshing ? graph.pendingNodeId : null,
               transform: _transform,
               viewport: viewport,
-              onOpen: graph.openNode,
-              onHighlight: (node) {
-                if (!mounted) return;
-                if (node?.id == _highlighted?.id &&
-                    node?.title == _highlighted?.title &&
-                    node?.description == _highlighted?.description) {
-                  return;
-                }
-                setState(() => _highlighted = node);
-              },
+              onSelect: _selectNode,
+              onHighlight: _onHighlightFromCenter,
             ),
           ),
         );
@@ -454,7 +545,7 @@ class _HighlightDrawer extends StatelessWidget {
   const _HighlightDrawer({required this.node});
 
   /// Fixed content height (above the home-indicator inset).
-  static const double contentHeight = 158;
+  static const double contentHeight = 148;
 
   static double totalHeight(double safeBottom) => contentHeight + safeBottom;
 
@@ -629,19 +720,21 @@ class _GraphView extends StatefulWidget {
   const _GraphView({
     required this.layout,
     required this.focusId,
+    required this.highlightId,
     required this.pendingId,
     required this.transform,
     required this.viewport,
-    required this.onOpen,
+    required this.onSelect,
     required this.onHighlight,
   });
 
   final GraphLayout layout;
   final String? focusId;
+  final String? highlightId;
   final String? pendingId;
   final TransformationController transform;
   final Size viewport;
-  final ValueChanged<String> onOpen;
+  final ValueChanged<PlacedNode> onSelect;
   final ValueChanged<PlacedNode?> onHighlight;
 
   @override
@@ -723,8 +816,8 @@ class _GraphViewState extends State<_GraphView> {
                   node: node,
                   focused: node.id == widget.focusId,
                   pending: node.id == widget.pendingId,
-                  centerHighlight: node.id == _centerId,
-                  onTap: () => widget.onOpen(node.id),
+                  centerHighlight: node.id == (widget.highlightId ?? _centerId),
+                  onTap: () => widget.onSelect(node),
                 ),
               ),
             ),
