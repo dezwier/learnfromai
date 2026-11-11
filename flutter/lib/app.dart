@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:provider/provider.dart';
 
@@ -14,12 +15,16 @@ class AdaptiveMasteryApp extends StatefulWidget {
     super.key,
     required this.auth,
     required this.graph,
+    this.initialThemeMode,
     this.splashHold = const Duration(milliseconds: 650),
+    this.showBrandedSplash = true,
   });
 
   final AuthController auth;
   final GraphController graph;
+  final ThemeMode? initialThemeMode;
   final Duration splashHold;
+  final bool showBrandedSplash;
 
   @override
   State<AdaptiveMasteryApp> createState() => _AdaptiveMasteryAppState();
@@ -27,15 +32,21 @@ class AdaptiveMasteryApp extends StatefulWidget {
 
 class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
   late final router = buildRouter(widget.auth);
-  final themes = ThemeController();
+  late final themes = ThemeController(initialMode: widget.initialThemeMode);
   var _ready = false;
+  var _nativeRemoved = false;
 
   @override
   void initState() {
     super.initState();
     widget.auth.addListener(_syncTheme);
-    _syncTheme();
-    _boot();
+    if (!widget.showBrandedSplash) {
+      _ready = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _removeNativeSplash());
+      _syncTheme();
+    } else {
+      _boot();
+    }
   }
 
   @override
@@ -49,14 +60,37 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
     themes.bindUser(widget.auth.user?.id);
   }
 
+  void _removeNativeSplash() {
+    if (_nativeRemoved) return;
+    _nativeRemoved = true;
+    FlutterNativeSplash.remove();
+    // iOS often keeps the launch screen until the next frame / touch without this.
+    SchedulerBinding.instance.scheduleFrame();
+  }
+
   Future<void> _boot() async {
+    // Theme first so the Flutter splash matches dark/light preference.
+    if (widget.initialThemeMode == null) {
+      await themes.restoreLastMode();
+    }
+    if (!mounted) return;
+    // Drop the (often system-light) native splash as soon as our themed splash paints.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _removeNativeSplash();
+    });
+
     await Future.wait([
       widget.auth.loadMe(),
       Future<void>.delayed(widget.splashHold),
     ]);
     if (!mounted) return;
-    FlutterNativeSplash.remove();
+    await themes.bindUser(widget.auth.user?.id);
+    if (!mounted) return;
+
     setState(() => _ready = true);
+    // Force a paint so the overlay actually tears down without waiting for a gesture.
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   @override
@@ -70,16 +104,8 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
       child: ListenableBuilder(
         listenable: themes,
         builder: (context, _) {
-          if (!_ready) {
-            return MaterialApp(
-              title: 'learnfromai',
-              debugShowCheckedModeBanner: false,
-              theme: buildTheme(),
-              darkTheme: buildTheme(brightness: Brightness.dark),
-              themeMode: themes.mode,
-              home: const BrandedSplash(),
-            );
-          }
+          final platform = WidgetsBinding.instance.platformDispatcher.platformBrightness;
+          final splashDark = ThemeController.isDark(themes.mode, platform);
           return MaterialApp.router(
             title: 'learnfromai',
             debugShowCheckedModeBanner: false,
@@ -87,6 +113,24 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
             darkTheme: buildTheme(brightness: Brightness.dark),
             themeMode: themes.mode,
             routerConfig: router,
+            builder: (context, child) {
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Match scaffold paper under the router so no black window shows through.
+                  ColoredBox(
+                    color: splashDark ? BrandedSplash.paperDark : BrandedSplash.paperLight,
+                  ),
+                  if (child != null) child,
+                  if (!_ready)
+                    Positioned.fill(
+                      child: AbsorbPointer(
+                        child: BrandedSplash(dark: splashDark),
+                      ),
+                    ),
+                ],
+              );
+            },
           );
         },
       ),

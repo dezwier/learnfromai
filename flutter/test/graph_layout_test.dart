@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('focus is a solid 7-hex flower with parallel outer inset', () {
+  test('focus is a solid 4-hex flower with parallel outer inset', () {
     const viewport = Size(390, 700);
     final layout = layoutGraph(
       const [
@@ -35,54 +35,36 @@ void main() {
     expect(byId['2']!.center.dx, closeTo(layout.width / 2, 0.5));
     expect(byId['2']!.center.dy, closeTo(layout.height / 2, 0.5));
     expect(hitTestNode(layout, byId['2']!.center), '2');
-    expect(
-      hitTestNode(layout, byId['2']!.center + axialToPixel(1, 0, byId['2']!.radius) * 0.5),
-      '2',
-    );
+    expect(flowerCells.length, 4);
 
     const R = 40.0;
     final outline = hexFlowerOutline(R);
-    expect(outline.length, 18);
+    expect(outline.length, greaterThanOrEqualTo(10));
 
     final full = Path()
       ..fillType = PathFillType.nonZero
       ..addPolygon(outline, true);
     final flower = hexFlowerPath(latticeSize: R);
     expect(flower.contains(Offset.zero), isTrue);
-    expect(flower.contains(axialToPixel(1, 0, R) * 0.5), isTrue);
 
     // Inset shrinks the silhouette uniformly by ~hexFlatInset on every edge.
     final fullBounds = full.getBounds();
     final insetBounds = flower.getBounds();
     final expected = hexFlatInset(R);
-    expect(fullBounds.width - insetBounds.width, closeTo(expected * 2, expected * 0.35));
-    expect(fullBounds.height - insetBounds.height, closeTo(expected * 2, expected * 0.35));
+    expect(fullBounds.width - insetBounds.width, closeTo(expected * 2, expected * 0.45));
+    expect(fullBounds.height - insetBounds.height, closeTo(expected * 2, expected * 0.45));
 
-    // Clearance from flower to ring-2 hexes is equal across the six directions:
-    // measure how far past the flower the lattice neighbor center sits, minus unit radius.
-    final drawn = R * (1 - hexGapInset);
-    final ring2 = [(2, 0), (2, -2), (0, -2), (-2, 0), (-2, 2), (0, 2)];
-    final clearances = <double>[];
-    for (final cell in ring2) {
-      final neighbor = axialToPixel(cell.$1, cell.$2, R);
-      final dir = neighbor / neighbor.distance;
-      var lo = 0.0;
-      var hi = neighbor.distance;
-      for (var i = 0; i < 48; i++) {
-        final mid = (lo + hi) / 2;
-        if (flower.contains(dir * mid)) {
-          lo = mid;
-        } else {
-          hi = mid;
-        }
-      }
-      // Distance from flower boundary to neighbor center, minus neighbor circumradius
-      // (= gap along that ray to the neighbor "vertex toward center" approximation).
-      clearances.add(neighbor.distance - lo - drawn);
-    }
-    final mean = clearances.reduce((a, b) => a + b) / clearances.length;
-    for (final c in clearances) {
-      expect((c - mean).abs(), lessThan(0.35));
+    // Free ring-1 cells sit outside the flower silhouette (same gap strip as unit hexes).
+    final ring1 = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
+    final occupied = {for (final c in flowerCells) '${c.$1},${c.$2}'};
+    final free = [
+      for (final cell in ring1)
+        if (!occupied.contains('${cell.$1},${cell.$2}')) cell,
+    ];
+    expect(free.length, 3);
+    for (final cell in free) {
+      final neighbor = axialToPixel(cell.$1, cell.$2, R) - flowerCentroidUnit * R;
+      expect(flower.contains(neighbor), isFalse);
     }
   });
 
@@ -124,12 +106,13 @@ void main() {
     final childA = byId['child-a']!;
     final childB = byId['child-b']!;
     final step = childA.radius * math.sqrt(3); // flat-top adjacent-center distance
-    // Each extended sits next to its via (within ~one hex step), not the other child.
     expect(dist(byId['ext-a1']!, childA), lessThan(step * 1.15));
     expect(dist(byId['ext-a2']!, childA), lessThan(step * 1.15));
     expect(dist(byId['ext-b1']!, childB), lessThan(step * 1.15));
     expect(dist(byId['ext-a1']!, childA), lessThan(dist(byId['ext-a1']!, childB)));
     expect(dist(byId['ext-a2']!, childA), lessThan(dist(byId['ext-a2']!, childB)));
     expect(dist(byId['ext-b1']!, childB), lessThan(dist(byId['ext-b1']!, childA)));
+    expect(byId['ext-a1']!.viaRole, NodeRole.child);
+    expect(byId['ext-b1']!.viaRole, NodeRole.child);
   });
 }

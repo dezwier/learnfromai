@@ -64,6 +64,7 @@ class PlacedNode {
     required this.radius,
     this.isFlower = false,
     this.description,
+    this.viaRole,
   });
 
   final String id;
@@ -78,9 +79,11 @@ class PlacedNode {
   final double height;
   /// Lattice unit circumradius (centers sit on the full grid; drawing insets).
   final double radius;
-  /// Focus is the solid union of 7 unit hexes (no internal gaps).
+  /// Focus is the solid union of unit hexes (no internal gaps).
   final bool isFlower;
   final String? description;
+  /// For [NodeRole.extended]: role of the direct neighbor this tile hangs off.
+  final NodeRole? viaRole;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -113,16 +116,26 @@ const graphSideGap = 8.0;
 /// Equal inset so unit hexes (and the flower outline) leave a thin strip.
 const hexGapInset = 0.08;
 
-/// Flat-top axial cells that make the 7-hex focus flower.
+/// Flat-top axial cells for the 4-hex focus flower:
+/// one on top, two side-by-side below, one under those (diamond).
 const flowerCells = <(int, int)>[
-  (0, 0),
-  (1, 0),
-  (1, -1),
-  (0, -1),
-  (-1, 0),
-  (-1, 1),
-  (0, 1),
+  (0, -1), // top
+  (-1, 0), // middle-left
+  (1, -1), // middle-right
+  (0, 0), // bottom
 ];
+
+/// Pixel centroid of [flowerCells] for lattice size 1 (outline is shifted by this).
+final Offset flowerCentroidUnit = () {
+  var sx = 0.0;
+  var sy = 0.0;
+  for (final cell in flowerCells) {
+    final p = axialToPixel(cell.$1, cell.$2, 1.0);
+    sx += p.dx;
+    sy += p.dy;
+  }
+  return Offset(sx / flowerCells.length, sy / flowerCells.length);
+}();
 
 /// Soft corner radius as a fraction of hex circumradius.
 const hexCornerFraction = 0.16;
@@ -186,10 +199,11 @@ Offset _snap(Offset p) => Offset(
 
 String _pointKey(Offset p) => '${p.dx},${p.dy}';
 
-/// Outer boundary of the 7-hex flower (18 verts), origin-centered.
+/// Outer boundary of the 4-hex flower, origin-centered on the cell centroid.
 List<Offset> hexFlowerOutline(double R) {
   final counts = <String, int>{};
   final ends = <String, (Offset, Offset)>{};
+  final origin = flowerCentroidUnit * R;
 
   String edgeKey(Offset a, Offset b) {
     final ka = _pointKey(a);
@@ -198,7 +212,7 @@ List<Offset> hexFlowerOutline(double R) {
   }
 
   for (final cell in flowerCells) {
-    final c = axialToPixel(cell.$1, cell.$2, R);
+    final c = axialToPixel(cell.$1, cell.$2, R) - origin;
     final verts = [
       for (var i = 0; i < 6; i++)
         _snap(Offset(
@@ -306,7 +320,7 @@ Path _pathFromVerts(List<Offset> verts, Offset center, {required double cornerRa
   return roundedPolygonPath(shifted, cornerRadius: cornerRadius)..fillType = PathFillType.nonZero;
 }
 
-/// Solid 7-cell focus: full lattice outline, parallel-inset by the unit-hex flat
+/// Solid 4-cell focus: full lattice outline, parallel-inset by the unit-hex flat
 /// inset so every side has the same strip as neighboring hexes.
 Path hexFlowerPath({
   required double latticeSize,
@@ -321,9 +335,10 @@ Path hexFlowerPath({
   );
   final ok = path.contains(center) && _polygonWidth(inset) < _polygonWidth(outline);
   if (!ok) {
+    final origin = flowerCentroidUnit * latticeSize;
     Path? solid;
     for (final cell in flowerCells) {
-      final c = center + axialToPixel(cell.$1, cell.$2, latticeSize);
+      final c = center + axialToPixel(cell.$1, cell.$2, latticeSize) - origin;
       final hex = flatHexPath(latticeSize * 1.02, center: c);
       solid = solid == null ? hex : Path.combine(PathOperation.union, solid, hex);
     }
@@ -345,13 +360,24 @@ bool pointInHexFlower(Offset local, {required double latticeSize}) {
 
 Size flatHexBounds(double radius) => Size(radius * 2, radius * math.sqrt(3));
 
-/// Bounding box of the 7-hex flower for unit circumradius [unitRadius].
+/// Bounding box of the 4-hex flower for unit circumradius [unitRadius].
 Size hexFlowerBounds(double unitRadius) {
-  return Size(unitRadius * 5, unitRadius * 3 * math.sqrt(3));
+  final outline = hexFlowerOutline(unitRadius);
+  var minX = double.infinity;
+  var maxX = -double.infinity;
+  var minY = double.infinity;
+  var maxY = -double.infinity;
+  for (final v in outline) {
+    minX = math.min(minX, v.dx);
+    maxX = math.max(maxX, v.dx);
+    minY = math.min(minY, v.dy);
+    maxY = math.max(maxY, v.dy);
+  }
+  return Size(math.max(maxX - minX, 1.0), math.max(maxY - minY, 1.0));
 }
 
 /// Tight honeycomb on a flat-top axial lattice.
-/// Focus is one solid 7-hex flower; direct neighbors on ring 2+;
+/// Focus is one solid 4-hex flower; direct neighbors on the first free ring;
 /// neighbors-of-neighbors sit next to the direct neighbor they hang off.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
@@ -421,13 +447,17 @@ GraphLayout layoutGraph(
   final slotBudget = _viewportSlotBudget(width, height, minDirect: directs.length);
   final fillers = extended.take(math.max(0, slotBudget - directs.length)).toList();
 
-  // Include at least one outer ring beyond the directs so extended can sit
-  // beside their anchors instead of only competing for leftover ring-2 cells.
+  // Neighbors sit on the first free cells around the 4-flower (same thin gap
+  // as hex-to-hex), not on ring 2 as if a 7-flower still occupied the center.
+  final occupied = {for (final c in flowerCells) '${c.$1},${c.$2}'};
   final cellPool = math.max(
     directs.length + fillers.length + 18,
     fillers.isEmpty ? directs.length : 30,
   );
-  final cells = _ringCells(fromRing: 2, count: math.max(cellPool, 1));
+  final cells = [
+    for (final cell in _ringCells(fromRing: 1, count: math.max(cellPool + occupied.length, 1)))
+      if (!occupied.contains('${cell.q},${cell.r}')) cell,
+  ];
   final used = <int>{};
   final assignments = <(GraphNode, _HexCell)>[];
   final cellByNodeId = <String, _HexCell>{};
@@ -476,11 +506,14 @@ GraphLayout layoutGraph(
     cellByNodeId[node.id] = cells[best];
   }
 
-  // Unit lattice size = 1. Focus flower bounds use the 7-cell footprint.
+  // Unit lattice size = 1. Focus flower is drawn centered on its cell centroid;
+  // shift neighbors by the same amount so gaps match the diamond (not cell 0,0).
   final focusBounds = hexFlowerBounds(1.0);
+  final origin = flowerCentroidUnit;
   final centers = <(GraphNode, Offset, bool)>[
     (focusNode, Offset.zero, true),
-    for (final a in assignments) (a.$1, axialToPixel(a.$2.q, a.$2.r, 1.0), false),
+    for (final a in assignments)
+      (a.$1, axialToPixel(a.$2.q, a.$2.r, 1.0) - origin, false),
   ];
 
   var minX = -focusBounds.width / 2;
@@ -496,16 +529,18 @@ GraphLayout layoutGraph(
     maxY = math.max(maxY, c.$2.dy + b.height / 2);
   }
 
-  // Zoom to the focus flower + ring 2, then push in further so outer hexes
+  // Zoom like the 7-flower: fit focus + ring 2, then push in so outer hexes
   // may sit outside the viewport. Focus stays at the canvas center.
   const pad = 8.0;
   const defaultZoomIn = 1.8;
-  final ring2Half = math.max(focusBounds.width, focusBounds.height) / 2 + 2 * math.sqrt(3);
-  final fitRing2 = math.min(
-    (width - 2 * pad) / (2 * ring2Half),
-    (height - 2 * pad) / (2 * ring2Half),
+  // Use the legacy 7-hex footprint for zoom so the 4-flower reads the same size.
+  final footprintHalf = math.max(5.0, 3 * math.sqrt(3)) / 2;
+  final nearHalf = footprintHalf + 2 * math.sqrt(3);
+  final fitNear = math.min(
+    (width - 2 * pad) / (2 * nearHalf),
+    (height - 2 * pad) / (2 * nearHalf),
   );
-  final scale = fitRing2 * defaultZoomIn;
+  final scale = fitNear * defaultZoomIn;
 
   final contentW = math.max((maxX - minX) * scale, 1.0);
   final contentH = math.max((maxY - minY) * scale, 1.0);
@@ -521,7 +556,9 @@ GraphLayout layoutGraph(
     if (c.$3) {
       placed.add(_flower(c.$1, cx: cx, cy: cy, latticeSize: scale));
     } else {
-      placed.add(_hex(c.$1, cx: cx, cy: cy, radius: scale));
+      final viaId = viaDirect[c.$1.id];
+      final viaRole = viaId == null ? null : byId[viaId]?.role;
+      placed.add(_hex(c.$1, cx: cx, cy: cy, radius: scale, viaRole: viaRole));
     }
   }
 
@@ -585,8 +622,8 @@ double _cellScore(_HexCell cell, NodeRole role) {
   final south = _angleDist(angle, math.pi / 2);
   final east = _angleDist(angle, 0);
   final west = _angleDist(angle, math.pi);
-  // Keep directs on ring 2 whenever a free cell remains there.
-  final ringPenalty = (cell.ring - 2) * 1.8;
+  // Prefer the innermost free ring around the 4-flower.
+  final ringPenalty = (cell.ring - 1) * 1.8;
 
   return switch (role) {
     NodeRole.parent => 4.0 - north - ringPenalty,
@@ -613,7 +650,7 @@ double _nearAnchorScore(
 ) {
   final dist = _cubeDist(cell, anchor);
   final outwardBoost = cell.ring >= anchor.ring ? 1.2 : -1.0;
-  var score = 12.0 - dist * 3.0 + outwardBoost - (cell.ring - 2) * 0.15;
+  var score = 12.0 - dist * 3.0 + outwardBoost - (cell.ring - 1) * 0.15;
   for (final other in directCells.values) {
     if (other.q == anchor.q && other.r == anchor.r) continue;
     final dOther = _cubeDist(cell, other);
@@ -649,7 +686,13 @@ double _angleDist(double a, double b) {
   return d;
 }
 
-PlacedNode _hex(GraphNode node, {required double cx, required double cy, required double radius}) {
+PlacedNode _hex(
+  GraphNode node, {
+  required double cx,
+  required double cy,
+  required double radius,
+  NodeRole? viaRole,
+}) {
   final bounds = flatHexBounds(radius);
   return PlacedNode(
     id: node.id,
@@ -659,6 +702,7 @@ PlacedNode _hex(GraphNode node, {required double cx, required double cy, require
     kind: node.kind,
     role: node.role,
     description: node.description,
+    viaRole: viaRole,
     radius: radius,
     x: cx - bounds.width / 2,
     y: cy - bounds.height / 2,
@@ -696,7 +740,7 @@ String? hitTestNode(GraphLayout layout, Offset point) {
 Color roleFill(NodeRole role, ColorScheme scheme) {
   final dark = scheme.brightness == Brightness.dark;
   return switch (role) {
-    // Light: blue / red / warm green / yellow-orange / light grey / darker grey.
+    // Light: blue / red / warm green / yellow-orange / greys.
     NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFF8AAFCF),
     NodeRole.focus => dark ? const Color(0xFF4A4E55) : const Color(0xFFE4E6EA),
     NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFD98E96),
@@ -704,6 +748,20 @@ Color roleFill(NodeRole role, ColorScheme scheme) {
     NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFDCAD6A),
     NodeRole.extended => dark ? const Color(0xFF3C4046) : const Color(0xFFADB3BE),
   };
+}
+
+/// Tile fill: extended neighbors inherit their via-neighbor color, faded toward paper.
+Color nodeFill(PlacedNode node, ColorScheme scheme) {
+  if (node.role != NodeRole.extended) return roleFill(node.role, scheme);
+  final via = node.viaRole;
+  if (via == null || via == NodeRole.extended || via == NodeRole.focus) {
+    return roleFill(NodeRole.extended, scheme);
+  }
+  final base = roleFill(via, scheme);
+  final paper = scheme.brightness == Brightness.dark
+      ? const Color(0xFF16181C)
+      : const Color(0xFFF4F1EA);
+  return Color.lerp(base, paper, 0.42)!;
 }
 
 Color roleColor(NodeRole role, ColorScheme scheme) => roleFill(role, scheme);
@@ -730,7 +788,7 @@ class HexagonBorder extends ShapeBorder {
   ShapeBorder scale(double t) => this;
 }
 
-/// Outline of the solid 7-hex focus flower.
+/// Outline of the solid 4-hex focus flower.
 class HexFlowerBorder extends ShapeBorder {
   const HexFlowerBorder();
 
@@ -742,7 +800,8 @@ class HexFlowerBorder extends ShapeBorder {
 
   @override
   Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    final lattice = math.min(rect.width / 5, rect.height / (3 * math.sqrt(3)));
+    final unit = hexFlowerBounds(1.0);
+    final lattice = math.min(rect.width / unit.width, rect.height / unit.height);
     return hexFlowerPath(latticeSize: lattice, center: rect.center);
   }
 

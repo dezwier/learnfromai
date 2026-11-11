@@ -51,23 +51,26 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/branding/app_icon.png
+  image_path_ios_dark_transparent: assets/branding/app_icon_fg_dark.png
+  image_path_ios_tinted_grayscale: assets/branding/app_icon_fg.png
+  desaturate_tinted_to_grayscale_ios: true
   adaptive_icon_background: "#F4F1EA"
-  adaptive_icon_foreground: assets/branding/app_icon.png
+  adaptive_icon_foreground: assets/branding/app_icon_fg.png
   remove_alpha_ios: true
 
 flutter_native_splash:
   color: "#F4F1EA"
-  image: assets/branding/app_icon.png
+  image: assets/branding/splash_mark.png
   color_dark: "#16181C"
-  image_dark: assets/branding/app_icon_dark.png
+  image_dark: assets/branding/splash_mark_dark.png
   android_12:
     color: "#F4F1EA"
-    image: assets/branding/app_icon.png
+    image: assets/branding/splash_mark.png
     color_dark: "#16181C"
-    image_dark: assets/branding/app_icon_dark.png
+    image_dark: assets/branding/splash_mark_dark.png
   ios: true
   android: true
-  fullscreen: true
+  fullscreen: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -83,6 +86,11 @@ flutter:
   assets:
     - assets/branding/app_icon.png
     - assets/branding/app_icon_dark.png
+    - assets/branding/app_icon_fg.png
+    - assets/branding/app_icon_fg_dark.png
+    - assets/branding/splash_mark.png
+    - assets/branding/splash_mark_dark.png
+
 
   fonts:
     - family: tt_ramilas

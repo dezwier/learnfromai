@@ -30,6 +30,7 @@ class _GraphScreenState extends State<GraphScreen> {
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
+  PlacedNode? _highlighted;
 
   @override
   void initState() {
@@ -238,10 +239,17 @@ class _GraphScreenState extends State<GraphScreen> {
                 ),
               ),
             ),
+          if (!_profileOpen && !_searchOpen && _highlighted != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _HighlightDrawer(node: _highlighted!),
+            ),
           if (graph.working)
             Positioned(
               left: 16,
-              bottom: 16 + keyboard,
+              bottom: (_highlighted != null && !_profileOpen && !_searchOpen ? 132 : 16) + keyboard,
               child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
             ),
           if (_searchOpen)
@@ -334,6 +342,15 @@ class _GraphScreenState extends State<GraphScreen> {
               transform: _transform,
               viewport: viewport,
               onOpen: graph.openNode,
+              onHighlight: (node) {
+                if (!mounted) return;
+                if (node?.id == _highlighted?.id &&
+                    node?.title == _highlighted?.title &&
+                    node?.description == _highlighted?.description) {
+                  return;
+                }
+                setState(() => _highlighted = node);
+              },
             ),
           ),
         );
@@ -408,6 +425,74 @@ class _ProgressChip extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HighlightDrawer extends StatelessWidget {
+  const _HighlightDrawer({required this.node});
+
+  final PlacedNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final desc = (node.description ?? '').trim();
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Material(
+      elevation: 10,
+      shadowColor: Colors.black.withValues(alpha: 0.28),
+      color: scheme.surface.withValues(alpha: 0.97),
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottom),
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: scheme.onSurface.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                node.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'tt_ramilas',
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                  height: 1.15,
+                  color: scheme.onSurface,
+                ),
+              ),
+              if (desc.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  desc,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.72),
+                        height: 1.35,
+                      ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -525,6 +610,7 @@ class _GraphView extends StatefulWidget {
     required this.transform,
     required this.viewport,
     required this.onOpen,
+    required this.onHighlight,
   });
 
   final GraphLayout layout;
@@ -533,6 +619,7 @@ class _GraphView extends StatefulWidget {
   final TransformationController transform;
   final Size viewport;
   final ValueChanged<String> onOpen;
+  final ValueChanged<PlacedNode?> onHighlight;
 
   @override
   State<_GraphView> createState() => _GraphViewState();
@@ -578,6 +665,16 @@ class _GraphViewState extends State<_GraphView> {
     );
     if (next == _centerId) return;
     setState(() => _centerId = next);
+    PlacedNode? node;
+    if (next != null) {
+      for (final n in widget.layout.nodes) {
+        if (n.id == next) {
+          node = n;
+          break;
+        }
+      }
+    }
+    widget.onHighlight(node);
   }
 
   @override
@@ -691,8 +788,7 @@ class _NodeCard extends StatelessWidget {
     final dark = scheme.brightness == Brightness.dark;
     final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
-        : roleFill(node.role, scheme);
-    final showDescription = node.isFlower && (node.description ?? '').trim().isNotEmpty;
+        : nodeFill(node, scheme);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
@@ -707,7 +803,6 @@ class _NodeCard extends StatelessWidget {
                 fill: fill,
                 dark: dark,
                 spotlight: spotlight,
-                showDescription: showDescription,
               )
             : _tileCard(
                 scheme: scheme,
@@ -731,14 +826,13 @@ class _NodeCard extends StatelessWidget {
     required Color fill,
     required bool dark,
     required double spotlight,
-    required bool showDescription,
   }) {
     return CustomPaint(
       painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: node.radius * 0.58,
-          vertical: node.radius * 0.95,
+          horizontal: node.radius * 0.42,
+          vertical: node.radius * 0.55,
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -754,78 +848,27 @@ class _NodeCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: scheme.onSurface,
             );
-            final gap = node.radius * 0.06;
-            final descPad = node.radius * 0.18;
-
-            // Description keeps one fixed style; only line count adapts.
-            final descFontSize = (node.radius * 0.28).clamp(13.0, 17.0);
-            final descStyle = TextStyle(
-              fontFamily: 'tt_ramilas',
-              height: 1.28,
-              fontWeight: FontWeight.w400,
-              fontSize: descFontSize,
-              color: scheme.onSurface.withValues(alpha: 0.72),
-            );
-            final descLineHeight = scaler.scale(descFontSize) * 1.28;
-
-            // Keep air inside the hex so title+desc stay centered, not edge-hugging.
-            final contentBudget = maxH * 0.88;
-            final reserveDesc = showDescription ? gap + descLineHeight * 2 : 0.0;
-            final titleMaxH = (contentBudget - reserveDesc).clamp(14.0, contentBudget);
             final titleLaid = layoutTitle(
               text: node.title,
               style: titleStyleBase,
               maxWidth: maxW,
-              maxHeight: titleMaxH,
+              maxHeight: maxH * 0.9,
               maxLines: titleMaxLines,
               minFontSize: 12,
-              maxFontSize: (node.radius * 0.5).clamp(18.0, 30.0),
+              maxFontSize: (node.radius * 0.48).clamp(16.0, 28.0),
               textScaler: scaler,
               hyphenateAtMinSize: true,
             );
             final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
-            final titlePainter = TextPainter(
-              text: TextSpan(text: titleLaid.text, style: titleStyle),
-              textDirection: TextDirection.ltr,
-              textAlign: TextAlign.center,
-              textScaler: scaler,
-              maxLines: titleMaxLines,
-            )..layout(maxWidth: maxW);
-
-            final descMaxLines = showDescription
-                ? ((contentBudget - titlePainter.height - gap) / descLineHeight)
-                    .floor()
-                    .clamp(1, 6)
-                : 0;
 
             return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    titleLaid.text,
-                    textAlign: TextAlign.center,
-                    softWrap: true,
-                    maxLines: titleMaxLines,
-                    overflow: TextOverflow.ellipsis,
-                    style: titleStyle,
-                  ),
-                  if (showDescription && descMaxLines > 0) ...[
-                    SizedBox(height: gap),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: descPad),
-                      child: Text(
-                        node.description!.trim(),
-                        textAlign: TextAlign.center,
-                        softWrap: true,
-                        maxLines: descMaxLines,
-                        overflow: TextOverflow.ellipsis,
-                        style: descStyle,
-                      ),
-                    ),
-                  ],
-                ],
+              child: Text(
+                titleLaid.text,
+                textAlign: TextAlign.center,
+                softWrap: true,
+                maxLines: titleMaxLines,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
               ),
             );
           },
@@ -985,7 +1028,8 @@ class _HexFlowerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final lattice = math.min(size.width / 5, size.height / (3 * math.sqrt(3)));
+    final unit = hexFlowerBounds(1.0);
+    final lattice = math.min(size.width / unit.width, size.height / unit.height);
     final path = hexFlowerPath(
       latticeSize: lattice,
       center: Offset(size.width / 2, size.height / 2),

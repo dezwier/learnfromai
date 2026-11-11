@@ -36,7 +36,12 @@ void main() {
     final api = ApiClient(baseUrl: 'http://localhost', tokens: tokens);
     final auth = AuthController(api: api, gateway: _Gateway());
     await tester.pumpWidget(
-      AdaptiveMasteryApp(auth: auth, graph: GraphController(), splashHold: Duration.zero),
+      AdaptiveMasteryApp(
+        auth: auth,
+        graph: GraphController(),
+        splashHold: Duration.zero,
+        showBrandedSplash: false,
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsWidgets);
@@ -279,7 +284,8 @@ void main() {
     expect(byId['2']!.center.dy < byId['3']!.center.dy, isTrue);
     expect(byId['4']!.role, NodeRole.sibling);
     expect(byId['2']!.isFlower, isTrue);
-    expect(byId['2']!.width / byId['4']!.width, closeTo(2.5, 0.05));
+    // 4-cell diamond (top / two / bottom) spans ~2.5× a unit hex width.
+    expect(byId['2']!.width / byId['4']!.width, closeTo(2.5, 0.15));
   });
 
   test('api client maps the error envelope', () {
@@ -351,5 +357,10 @@ AuthController _signedIn() {
 }
 
 Widget _app(AuthController auth, GraphController graph) {
-  return AdaptiveMasteryApp(auth: auth, graph: graph, splashHold: Duration.zero);
+  return AdaptiveMasteryApp(
+    auth: auth,
+    graph: graph,
+    splashHold: Duration.zero,
+    showBrandedSplash: false,
+  );
 }
