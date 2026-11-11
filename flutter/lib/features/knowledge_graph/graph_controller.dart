@@ -64,12 +64,20 @@ class NeighborhoodPrefs {
 }
 
 class GraphController extends ChangeNotifier {
-  GraphController({this.api, this.loader, this.poster, this.patcher, this.jobLoader});
+  GraphController({
+    this.api,
+    this.loader,
+    this.poster,
+    this.patcher,
+    this.deleter,
+    this.jobLoader,
+  });
 
   final ApiClient? api;
   final Future<Map<String, dynamic>> Function(String path)? loader;
   final Future<Map<String, dynamic>> Function(String path, {Object? body})? poster;
   final Future<Map<String, dynamic>> Function(String path, {Object? body})? patcher;
+  final Future<Map<String, dynamic>> Function(String path)? deleter;
   final Future<Map<String, dynamic>> Function(String jobId)? jobLoader;
 
   Map<String, dynamic>? categoryGraph;
@@ -196,6 +204,81 @@ class GraphController extends ChangeNotifier {
     if (error != null) focusHistory.add(current);
   }
 
+  Future<bool> updateNode({
+    required String id,
+    String? title,
+    String? description,
+  }) async {
+    if (refreshing || loading || working) return false;
+    error = null;
+    notifyListeners();
+    try {
+      final body = <String, dynamic>{};
+      if (title != null) body['name'] = title;
+      if (description != null) body['description'] = description;
+      final updated = await _patch('/knowledge/nodes/$id', body: body);
+      _patchLocalNode(
+        id,
+        title: updated['title']?.toString() ?? title,
+        description: updated.containsKey('description')
+            ? updated['description']?.toString()
+            : description,
+      );
+      notifyListeners();
+      return true;
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteNode(String id) async {
+    if (refreshing || loading || working) return false;
+    final wasFocus = focusId == id;
+    error = null;
+    notifyListeners();
+    try {
+      await _delete('/knowledge/nodes/$id');
+      focusHistory.removeWhere((entry) => entry == id);
+      if (wasFocus) {
+        if (focusHistory.isNotEmpty) {
+          await openExisting(focusHistory.last);
+        } else {
+          categoryGraph = null;
+          notifyListeners();
+        }
+      } else {
+        final focus = focusId;
+        if (focus != null) {
+          await openExisting(focus);
+        }
+      }
+      return true;
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void _patchLocalNode(String id, {String? title, String? description}) {
+    final payload = categoryGraph;
+    if (payload == null) return;
+    final nodes = payload['nodes'];
+    if (nodes is! List) return;
+    for (var i = 0; i < nodes.length; i++) {
+      final raw = nodes[i];
+      if (raw is! Map || raw['id']?.toString() != id) continue;
+      final next = Map<String, dynamic>.from(raw);
+      if (title != null) next['title'] = title;
+      if (description != null) next['description'] = description;
+      nodes[i] = next;
+      break;
+    }
+    categoryGraph = Map<String, dynamic>.from(payload)..['nodes'] = nodes;
+  }
+
   Future<void> loadPreferences() async {
     try {
       final raw = await _get('/me/preferences');
@@ -319,6 +402,16 @@ class GraphController extends ChangeNotifier {
     final client = api;
     if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
     return Map<String, dynamic>.from(await client.patch(path, body: body) as Map);
+  }
+
+  Future<Map<String, dynamic>> _delete(String path) async {
+    final del = deleter;
+    if (del != null) return Map<String, dynamic>.from(await del(path));
+    final client = api;
+    if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
+    final raw = await client.delete(path);
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>> _job(String jobId) async {

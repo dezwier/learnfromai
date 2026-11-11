@@ -175,6 +175,40 @@ def test_name_collision_can_insert_second_node(session, user):
     assert session.exec(select(func.count()).select_from(KnowledgeNode)).one() == 2
 
 
+def test_patch_and_delete_knowledge_node(client, auth, session):
+    node = KnowledgeNode(name="Theropods", name_key="theropods", description="Bipedal dinosaurs.")
+    other = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles.")
+    session.add_all([node, other])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=node.id, relation="parent", to_id=other.id),
+            KnowledgeEdge(from_id=other.id, relation="child", to_id=node.id),
+        ]
+    )
+    session.commit()
+
+    patched = client.patch(
+        f"/api/v1/knowledge/nodes/{node.id}",
+        headers=auth,
+        json={"name": "Theropoda", "description": "A dinosaur clade."},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["title"] == "Theropoda"
+    assert patched.json()["description"] == "A dinosaur clade."
+    session.refresh(node)
+    assert node.name_key == "theropoda"
+
+    node_id = node.id
+    deleted = client.delete(f"/api/v1/knowledge/nodes/{node_id}", headers=auth)
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert deleted.json()["edges_removed"] == 2
+    session.expire_all()
+    assert session.get(KnowledgeNode, node_id) is None
+    assert session.exec(select(KnowledgeEdge)).all() == []
+
+
 def test_build_subgraph_hides_near_duplicate_neighbors(session, user):
     from app.features.knowledge_graph.neighborhood import build_subgraph
 
@@ -227,6 +261,102 @@ def test_consolidate_merges_existing_near_duplicates(session, user):
         (keep.id, "parent", other.id),
         (other.id, "child", keep.id),
     }
+
+
+def test_expand_batches_sameness_into_one_match_topics_call(session, user):
+    from app.features.knowledge_graph.neighborhood import expand_neighborhood
+    from app.features.platform.models import GenerationJob
+
+    class BatchSpy:
+        name = "fake"
+        calls = 0
+        last_candidates = None
+
+        def generate_neighborhood(self, topic, counts):
+            return {
+                "focus": {"name": "Dinosaurs", "description": "Extinct reptiles."},
+                "parents": [
+                    {"name": "Paleontology", "description": "Study of fossils."},
+                    {"name": "Reptiles", "description": "Scaled vertebrates."},
+                ],
+                "siblings": [],
+                "children": [
+                    {"name": "Theropods", "description": "Bipedal dinosaurs."},
+                ],
+                "acquaintances": [
+                    # Close to "The Last Dance" via media stem, but not same_topic — needs LLM.
+                    {"name": "Last Dance Series", "description": "Documentary series about the Bulls."},
+                ],
+            }, {"model": "fake", "input_tokens": 1, "output_tokens": 1, "estimated_cost_usd": 0}
+
+        def match_topics(self, candidates):
+            BatchSpy.calls += 1
+            BatchSpy.last_candidates = candidates
+            matches = {}
+            for item in candidates:
+                chosen = None
+                for row in item.get("existing") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    existing_name = str(row.get("name") or "")
+                    if "last dance" in existing_name.lower():
+                        chosen = str(row.get("id"))
+                        break
+                matches[str(item.get("key"))] = chosen
+            return {"matches": matches}, {
+                "model": "fake",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "estimated_cost_usd": 0,
+            }
+
+    last_dance = KnowledgeNode(
+        name="The Last Dance",
+        name_key="the-last-dance",
+        description="A documentary miniseries about Michael Jordan.",
+    )
+    session.add(last_dance)
+    session.commit()
+
+    focus = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description=None)
+    session.add(focus)
+    session.commit()
+    job = GenerationJob(
+        type="expand_neighborhood",
+        state="running",
+        user_id=user.id,
+        payload={
+            "focus_id": str(focus.id),
+            "topic": "dinosaurs",
+            "parents": 2,
+            "siblings": 0,
+            "children": 1,
+            "acquaintances": 1,
+        },
+    )
+    session.add(job)
+    session.commit()
+
+    import app.features.knowledge_graph.neighborhood as neighborhood_mod
+
+    original = neighborhood_mod.get_neighborhood_llm
+    neighborhood_mod.get_neighborhood_llm = lambda: BatchSpy()
+    try:
+        BatchSpy.calls = 0
+        expand_neighborhood(session, job)
+    finally:
+        neighborhood_mod.get_neighborhood_llm = original
+
+    assert BatchSpy.calls == 1
+    assert BatchSpy.last_candidates is not None
+    assert len(BatchSpy.last_candidates) >= 1
+    for item in BatchSpy.last_candidates:
+        assert "name" in item
+        assert "description" in item
+        assert "existing" in item
+        assert len(item["existing"]) <= 16
+        for row in item["existing"]:
+            assert set(row) >= {"id", "name", "description"}
 
 
 def test_near_duplicate_titles_map_together(session, user):

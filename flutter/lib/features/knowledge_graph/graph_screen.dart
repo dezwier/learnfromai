@@ -34,6 +34,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
+  var _drawerExpanded = false;
   PlacedNode? _highlighted;
   Size _viewport = Size.zero;
 
@@ -114,7 +115,10 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     if (_highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description) {
-      setState(() => _highlighted = node);
+      setState(() {
+        if (_highlighted?.id != node.id) _drawerExpanded = false;
+        _highlighted = node;
+      });
     }
     unawaited(_animatePanTo(node.center, _viewport));
   }
@@ -131,13 +135,114 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
         node?.description == _highlighted?.description) {
       return;
     }
-    setState(() => _highlighted = node);
+    setState(() {
+      if (_highlighted?.id != node?.id) _drawerExpanded = false;
+      _highlighted = node;
+    });
   }
 
   Future<void> _goToHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
     await graph.openNode(node.id);
+  }
+
+  Future<void> _editHighlighted(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null) return;
+    final titleCtrl = TextEditingController(text: node.title);
+    final descCtrl = TextEditingController(text: (node.description ?? '').trim());
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit topic'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                  minLines: 4,
+                  maxLines: 10,
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          ],
+        );
+      },
+    );
+    final title = titleCtrl.text.trim();
+    final description = descCtrl.text.trim();
+    titleCtrl.dispose();
+    descCtrl.dispose();
+    if (saved != true || !mounted || title.isEmpty) return;
+    final ok = await graph.updateNode(id: node.id, title: title, description: description);
+    if (!ok || !mounted) return;
+    setState(() {
+      _highlighted = PlacedNode(
+        id: node.id,
+        title: title,
+        depth: node.depth,
+        distance: node.distance,
+        kind: node.kind,
+        role: node.role,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        radius: node.radius,
+        isFlower: node.isFlower,
+        description: description,
+        viaRole: node.viaRole,
+      );
+    });
+  }
+
+  Future<void> _confirmDeleteHighlighted(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete topic?'),
+          content: Text(
+            'Delete “${node.title}” and all of its edges from the shared graph? This cannot be undone.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    final ok = await graph.deleteNode(node.id);
+    if (!ok || !mounted) return;
+    setState(() {
+      _highlighted = null;
+      _drawerExpanded = false;
+    });
   }
 
   void _openSearch() {
@@ -209,7 +314,11 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
     final drawerVisible = !_profileOpen && !_searchOpen && _highlighted != null;
-    final drawerClearance = drawerVisible ? _HighlightDrawer.totalHeight(safeBottom) + 12 : 16.0;
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final collapsedDrawer = _HighlightDrawer.collapsedHeight(safeBottom);
+    final drawerClearance = drawerVisible
+        ? (_drawerExpanded ? screenHeight * 0.95 : collapsedDrawer) + 12
+        : 16.0;
     final floatBottom = drawerClearance + keyboard;
     final canGoToHighlight =
         !_searchOpen && !_profileOpen && _highlighted != null && _highlighted!.id != graph.focusId;
@@ -285,11 +394,18 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
               ),
             ),
           if (drawerVisible)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _HighlightDrawer(node: _highlighted!),
+            Positioned.fill(
+              child: _HighlightDrawer(
+                node: _highlighted!,
+                canViewInGraph: canGoToHighlight,
+                onExpandedChanged: (expanded) {
+                  if (_drawerExpanded == expanded) return;
+                  setState(() => _drawerExpanded = expanded);
+                },
+                onViewInGraph: () => _goToHighlighted(graph),
+                onEdit: () => _editHighlighted(graph),
+                onDelete: () => _confirmDeleteHighlighted(graph),
+              ),
             ),
           if (graph.working)
             Positioned(
@@ -541,73 +657,182 @@ class _ProgressChip extends StatelessWidget {
   }
 }
 
-class _HighlightDrawer extends StatelessWidget {
-  const _HighlightDrawer({required this.node});
+class _HighlightDrawer extends StatefulWidget {
+  const _HighlightDrawer({
+    required this.node,
+    required this.canViewInGraph,
+    required this.onExpandedChanged,
+    required this.onViewInGraph,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
-  /// Fixed content height (above the home-indicator inset).
-  static const double contentHeight = 148;
+  /// Collapsed content height (above the home-indicator inset).
+  static const double contentHeight = 168;
 
-  static double totalHeight(double safeBottom) => contentHeight + safeBottom;
+  static double collapsedHeight(double safeBottom) => contentHeight + safeBottom;
 
   final PlacedNode node;
+  final bool canViewInGraph;
+  final ValueChanged<bool> onExpandedChanged;
+  final VoidCallback onViewInGraph;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  State<_HighlightDrawer> createState() => _HighlightDrawerState();
+}
+
+class _HighlightDrawerState extends State<_HighlightDrawer> {
+  final _sheet = DraggableScrollableController();
+  var _expanded = false;
+
+  @override
+  void dispose() {
+    _sheet.dispose();
+    super.dispose();
+  }
+
+  void _onSheetSize(double size, double collapsed) {
+    final next = size > collapsed + 0.08;
+    if (next == _expanded) return;
+    _expanded = next;
+    widget.onExpandedChanged(next);
+  }
+
+  Future<void> _toggle(double collapsed, double expanded) async {
+    final target = _expanded ? collapsed : expanded;
+    await _sheet.animateTo(
+      target,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final desc = (node.description ?? '').trim();
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    return Material(
-      elevation: 10,
-      shadowColor: Colors.black.withValues(alpha: 0.28),
-      color: scheme.surface.withValues(alpha: 0.97),
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      child: SizedBox(
-        height: totalHeight(bottom),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(20, 14, 20, 12 + bottom),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: scheme.onSurface.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(999),
+    final media = MediaQuery.of(context);
+    final screenHeight = media.size.height;
+    final bottom = media.padding.bottom;
+    final collapsedPx = _HighlightDrawer.collapsedHeight(bottom);
+    final collapsed = (collapsedPx / screenHeight).clamp(0.12, 0.45);
+    const expanded = 0.95;
+    final desc = (widget.node.description ?? '').trim();
+
+    return NotificationListener<DraggableScrollableNotification>(
+      onNotification: (notification) {
+        _onSheetSize(notification.extent, collapsed);
+        return false;
+      },
+      child: DraggableScrollableSheet(
+        controller: _sheet,
+        initialChildSize: collapsed,
+        minChildSize: collapsed,
+        maxChildSize: expanded,
+        snap: true,
+        snapSizes: [collapsed, expanded],
+        builder: (context, scrollController) {
+          return Material(
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.28),
+            color: scheme.surface.withValues(alpha: 0.97),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _toggle(collapsed, expanded),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: scheme.onSurface.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _expanded ? 'Swipe down to collapse' : 'Swipe up for full details',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurface.withValues(alpha: 0.45),
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                node.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontFamily: 'tt_ramilas',
-                  fontWeight: FontWeight.w700,
-                  fontSize: 22,
-                  height: 1.15,
-                  color: scheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: desc.isEmpty
-                    ? const SizedBox.shrink()
-                    : Text(
-                        desc,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.72),
-                              height: 1.35,
-                            ),
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + bottom),
+                    children: [
+                      Text(
+                        widget.node.title,
+                        style: TextStyle(
+                          fontFamily: 'tt_ramilas',
+                          fontWeight: FontWeight.w700,
+                          fontSize: _expanded ? 28 : 22,
+                          height: 1.15,
+                          color: scheme.onSurface,
+                        ),
                       ),
-              ),
-            ],
-          ),
-        ),
+                      const SizedBox(height: 10),
+                      if (desc.isNotEmpty)
+                        Text(
+                          desc,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: scheme.onSurface.withValues(alpha: 0.78),
+                                height: 1.4,
+                              ),
+                        )
+                      else
+                        Text(
+                          'No description yet.',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: scheme.onSurface.withValues(alpha: 0.45),
+                                fontStyle: FontStyle.italic,
+                              ),
+                        ),
+                      const SizedBox(height: 20),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          if (widget.canViewInGraph)
+                            FilledButton.icon(
+                              onPressed: widget.onViewInGraph,
+                              icon: const Icon(Icons.arrow_forward, size: 18),
+                              label: const Text('View in graph'),
+                            ),
+                          OutlinedButton.icon(
+                            onPressed: widget.onEdit,
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Edit'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: widget.onDelete,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: scheme.error,
+                              side: BorderSide(color: scheme.error.withValues(alpha: 0.55)),
+                            ),
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            label: const Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

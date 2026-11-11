@@ -14,6 +14,7 @@ from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
 from app.features.accounts.profile import merge_profile_prefs, profile_fields
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
+from app.features.knowledge_graph.node_ops import delete_knowledge_node, update_knowledge_node
 from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
@@ -36,6 +37,11 @@ class ExtendBody(BaseModel):
 class FocusBody(BaseModel):
     topic: str | None = Field(default=None, max_length=200)
     node_id: UUID | None = None
+
+
+class KnowledgeNodePatchBody(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=8000)
 
 
 class PreferencesBody(BaseModel):
@@ -153,6 +159,38 @@ def knowledge_nodes(
 ):
     _ = user
     return {"nodes": search_nodes(session, q, limit=limit)}
+
+
+@router.patch("/knowledge/nodes/{node_id}")
+def patch_knowledge_node(
+    node_id: UUID,
+    body: KnowledgeNodePatchBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    if body.name is None and body.description is None:
+        raise AppError("VALIDATION_ERROR", "Provide a name and/or description", 422)
+    payload = update_knowledge_node(
+        session,
+        node_id,
+        name=body.name,
+        description=body.description,
+    )
+    session.commit()
+    return payload
+
+
+@router.delete("/knowledge/nodes/{node_id}")
+def delete_knowledge_node_route(
+    node_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    payload = delete_knowledge_node(session, node_id)
+    session.commit()
+    return payload
 
 
 @router.get("/knowledge/graph")

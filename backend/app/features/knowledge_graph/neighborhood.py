@@ -46,6 +46,9 @@ KIND_FOR_RELATION = {
     RELATION_ACQUAINTANCE: "related",
 }
 
+# Cap how many close existing rows we send into one sameness prompt.
+NEAR_CANDIDATE_LIMIT = 16
+
 
 def relation_counts(session: Session, focus_id: UUID) -> dict[str, int]:
     edges = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus_id)).all())
@@ -95,12 +98,15 @@ def ensure_focus_node(session: Session, *, topic: str | None = None, node_id: UU
     return row
 
 
-def _near_name_candidates(session: Session, name: str, *, limit: int = 24) -> list[KnowledgeNode]:
+def _near_name_candidates(
+    session: Session, name: str, *, limit: int = NEAR_CANDIDATE_LIMIT
+) -> list[KnowledgeNode]:
     """Existing nodes whose titles look close enough to ask sameness / same_topic."""
     needle = name.strip()
     if not needle:
         return []
     key = canonical_key_for(needle)
+    capped = max(1, min(limit, NEAR_CANDIDATE_LIMIT))
     clauses = [
         func.lower(KnowledgeNode.name).like(f"%{needle.lower()}%"),
         col(KnowledgeNode.name_key).like(f"%{key}%"),
@@ -116,7 +122,7 @@ def _near_name_candidates(session: Session, name: str, *, limit: int = 24) -> li
             select(KnowledgeNode)
             .where(or_(*clauses))
             .order_by(KnowledgeNode.name)
-            .limit(max(1, min(limit, 40)))
+            .limit(capped)
         ).all()
     )
     # Prefer exact / same_topic hits first for stable merges.
@@ -127,7 +133,15 @@ def _near_name_candidates(session: Session, name: str, *, limit: int = 24) -> li
             row.name.lower(),
         )
     )
-    return rows
+    return rows[:capped]
+
+
+def _pack_existing(rows: list[KnowledgeNode]) -> list[dict]:
+    """Name+description payload for sameness prompts."""
+    return [
+        {"id": str(row.id), "name": row.name, "description": row.description}
+        for row in rows
+    ]
 
 
 def set_progress(session: Session, job: GenerationJob, *, stage: str, message: str, fraction: float) -> None:
@@ -193,42 +207,19 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     linked: dict[str, list[UUID]] = {bucket: [] for bucket in BUCKETS}
     seen_names: set[str] = {canonical_key_for(focus.name)}
     seen_titles: list[str] = [focus.name]
-    total = sum(len(neighborhood.get(bucket) or []) for bucket in BUCKETS) or 1
-    done = 0
-    for bucket in BUCKETS:
-        relation = BUCKET_RELATION[bucket]
-        for item in neighborhood.get(bucket) or []:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name") or "").strip()
-            if not name:
-                continue
-            key = canonical_key_for(name)
-            if key in seen_names or any(same_topic(name, prior) for prior in seen_titles):
-                continue
-            seen_names.add(key)
-            seen_titles.append(name)
-            set_progress(
-                session,
-                job,
-                stage="merge",
-                message=f"Merging {name}…",
-                fraction=0.35 + 0.45 * (done / total),
-            )
-            node = _upsert_named(
-                session,
-                llm=llm,
-                user_id=user_id,
-                job_id=job.id,
-                name=name,
-                description=item.get("description"),
-            )
-            if node.id == focus.id or any(node.id == other for other in linked[bucket]):
-                continue
-            _ensure_pair(session, focus.id, node.id, relation)
-            linked[bucket].append(node.id)
-            done += 1
-            session.commit()
+    _link_resolved_batch(
+        session,
+        job=job,
+        llm=llm,
+        user_id=user_id,
+        focus=focus,
+        bucket_items=_bucket_items(neighborhood),
+        linked=linked,
+        seen_names=seen_names,
+        seen_titles=seen_titles,
+        progress_start=0.35,
+        progress_span=0.45,
+    )
 
     # Fill short buckets with a repair pass once.
     short = {bucket: max(0, counts[bucket] - len(linked[bucket])) for bucket in BUCKETS if len(linked[bucket]) < counts[bucket]}
@@ -239,35 +230,27 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         record_usage(
             session, user_id=user_id, job_id=job.id, task="neighborhood_repair", provider=llm.name, usage=repair_usage
         )
+        repair_items = []
         for bucket in BUCKETS:
-            relation = BUCKET_RELATION[bucket]
             need = short.get(bucket, 0)
             if need <= 0:
                 continue
             for item in (repair.get(bucket) or [])[:need]:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                key = canonical_key_for(name)
-                if key in seen_names or any(same_topic(name, prior) for prior in seen_titles):
-                    continue
-                seen_names.add(key)
-                seen_titles.append(name)
-                node = _upsert_named(
-                    session,
-                    llm=llm,
-                    user_id=user_id,
-                    job_id=job.id,
-                    name=name,
-                    description=item.get("description"),
-                )
-                if node.id == focus.id or node.id in linked[bucket]:
-                    continue
-                _ensure_pair(session, focus.id, node.id, relation)
-                linked[bucket].append(node.id)
-        session.commit()
+                if isinstance(item, dict):
+                    repair_items.append((bucket, item))
+        _link_resolved_batch(
+            session,
+            job=job,
+            llm=llm,
+            user_id=user_id,
+            focus=focus,
+            bucket_items=repair_items,
+            linked=linked,
+            seen_names=seen_names,
+            seen_titles=seen_titles,
+            progress_start=0.85,
+            progress_span=0.08,
+        )
 
     set_progress(session, job, stage="persist", message="Saving neighborhood…", fraction=0.95)
     request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
@@ -389,18 +372,25 @@ def _merge_node_into(session: Session, *, keep: KnowledgeNode, drop: KnowledgeNo
     session.flush()
 
 
-def _upsert_named(
+def _bucket_items(neighborhood: dict) -> list[tuple[str, dict]]:
+    items: list[tuple[str, dict]] = []
+    for bucket in BUCKETS:
+        for item in neighborhood.get(bucket) or []:
+            if isinstance(item, dict):
+                items.append((bucket, item))
+    return items
+
+
+def _resolve_local(
     session: Session,
     *,
-    llm,
-    user_id: UUID,
-    job_id: UUID | None,
     name: str,
-    description: object,
+    description: str | None,
     preferred: KnowledgeNode | None = None,
-) -> KnowledgeNode:
+) -> tuple[KnowledgeNode | None, list[KnowledgeNode]]:
+    """Deterministic resolve. Returns (node_or_none, near_candidates_for_llm)."""
     key = canonical_key_for(name)
-    desc = str(description).strip() if description else None
+    desc = description
     existing = list(session.exec(select(KnowledgeNode).where(KnowledgeNode.name_key == key)).all())
     if preferred is not None and (preferred.name_key == key or same_topic(preferred.name, name)):
         if desc and not preferred.description:
@@ -408,7 +398,7 @@ def _upsert_named(
             preferred.name = name
             session.add(preferred)
             session.flush()
-        return preferred
+        return preferred, []
     if len(existing) == 1 and (
         not desc
         or not existing[0].description
@@ -421,52 +411,198 @@ def _upsert_named(
             row.name = name
             session.add(row)
             session.flush()
-        return row
+        return row, []
 
-    # Exact key collisions plus near-title neighbors (plural/taxon/media variants).
-    near = existing or []
+    near = list(existing)
     seen_ids = {row.id for row in near}
-    for row in _near_name_candidates(session, name):
+    for row in _near_name_candidates(session, name, limit=NEAR_CANDIDATE_LIMIT):
         if row.id in seen_ids:
             continue
         near.append(row)
         seen_ids.add(row.id)
-    # Morphological / media-suffix near-duplicates share a concept. Exact same
+    near = near[:NEAR_CANDIDATE_LIMIT]
+
+    # Morphological / spelling / media near-duplicates share a concept. Exact same
     # name_key with differing descriptions can still be true homonyms (Bass fish
-    # vs Bass pitch), so those go through the LLM sameness check below.
+    # vs Bass pitch), so those go through the LLM sameness check.
     for row in near:
         if row.name_key != key and same_topic(row.name, name):
             if desc and not row.description:
                 row.description = desc
                 session.add(row)
                 session.flush()
-            return row
+            return row, []
 
-    if near:
-        candidates = [
+    return None, near
+
+
+def _create_named(session: Session, *, name: str, description: str | None) -> KnowledgeNode:
+    row = KnowledgeNode(name=name, name_key=canonical_key_for(name), description=description)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _apply_match(
+    session: Session,
+    *,
+    name: str,
+    description: str | None,
+    chosen_id: UUID | None,
+) -> KnowledgeNode:
+    if chosen_id is not None:
+        row = session.get(KnowledgeNode, chosen_id)
+        if row is not None:
+            if description and not row.description:
+                row.description = description
+                session.add(row)
+                session.flush()
+            return row
+    return _create_named(session, name=name, description=description)
+
+
+def _match_topics_batch(
+    session: Session,
+    *,
+    llm,
+    user_id: UUID,
+    job_id: UUID | None,
+    pending: list[dict],
+) -> dict[str, UUID | None]:
+    """One cheap LLM sameness call for all unresolved titles. Returns key -> id|None."""
+    if not pending:
+        return {}
+    candidates = [
+        {
+            "key": str(item["key"]),
+            "name": str(item["name"]),
+            "description": item.get("description"),
+            "existing": item["existing"],
+        }
+        for item in pending
+    ]
+    matched, usage = llm.match_topics(candidates)
+    record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
+    raw = matched.get("matches") if isinstance(matched, dict) else {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return {str(key): parse_uuid(value) for key, value in raw.items()}
+
+
+def _link_resolved_batch(
+    session: Session,
+    *,
+    job: GenerationJob,
+    llm,
+    user_id: UUID,
+    focus: KnowledgeNode,
+    bucket_items: list[tuple[str, dict]],
+    linked: dict[str, list[UUID]],
+    seen_names: set[str],
+    seen_titles: list[str],
+    progress_start: float,
+    progress_span: float,
+) -> None:
+    """Resolve titles with same_topic first, then one batched match_topics call."""
+    ready: list[tuple[str, KnowledgeNode, str]] = []
+    pending: list[dict] = []
+    total = len(bucket_items) or 1
+    scanned = 0
+
+    for bucket, item in bucket_items:
+        scanned += 1
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        key = canonical_key_for(name)
+        if key in seen_names or any(same_topic(name, prior) for prior in seen_titles):
+            continue
+        desc = str(item.get("description") or "").strip() or None
+        seen_names.add(key)
+        seen_titles.append(name)
+        set_progress(
+            session,
+            job,
+            stage="merge",
+            message=f"Merging {name}…",
+            fraction=progress_start + progress_span * (scanned / total) * 0.5,
+        )
+        node, near = _resolve_local(session, name=name, description=desc)
+        if node is not None:
+            ready.append((bucket, node, name))
+            continue
+        if not near:
+            ready.append((bucket, _create_named(session, name=name, description=desc), name))
+            continue
+        pending.append(
+            {
+                "key": f"p{len(pending)}",
+                "bucket": bucket,
+                "name": name,
+                "description": desc,
+                "existing": _pack_existing(near),
+            }
+        )
+
+    matches = _match_topics_batch(
+        session, llm=llm, user_id=user_id, job_id=job.id, pending=pending
+    )
+    for item in pending:
+        node = _apply_match(
+            session,
+            name=str(item["name"]),
+            description=item.get("description"),
+            chosen_id=matches.get(str(item["key"])),
+        )
+        ready.append((str(item["bucket"]), node, str(item["name"])))
+
+    for index, (bucket, node, name) in enumerate(ready):
+        relation = BUCKET_RELATION[bucket]
+        if node.id == focus.id or node.id in linked[bucket]:
+            continue
+        set_progress(
+            session,
+            job,
+            stage="merge",
+            message=f"Linking {name}…",
+            fraction=progress_start + progress_span * (0.5 + 0.5 * ((index + 1) / max(len(ready), 1))),
+        )
+        _ensure_pair(session, focus.id, node.id, relation)
+        linked[bucket].append(node.id)
+    session.commit()
+
+
+def _upsert_named(
+    session: Session,
+    *,
+    llm,
+    user_id: UUID,
+    job_id: UUID | None,
+    name: str,
+    description: object,
+    preferred: KnowledgeNode | None = None,
+) -> KnowledgeNode:
+    desc = str(description).strip() if description else None
+    node, near = _resolve_local(session, name=name, description=desc, preferred=preferred)
+    if node is not None:
+        return node
+    if not near:
+        return _create_named(session, name=name, description=desc)
+    matches = _match_topics_batch(
+        session,
+        llm=llm,
+        user_id=user_id,
+        job_id=job_id,
+        pending=[
             {
                 "key": "c0",
                 "name": name,
                 "description": desc,
-                "existing": [{"id": str(row.id), "name": row.name, "description": row.description} for row in near],
+                "existing": _pack_existing(near),
             }
-        ]
-        matched, usage = llm.match_topics(candidates)
-        record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
-        chosen = parse_uuid((matched.get("matches") or {}).get("c0"))
-        if chosen is not None:
-            row = session.get(KnowledgeNode, chosen)
-            if row is not None:
-                if desc and not row.description:
-                    row.description = desc
-                    session.add(row)
-                    session.flush()
-                return row
-
-    row = KnowledgeNode(name=name, name_key=key, description=desc)
-    session.add(row)
-    session.flush()
-    return row
+        ],
+    )
+    return _apply_match(session, name=name, description=desc, chosen_id=matches.get("c0"))
 
 
 def _ensure_pair(session: Session, focus_id: UUID, other_id: UUID, relation: str) -> None:
