@@ -668,7 +668,7 @@ class _HighlightDrawer extends StatefulWidget {
   });
 
   /// Collapsed content height (above the home-indicator inset).
-  static const double contentHeight = 168;
+  static const double contentHeight = 140;
 
   static double collapsedHeight(double safeBottom) => contentHeight + safeBottom;
 
