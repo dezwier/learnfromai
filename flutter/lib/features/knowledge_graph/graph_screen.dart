@@ -392,8 +392,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
               ),
             ),
           if (drawerVisible)
-            Align(
-              alignment: Alignment.bottomCenter,
+            Positioned.fill(
               child: _HighlightDrawer(
                 key: ValueKey(_highlighted!.id),
                 node: _highlighted!,
@@ -796,113 +795,132 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     final height = _heightFor(context, _extent.value);
     final desc = (widget.node.description ?? '').trim();
     final expanded = _expanded;
+    final scrim = (_extent.value * 0.48).clamp(0.0, 0.48);
 
-    return Material(
-      elevation: 10,
-      shadowColor: Colors.black.withValues(alpha: 0.28),
-      color: scheme.surface.withValues(alpha: 0.97),
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: height,
-        width: double.infinity,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragUpdate: _onDragUpdate,
-          onVerticalDragEnd: _onDragEnd,
-          child: Column(
-            children: [
-              GestureDetector(
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: scrim < 0.02,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _extent.animateTo(0, curve: Curves.easeOutCubic),
+              child: ColoredBox(color: Colors.black.withValues(alpha: scrim)),
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Material(
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.28),
+            color: scheme.surface.withValues(alpha: 0.97),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              height: height,
+              width: double.infinity,
+              child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onVerticalDragUpdate: _onDragUpdate,
                 onVerticalDragEnd: _onDragEnd,
-                onTap: _toggle,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-                  child: Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: scheme.onSurface.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  controller: _bodyScroll,
-                  // Drag is owned by the parent GestureDetector so swipe-down
-                  // always moves the drawer; we jump the offset manually on swipe-up.
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + bottom),
+                child: Column(
                   children: [
-                    Text(
-                      widget.node.title,
-                      style: TextStyle(
-                        fontFamily: 'tt_ramilas',
-                        fontWeight: FontWeight.w700,
-                        fontSize: expanded ? 28 : 22,
-                        height: 1.15,
-                        color: scheme.onSurface,
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragUpdate: _onDragUpdate,
+                      onVerticalDragEnd: _onDragEnd,
+                      onTap: _toggle,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+                        child: Center(
+                          child: Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: scheme.onSurface.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    if (desc.isNotEmpty)
-                      Text(
-                        desc,
-                        maxLines: expanded ? null : 3,
-                        overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.78),
-                              height: 1.4,
-                            ),
-                      )
-                    else
-                      Text(
-                        'No description yet.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.45),
-                              fontStyle: FontStyle.italic,
-                            ),
-                      ),
-                    if (expanded) ...[
-                      const SizedBox(height: 18),
-                      Row(
+                    Expanded(
+                      child: ListView(
+                        controller: _bodyScroll,
+                        // Drag is owned by the parent GestureDetector so swipe-down
+                        // always moves the drawer; we jump the offset manually on swipe-up.
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + bottom),
                         children: [
-                          if (widget.canViewInGraph) ...[
-                            _DrawerIconButton(
-                              tooltip: 'View in graph',
-                              icon: Icons.arrow_forward,
-                              filled: true,
-                              onPressed: () => _collapseThen(widget.onViewInGraph),
+                          Text(
+                            widget.node.title,
+                            style: TextStyle(
+                              fontFamily: 'tt_ramilas',
+                              fontWeight: FontWeight.w700,
+                              fontSize: expanded ? 28 : 22,
+                              height: 1.15,
+                              color: scheme.onSurface,
                             ),
-                            const SizedBox(width: 8),
+                          ),
+                          const SizedBox(height: 10),
+                          if (desc.isNotEmpty)
+                            Text(
+                              desc,
+                              maxLines: expanded ? null : 3,
+                              overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: scheme.onSurface.withValues(alpha: 0.78),
+                                    height: 1.4,
+                                  ),
+                            )
+                          else
+                            Text(
+                              'No description yet.',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: scheme.onSurface.withValues(alpha: 0.45),
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                            ),
+                          if (expanded) ...[
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                if (widget.canViewInGraph) ...[
+                                  _DrawerIconButton(
+                                    tooltip: 'View in graph',
+                                    icon: Icons.arrow_forward,
+                                    filled: true,
+                                    onPressed: () => _collapseThen(widget.onViewInGraph),
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                _DrawerIconButton(
+                                  tooltip: 'Edit',
+                                  icon: Icons.edit_outlined,
+                                  onPressed: widget.onEdit,
+                                ),
+                                const SizedBox(width: 8),
+                                _DrawerIconButton(
+                                  tooltip: 'Delete',
+                                  icon: Icons.delete_outline,
+                                  foreground: scheme.error,
+                                  onPressed: widget.onDelete,
+                                ),
+                              ],
+                            ),
                           ],
-                          _DrawerIconButton(
-                            tooltip: 'Edit',
-                            icon: Icons.edit_outlined,
-                            onPressed: widget.onEdit,
-                          ),
-                          const SizedBox(width: 8),
-                          _DrawerIconButton(
-                            tooltip: 'Delete',
-                            icon: Icons.delete_outline,
-                            foreground: scheme.error,
-                            onPressed: widget.onDelete,
-                          ),
                         ],
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
