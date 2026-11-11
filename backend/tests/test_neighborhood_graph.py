@@ -108,6 +108,32 @@ def test_resume_empty_and_latest(client, auth, other_auth, session):
     assert other.json()["nodes"] == []
 
 
+def test_knowledge_nodes_autocomplete(client, auth, session):
+    session.add_all(
+        [
+            KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles."),
+            KnowledgeNode(name="Theropods", name_key="theropods", description="Bipedal dinosaurs."),
+            KnowledgeNode(name="Birds", name_key="birds", description="Flying vertebrates."),
+        ]
+    )
+    session.commit()
+
+    empty = client.get("/api/v1/knowledge/nodes", headers=auth, params={"q": ""})
+    assert empty.status_code == 200
+    assert empty.json()["nodes"] == []
+
+    hit = client.get("/api/v1/knowledge/nodes", headers=auth, params={"q": "dino"})
+    assert hit.status_code == 200
+    titles = [row["title"] for row in hit.json()["nodes"]]
+    assert titles == ["Dinosaurs"]
+
+    existing = client.get(f"/api/v1/knowledge/graph/{hit.json()['nodes'][0]['id']}", headers=auth)
+    assert existing.status_code == 200
+    assert existing.json()["focus_node_id"] == hit.json()["nodes"][0]["id"]
+    before = session.exec(select(func.count()).select_from(GenerationJob)).one()
+    assert before == 0
+
+
 def test_name_collision_can_insert_second_node(session, user):
     from app.features.knowledge_graph.neighborhood import _upsert_named
     from app.features.platform.neighborhood_llm import FakeNeighborhoodLLM

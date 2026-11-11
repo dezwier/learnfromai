@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ class _GraphScreenState extends State<GraphScreen> {
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
   String? _transformFocusId;
+  Timer? _suggestDebounce;
   var _resumed = false;
   var _searchOpen = false;
 
@@ -38,6 +40,7 @@ class _GraphScreenState extends State<GraphScreen> {
 
   @override
   void dispose() {
+    _suggestDebounce?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     _transform.dispose();
@@ -69,16 +72,46 @@ class _GraphScreenState extends State<GraphScreen> {
   }
 
   void _dismissSearch() {
+    _suggestDebounce?.cancel();
     if (!_searchOpen && !_searchFocus.hasFocus) return;
     _searchFocus.unfocus();
     FocusManager.instance.primaryFocus?.unfocus();
+    context.read<GraphController>().clearSuggestions();
     if (_searchOpen) setState(() => _searchOpen = false);
   }
 
+  void _onSearchChanged(GraphController graph, String value) {
+    _suggestDebounce?.cancel();
+    _suggestDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      graph.suggest(value);
+    });
+  }
+
   Future<void> _submitSearch(GraphController graph) async {
-    final topic = _search.text;
+    final topic = _search.text.trim();
+    if (topic.isEmpty) return;
+    // Prefer an exact existing match when the user submits without picking.
+    TopicChoice? exact;
+    for (final choice in graph.suggestions) {
+      if (choice.title.toLowerCase() == topic.toLowerCase()) {
+        exact = choice;
+        break;
+      }
+    }
+    _search.clear();
     _dismissSearch();
-    await graph.search(topic);
+    if (exact != null) {
+      await graph.openExisting(exact.id);
+    } else {
+      await graph.search(topic);
+    }
+  }
+
+  Future<void> _pickSuggestion(GraphController graph, TopicChoice choice) async {
+    _search.clear();
+    _dismissSearch();
+    await graph.openExisting(choice.id);
   }
 
   Future<void> _openPrefs(GraphController graph) async {
@@ -190,17 +223,31 @@ class _GraphScreenState extends State<GraphScreen> {
       ),
       floatingActionButton: _searchOpen
           ? null
-          : FloatingActionButton(
-              heroTag: 'graph-search',
-              tooltip: 'Search',
-              onPressed: _openSearch,
-              child: const Icon(Icons.search),
+          : Builder(
+              builder: (context) {
+                final scheme = Theme.of(context).colorScheme;
+                return FloatingActionButton.small(
+                  heroTag: 'graph-search',
+                  tooltip: 'Search',
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  foregroundColor: scheme.onSurfaceVariant,
+                  elevation: 1.5,
+                  focusElevation: 2,
+                  hoverElevation: 2,
+                  highlightElevation: 2,
+                  onPressed: _openSearch,
+                  child: const Icon(Icons.search, size: 20),
+                );
+              },
             ),
       bottomSheet: _searchOpen
           ? _SearchBar(
               controller: _search,
               focusNode: _searchFocus,
+              suggestions: graph.suggestions,
+              onChanged: (value) => _onSearchChanged(graph, value),
               onSubmit: () => _submitSearch(graph),
+              onPick: (choice) => _pickSuggestion(graph, choice),
               onDismiss: _dismissSearch,
             )
           : null,
@@ -386,46 +433,91 @@ class _SearchBar extends StatelessWidget {
   const _SearchBar({
     required this.controller,
     required this.focusNode,
+    required this.suggestions,
+    required this.onChanged,
     required this.onSubmit,
+    required this.onPick,
     required this.onDismiss,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
+  final List<TopicChoice> suggestions;
+  final ValueChanged<String> onChanged;
   final VoidCallback onSubmit;
+  final ValueChanged<TopicChoice> onPick;
   final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      elevation: 8,
-      color: scheme.surface,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-          child: Row(
+    final textTheme = Theme.of(context).textTheme;
+    return TextFieldTapRegion(
+      child: Material(
+        elevation: 8,
+        color: scheme.surface,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    hintText: 'Search a topic',
-                    border: InputBorder.none,
-                    isDense: true,
+              if (suggestions.isNotEmpty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    itemCount: suggestions.length,
+                    separatorBuilder: (_, __) => Divider(height: 1, color: scheme.outlineVariant),
+                    itemBuilder: (context, index) {
+                      final choice = suggestions[index];
+                      final subtitle = choice.description?.trim();
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(Icons.north_west, size: 16, color: scheme.onSurfaceVariant),
+                        title: Text(choice.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: (subtitle == null || subtitle.isEmpty)
+                            ? null
+                            : Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                              ),
+                        onTap: () => onPick(choice),
+                      );
+                    },
                   ),
-                  onSubmitted: (_) => onSubmit(),
-                  onTapOutside: (_) => onDismiss(),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Search',
-                onPressed: onSubmit,
-                icon: const Icon(Icons.search),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        autofocus: true,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search a topic',
+                          hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+                          border: InputBorder.none,
+                          isDense: true,
+                        ),
+                        onChanged: onChanged,
+                        onSubmitted: (_) => onSubmit(),
+                        onTapOutside: (_) => onDismiss(),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Search',
+                      onPressed: onSubmit,
+                      color: scheme.onSurfaceVariant,
+                      icon: const Icon(Icons.search),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

@@ -68,8 +68,10 @@ class GraphController extends ChangeNotifier {
   String? error;
   String? progressMessage;
   List<TopicChoice> candidates = [];
+  List<TopicChoice> suggestions = [];
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
+  int _suggestToken = 0;
 
   String? get focusId {
     final raw = categoryGraph?['focus_node_id'];
@@ -88,6 +90,7 @@ class GraphController extends ChangeNotifier {
   Future<void> search(String topic) async {
     final trimmed = topic.trim();
     if (trimmed.isEmpty || refreshing || loading || working) return;
+    suggestions = [];
     final previous = List<String>.of(focusHistory);
     focusHistory.clear();
     await _focus(body: {'topic': trimmed});
@@ -98,11 +101,73 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  Future<void> suggest(String query) async {
+    final trimmed = query.trim();
+    final token = ++_suggestToken;
+    if (trimmed.isEmpty) {
+      if (suggestions.isEmpty) return;
+      suggestions = [];
+      notifyListeners();
+      return;
+    }
+    try {
+      final raw = await _get('/knowledge/nodes?q=${Uri.encodeQueryComponent(trimmed)}');
+      if (token != _suggestToken) return;
+      suggestions = _choices({'candidates': raw['nodes']});
+      notifyListeners();
+    } on ApiException {
+      if (token != _suggestToken) return;
+      suggestions = [];
+      notifyListeners();
+    }
+  }
+
+  void clearSuggestions() {
+    _suggestToken += 1;
+    if (suggestions.isEmpty) return;
+    suggestions = [];
+    notifyListeners();
+  }
+
   Future<void> openNode(String id) async {
     if (refreshing || loading || working) return; // one expand at a time; graph stays pannable
     if (focusId == id && categoryGraph != null) return;
     pendingNodeId = id;
     await _focus(body: {'node_id': id});
+  }
+
+  /// Open an existing node via GET graph — no expand/LLM job.
+  Future<void> openExisting(String id) async {
+    if (refreshing || loading || working) return;
+    if (focusId == id && categoryGraph != null) {
+      suggestions = [];
+      notifyListeners();
+      return;
+    }
+    final first = categoryGraph == null;
+    loading = first;
+    refreshing = !first;
+    pendingNodeId = id;
+    error = null;
+    candidates = [];
+    suggestions = [];
+    progressMessage = null;
+    notifyListeners();
+    try {
+      categoryGraph = await _get('/knowledge/graph/$id');
+      final focus = focusId;
+      if (focus != null && (focusHistory.isEmpty || focusHistory.last != focus)) {
+        focusHistory.add(focus);
+      }
+    } on ApiException catch (exc) {
+      error = exc.message;
+    } finally {
+      loading = false;
+      refreshing = false;
+      pendingNodeId = null;
+      progressMessage = null;
+      notifyListeners();
+    }
   }
 
   Future<void> choose(TopicChoice choice) async {

@@ -132,12 +132,50 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(TextField), findsNothing);
+    expect(find.byType(FloatingActionButton), findsOneWidget);
     await tester.tap(find.byTooltip('Search'));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsOneWidget);
 
     await tester.tapAt(const Offset(24, 180));
     await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('typing in search lists existing topics and opens without focus post', (tester) async {
+    final posts = <Object?>[];
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        posts.add(body);
+        return _compact();
+      },
+      loader: (path) async {
+        if (path.startsWith('/knowledge/nodes')) {
+          return {
+            'nodes': [
+              {'id': '3', 'title': 'Saurischia', 'description': 'Lizard-hipped dinosaurs.'},
+            ],
+          };
+        }
+        if (path == '/knowledge/graph/3') return _saurischia();
+        return _compact();
+      },
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'saur');
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pumpAndSettle();
+    expect(find.text('Saurischia'), findsWidgets);
+    expect(find.textContaining('Lizard-hipped'), findsOneWidget);
+
+    await tester.tap(find.textContaining('Lizard-hipped'));
+    await tester.pumpAndSettle();
+    expect(graph.focusId, '3');
+    expect(posts, isEmpty);
     expect(find.byType(TextField), findsNothing);
   });
 

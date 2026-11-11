@@ -14,6 +14,7 @@ from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
 from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
+from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.platform.models import GenerationJob
@@ -107,6 +108,17 @@ def knowledge_focus(
     session.commit()
     response.status_code = status
     return payload
+
+
+@router.get("/knowledge/nodes")
+def knowledge_nodes(
+    q: str = "",
+    limit: int = 8,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    return {"nodes": search_nodes(session, q, limit=limit)}
 
 
 @router.get("/knowledge/graph")

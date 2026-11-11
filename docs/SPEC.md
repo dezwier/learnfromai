@@ -19,8 +19,9 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/me/preferences`
 - `PATCH /api/v1/me/preferences`
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200) or `{job_id}` (202)
+- `GET /api/v1/knowledge/nodes?q=` existing-topic autocomplete (no LLM)
 - `GET /api/v1/knowledge/graph` resume latest (may also 202)
-- `GET /api/v1/knowledge/graph/{focus_id}`
+- `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/workspace/graph`
 - `POST /api/v1/graph/extend` (410)
@@ -30,4 +31,4 @@ Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `relat
 
 ## Client
 
-Neighborhood canvas: parents above, siblings beside the focus, related farther out, children below. Colors: parent blue, sibling violet, child green, related amber, focus primary. Search is a bottom-right FAB that opens a field above the keyboard. While a job runs, a modal barrier shows live progress. A gear opens neighborhood size settings.
+Neighborhood canvas: parents above, siblings beside the focus, related farther out, children below. Colors: parent blue, sibling violet, child green, related amber, focus primary. A small neutral search FAB opens a field above the keyboard and lists matching existing topics as the user types; tapping one opens that node without an LLM expand. Submitting a new topic still focuses via the worker. While a job runs, a lower-left chip shows live progress. A gear opens neighborhood size settings.
