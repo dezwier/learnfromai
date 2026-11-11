@@ -778,6 +778,17 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     _extent.animateTo(_expanded ? 0 : 1, curve: Curves.easeOutCubic);
   }
 
+  Future<void> _collapseThen(VoidCallback action) async {
+    if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
+      _bodyScroll.jumpTo(0);
+    }
+    if (_extent.value > 0) {
+      await _extent.animateTo(0, curve: Curves.easeOutCubic);
+    }
+    if (!mounted) return;
+    action();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -865,7 +876,7 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                         children: [
                           if (widget.canViewInGraph)
                             FilledButton.icon(
-                              onPressed: widget.onViewInGraph,
+                              onPressed: () => _collapseThen(widget.onViewInGraph),
                               icon: const Icon(Icons.arrow_forward, size: 18),
                               label: const Text('View in graph'),
                             ),
