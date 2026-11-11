@@ -32,6 +32,8 @@ void main() {
 
     final byId = {for (final node in layout.nodes) node.id: node};
     expect(byId['2']!.isFlower, isTrue);
+    expect(byId['2']!.center.dx, closeTo(layout.width / 2, 0.5));
+    expect(byId['2']!.center.dy, closeTo(layout.height / 2, 0.5));
     expect(hitTestNode(layout, byId['2']!.center), '2');
     expect(
       hitTestNode(layout, byId['2']!.center + axialToPixel(1, 0, byId['2']!.radius) * 0.5),

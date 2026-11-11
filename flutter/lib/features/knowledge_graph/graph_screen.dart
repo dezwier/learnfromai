@@ -44,10 +44,19 @@ class _GraphScreenState extends State<GraphScreen> {
     super.dispose();
   }
 
-  void _resetTransformIfFocusChanged(String? focusId) {
+  void _resetTransformIfFocusChanged({
+    required String? focusId,
+    required Size viewport,
+    required Size canvas,
+  }) {
     if (_transformFocusId == focusId) return;
     _transformFocusId = focusId;
-    _transform.value = Matrix4.identity();
+    // Focus is laid out at the canvas center; translate so that lands in view.
+    _transform.value = Matrix4.translationValues(
+      (viewport.width - canvas.width) / 2,
+      (viewport.height - canvas.height) / 2,
+      0,
+    );
   }
 
   void _openSearch() {
@@ -272,14 +281,19 @@ class _GraphScreenState extends State<GraphScreen> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        _resetTransformIfFocusChanged(graph.focusId);
-        final layout = _layoutFor(graph, Size(constraints.maxWidth, constraints.maxHeight));
+        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+        final layout = _layoutFor(graph, viewport);
+        _resetTransformIfFocusChanged(
+          focusId: graph.focusId,
+          viewport: viewport,
+          canvas: Size(layout.width, layout.height),
+        );
         return InteractiveViewer(
           transformationController: _transform,
           constrained: false,
           minScale: 0.45,
           maxScale: 3.5,
-          boundaryMargin: const EdgeInsets.all(300),
+          boundaryMargin: const EdgeInsets.all(480),
           child: SizedBox(
             width: layout.width,
             height: layout.height,

@@ -496,12 +496,23 @@ GraphLayout layoutGraph(
     maxY = math.max(maxY, c.$2.dy + b.height / 2);
   }
 
+  // Zoom to the focus flower + ring 2, then push in further so outer hexes
+  // may sit outside the viewport. Focus stays at the canvas center.
   const pad = 8.0;
-  final contentW = math.max(maxX - minX, 1.0);
-  final contentH = math.max(maxY - minY, 1.0);
-  final scale = math.min((width - 2 * pad) / contentW, (height - 2 * pad) / contentH);
-  final ox = (width - contentW * scale) / 2 - minX * scale;
-  final oy = (height - contentH * scale) / 2 - minY * scale;
+  const defaultZoomIn = 1.35;
+  final ring2Half = math.max(focusBounds.width, focusBounds.height) / 2 + 2 * math.sqrt(3);
+  final fitRing2 = math.min(
+    (width - 2 * pad) / (2 * ring2Half),
+    (height - 2 * pad) / (2 * ring2Half),
+  );
+  final scale = fitRing2 * defaultZoomIn;
+
+  final contentW = math.max((maxX - minX) * scale, 1.0);
+  final contentH = math.max((maxY - minY) * scale, 1.0);
+  final canvasW = math.max(width, contentW + 2 * pad);
+  final canvasH = math.max(height, contentH + 2 * pad);
+  final ox = canvasW / 2;
+  final oy = canvasH / 2;
 
   final placed = <PlacedNode>[];
   for (final c in centers) {
@@ -514,7 +525,7 @@ GraphLayout layoutGraph(
     }
   }
 
-  return GraphLayout(nodes: placed, width: width, height: height);
+  return GraphLayout(nodes: placed, width: canvasW, height: canvasH);
 }
 
 class _HexCell {
