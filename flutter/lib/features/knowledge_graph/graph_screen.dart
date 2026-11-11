@@ -869,30 +869,29 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                             ),
                       ),
                     if (expanded) ...[
-                      const SizedBox(height: 20),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
+                      const SizedBox(height: 18),
+                      Row(
                         children: [
-                          if (widget.canViewInGraph)
-                            FilledButton.icon(
+                          if (widget.canViewInGraph) ...[
+                            _DrawerIconButton(
+                              tooltip: 'View in graph',
+                              icon: Icons.arrow_forward,
+                              filled: true,
                               onPressed: () => _collapseThen(widget.onViewInGraph),
-                              icon: const Icon(Icons.arrow_forward, size: 18),
-                              label: const Text('View in graph'),
                             ),
-                          OutlinedButton.icon(
+                            const SizedBox(width: 8),
+                          ],
+                          _DrawerIconButton(
+                            tooltip: 'Edit',
+                            icon: Icons.edit_outlined,
                             onPressed: widget.onEdit,
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Edit'),
                           ),
-                          OutlinedButton.icon(
+                          const SizedBox(width: 8),
+                          _DrawerIconButton(
+                            tooltip: 'Delete',
+                            icon: Icons.delete_outline,
+                            foreground: scheme.error,
                             onPressed: widget.onDelete,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: scheme.error,
-                              side: BorderSide(color: scheme.error.withValues(alpha: 0.55)),
-                            ),
-                            icon: const Icon(Icons.delete_outline, size: 18),
-                            label: const Text('Delete'),
                           ),
                         ],
                       ),
@@ -901,6 +900,48 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerIconButton extends StatelessWidget {
+  const _DrawerIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.filled = false,
+    this.foreground,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool filled;
+  final Color? foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = foreground ?? (filled ? scheme.onPrimary : scheme.onSurfaceVariant);
+    final bg = filled
+        ? scheme.primary
+        : scheme.onSurface.withValues(alpha: scheme.brightness == Brightness.dark ? 0.10 : 0.06);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: bg,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, size: 20, color: fg),
           ),
         ),
       ),
