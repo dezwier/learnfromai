@@ -36,6 +36,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _profileOpen = false;
   var _drawerRaised = false;
   PlacedNode? _highlighted;
+  GraphLayout? _layout;
   Size _viewport = Size.zero;
 
   @override
@@ -110,13 +111,15 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     _panAnimation = null;
   }
 
-  void _selectNode(PlacedNode node) {
+  void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
     _panTargetId = node.id;
     if (_highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description) {
       setState(() {
-        if (_highlighted?.id != node.id) _drawerRaised = false;
+        if (_highlighted?.id != node.id && !keepDrawerRaised) {
+          _drawerRaised = false;
+        }
         _highlighted = node;
       });
     }
@@ -144,6 +147,21 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   Future<void> _goToHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
+    await graph.openNode(node.id);
+  }
+
+  Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
+    if (node.id == graph.focusId) {
+      setState(() {
+        _highlighted = node;
+        _drawerRaised = false;
+      });
+      return;
+    }
+    setState(() {
+      _highlighted = null;
+      _drawerRaised = false;
+    });
     await graph.openNode(node.id);
   }
 
@@ -394,8 +412,9 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
           if (drawerVisible)
             Positioned.fill(
               child: _HighlightDrawer(
-                key: ValueKey(_highlighted!.id),
                 node: _highlighted!,
+                layout: _layout,
+                focusId: graph.focusId,
                 canViewInGraph: canGoToHighlight,
                 onRaisedChanged: (raised) {
                   if (_drawerRaised == raised) return;
@@ -404,6 +423,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 onViewInGraph: () => _goToHighlighted(graph),
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
+                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
               ),
             ),
           if (graph.working && showFloats)
@@ -535,6 +555,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         _viewport = viewport;
         final layout = _layoutFor(graph, viewport);
+        _layout = layout;
         _resetTransformIfFocusChanged(
           focusId: graph.focusId,
           viewport: viewport,
@@ -665,6 +686,9 @@ class _HighlightDrawer extends StatefulWidget {
     required this.onViewInGraph,
     required this.onEdit,
     required this.onDelete,
+    required this.onOpenRelated,
+    this.layout,
+    this.focusId,
   });
 
   /// Collapsed content height (above the home-indicator inset).
@@ -673,22 +697,27 @@ class _HighlightDrawer extends StatefulWidget {
   static double collapsedHeight(double safeBottom) => contentHeight + safeBottom;
 
   final PlacedNode node;
+  final GraphLayout? layout;
+  final String? focusId;
   final bool canViewInGraph;
   final ValueChanged<bool> onRaisedChanged;
   final VoidCallback onViewInGraph;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final ValueChanged<PlacedNode> onOpenRelated;
 
   @override
   State<_HighlightDrawer> createState() => _HighlightDrawerState();
 }
 
 class _HighlightDrawerState extends State<_HighlightDrawer>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   /// 0 = collapsed, 1 = fully expanded (90% of screen).
   late final AnimationController _extent;
+  late final AnimationController _bodyFling;
   final _bodyScroll = ScrollController();
   var _reportedRaised = false;
+  var _dragMovedDrawer = false;
 
   bool get _expanded => _extent.value > 0.5;
   bool get _fullyOpen => _extent.value > 0.98;
@@ -701,14 +730,45 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
       duration: const Duration(milliseconds: 280),
       value: 0,
     )..addListener(_onExtentTick);
+    _bodyFling = AnimationController.unbounded(vsync: this)
+      ..addListener(_onBodyFlingTick);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HighlightDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node.id == widget.node.id) return;
+    _stopBodyBallistic();
+    if (_bodyScroll.hasClients) {
+      _bodyScroll.jumpTo(0);
+    }
   }
 
   @override
   void dispose() {
     _extent.removeListener(_onExtentTick);
     _extent.dispose();
+    _bodyFling.removeListener(_onBodyFlingTick);
+    _bodyFling.dispose();
     _bodyScroll.dispose();
     super.dispose();
+  }
+
+  void _onBodyFlingTick() {
+    if (!_bodyScroll.hasClients) return;
+    final position = _bodyScroll.position;
+    final next = _bodyFling.value.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (next != position.pixels) {
+      position.jumpTo(next);
+    }
+    final velocity = _bodyFling.velocity;
+    if ((velocity > 0 && next >= position.maxScrollExtent) ||
+        (velocity < 0 && next <= position.minScrollExtent)) {
+      _bodyFling.stop();
+    }
   }
 
   void _onExtentTick() {
@@ -740,13 +800,49 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     _extent.value = (_extent.value - dy / range).clamp(0.0, 1.0);
   }
 
+  void _scrollBodyBy(double dy) {
+    if (!_bodyScroll.hasClients) return;
+    final position = _bodyScroll.position;
+    position.jumpTo((position.pixels - dy).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    ));
+  }
+
+  void _stopBodyBallistic() {
+    if (_bodyFling.isAnimating) _bodyFling.stop();
+  }
+
+  void _flingBody(double primaryVelocity) {
+    if (!_bodyScroll.hasClients) return;
+    // Match Scrollable: negate drag velocity so finger-up continues downward.
+    // Boost + lower friction so a normal flick coasts farther.
+    final velocity = -primaryVelocity * 2.2;
+    if (velocity.abs() < 80) return;
+    final position = _bodyScroll.position;
+    _bodyFling.animateWith(
+      ClampingScrollSimulation(
+        position: position.pixels,
+        velocity: velocity,
+        friction: 0.008,
+      ),
+    );
+  }
+
+  void _onDragStart(DragStartDetails details) {
+    _dragMovedDrawer = false;
+    _stopBodyBallistic();
+  }
+
   void _onDragUpdate(DragUpdateDetails details) {
     final dy = details.delta.dy;
     if (dy > 0) {
-      // Finger down: always drag the drawer down (collapse), never scroll content.
-      if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
-        _bodyScroll.jumpTo(0);
+      // Finger down: scroll list toward top first; only collapse drawer at offset 0.
+      if (_fullyOpen && _bodyScroll.hasClients && _bodyScroll.offset > 0) {
+        _scrollBodyBy(dy);
+        return;
       }
+      _dragMovedDrawer = true;
       _applyDragDy(dy);
       return;
     }
@@ -754,10 +850,11 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     if (_fullyOpen && _bodyScroll.hasClients) {
       final max = _bodyScroll.position.maxScrollExtent;
       if (_bodyScroll.offset < max) {
-        _bodyScroll.jumpTo((_bodyScroll.offset - dy).clamp(0.0, max));
+        _scrollBodyBy(dy);
         return;
       }
     }
+    _dragMovedDrawer = true;
     _applyDragDy(dy);
   }
 
@@ -767,7 +864,15 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
   }
 
   void _onDragEnd(DragEndDetails details) {
-    _snap(velocity: details.primaryVelocity ?? 0);
+    final velocity = details.primaryVelocity ?? 0;
+    // List-only drags keep the sheet open and continue with inertial scroll.
+    if (!_dragMovedDrawer) {
+      _dragMovedDrawer = false;
+      _flingBody(velocity);
+      return;
+    }
+    _dragMovedDrawer = false;
+    _snap(velocity: velocity);
   }
 
   void _toggle() {
@@ -823,12 +928,14 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
               width: double.infinity,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onVerticalDragStart: _onDragStart,
                 onVerticalDragUpdate: _onDragUpdate,
                 onVerticalDragEnd: _onDragEnd,
                 child: Column(
                   children: [
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
+                      onVerticalDragStart: _onDragStart,
                       onVerticalDragUpdate: _onDragUpdate,
                       onVerticalDragEnd: _onDragEnd,
                       onTap: _toggle,
@@ -910,6 +1017,15 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                                 ),
                               ],
                             ),
+                            if (widget.layout != null) ...[
+                              const SizedBox(height: 18),
+                              _RelationsCard(
+                                node: widget.node,
+                                layout: widget.layout!,
+                                focusId: widget.focusId,
+                                onOpen: (item) => _collapseThen(() => widget.onOpenRelated(item)),
+                              ),
+                            ],
                           ],
                         ],
                       ),
@@ -923,6 +1039,187 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
       ],
     );
   }
+}
+
+class _RelationsCard extends StatelessWidget {
+  const _RelationsCard({
+    required this.node,
+    required this.layout,
+    required this.onOpen,
+    this.focusId,
+  });
+
+  final PlacedNode node;
+  final GraphLayout layout;
+  final String? focusId;
+  final ValueChanged<PlacedNode> onOpen;
+
+  static const _order = [
+    NodeRole.parent,
+    NodeRole.sibling,
+    NodeRole.child,
+    NodeRole.related,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final groups = relationsFor(node, layout, focusId: focusId);
+    final sections = [
+      for (final role in _order)
+        if ((groups[role] ?? const []).isNotEmpty) (role, groups[role]!),
+    ];
+    if (sections.isEmpty) {
+      return Material(
+        color: scheme.onSurface.withValues(
+          alpha: scheme.brightness == Brightness.dark ? 0.08 : 0.04,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          child: Text(
+            'No linked topics in this view.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: 0.45),
+                  fontStyle: FontStyle.italic,
+                ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: scheme.onSurface.withValues(
+        alpha: scheme.brightness == Brightness.dark ? 0.10 : 0.045,
+      ),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < sections.length; i++) ...[
+            if (i > 0)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: scheme.onSurface.withValues(alpha: 0.06),
+              ),
+            _RelationSection(
+              role: sections[i].$1,
+              nodes: sections[i].$2,
+              onOpen: onOpen,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RelationSection extends StatelessWidget {
+  const _RelationSection({
+    required this.role,
+    required this.nodes,
+    required this.onOpen,
+  });
+
+  final NodeRole role;
+  final List<PlacedNode> nodes;
+  final ValueChanged<PlacedNode> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = roleFill(role, scheme);
+    final onAccent = scheme.brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.92)
+        : const Color(0xFF1A1C1E).withValues(alpha: 0.88);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+          child: Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: accent,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                relationSectionLabel(role),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        for (final item in nodes)
+          InkWell(
+            onTap: () => onOpen(item),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 10, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: item.role == NodeRole.focus
+                          ? accent
+                          : nodeFill(item, scheme),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _topicInitial(item.title),
+                      style: TextStyle(
+                        color: onAccent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.9),
+                            height: 1.25,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: scheme.onSurface.withValues(alpha: 0.28),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+String _topicInitial(String title) {
+  final trimmed = title.trim();
+  if (trimmed.isEmpty) return '?';
+  return String.fromCharCode(trimmed.runes.first).toUpperCase();
 }
 
 class _DrawerIconButton extends StatelessWidget {

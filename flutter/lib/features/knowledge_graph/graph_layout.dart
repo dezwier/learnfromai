@@ -101,11 +101,120 @@ class GraphLayout {
     required this.nodes,
     required this.width,
     required this.height,
+    this.edges = const [],
   });
 
   final List<PlacedNode> nodes;
+  final List<GraphEdge> edges;
   final double width;
   final double height;
+}
+
+/// Edge `type` as stored by the API → display [NodeRole].
+NodeRole roleFromRelation(String type) {
+  switch (type) {
+    case 'parent':
+      return NodeRole.parent;
+    case 'child':
+      return NodeRole.child;
+    case 'sibling':
+      return NodeRole.sibling;
+    case 'acquaintance':
+    case 'related':
+      return NodeRole.related;
+    default:
+      return NodeRole.related;
+  }
+}
+
+NodeRole inverseRelationRole(NodeRole role) {
+  return switch (role) {
+    NodeRole.parent => NodeRole.child,
+    NodeRole.child => NodeRole.parent,
+    NodeRole.sibling => NodeRole.sibling,
+    NodeRole.related => NodeRole.related,
+    NodeRole.extended => NodeRole.related,
+    NodeRole.focus => NodeRole.related,
+  };
+}
+
+String relationSectionLabel(NodeRole role) {
+  return switch (role) {
+    NodeRole.parent => 'Parents',
+    NodeRole.sibling => 'Siblings',
+    NodeRole.child => 'Children',
+    NodeRole.related => 'Related',
+    NodeRole.extended => 'Nearby',
+    NodeRole.focus => 'Focus',
+  };
+}
+
+/// Direct neighbors of [node] for the highlight drawer (no extended / 2-hop).
+/// Uses layout roles when [node] is the focus, otherwise edges (inbound inverted).
+Map<NodeRole, List<PlacedNode>> relationsFor(
+  PlacedNode node,
+  GraphLayout layout, {
+  String? focusId,
+}) {
+  const sections = [
+    NodeRole.parent,
+    NodeRole.sibling,
+    NodeRole.child,
+    NodeRole.related,
+  ];
+  final groups = {for (final role in sections) role: <PlacedNode>[]};
+  final byId = {for (final n in layout.nodes) n.id: n};
+  final seen = <String>{};
+
+  void add(PlacedNode other, NodeRole role) {
+    if (other.id == node.id || seen.contains(other.id)) return;
+    // Drawer lists only direct neighbors — skip neighbors-of-neighbors.
+    if (other.role == NodeRole.extended) return;
+    final bucket = role == NodeRole.extended ? NodeRole.related : role;
+    if (!groups.containsKey(bucket)) return;
+    seen.add(other.id);
+    groups[bucket]!.add(other);
+  }
+
+  final isFocus = node.id == focusId || node.role == NodeRole.focus;
+  if (isFocus) {
+    for (final other in layout.nodes) {
+      if (other.id == node.id) continue;
+      switch (other.role) {
+        case NodeRole.parent:
+        case NodeRole.sibling:
+        case NodeRole.child:
+        case NodeRole.related:
+          add(other, other.role);
+        case NodeRole.extended:
+        case NodeRole.focus:
+          break;
+      }
+    }
+    return groups;
+  }
+
+  for (final edge in layout.edges) {
+    if (edge.source == node.id) {
+      final other = byId[edge.target];
+      if (other == null || other.role == NodeRole.extended) continue;
+      add(other, roleFromRelation(edge.type));
+    } else if (edge.target == node.id) {
+      final other = byId[edge.source];
+      if (other == null || other.role == NodeRole.extended) continue;
+      add(other, inverseRelationRole(roleFromRelation(edge.type)));
+    }
+  }
+
+  // Fallback: if edges didn't surface the focus, place it by inverse of this node's role.
+  if (focusId != null && !seen.contains(focusId)) {
+    final focus = byId[focusId];
+    if (focus != null) {
+      add(focus, inverseRelationRole(node.role));
+    }
+  }
+
+  return groups;
 }
 
 const graphFocusWidth = 168.0;
@@ -389,7 +498,7 @@ GraphLayout layoutGraph(
   final width = math.max(viewport.width, 280.0);
   final height = math.max(viewport.height, 360.0);
   if (nodes.isEmpty) {
-    return GraphLayout(nodes: const [], width: width, height: height);
+    return GraphLayout(nodes: const [], edges: edges, width: width, height: height);
   }
 
   final byId = {for (final node in nodes) node.id: node};
@@ -605,7 +714,7 @@ GraphLayout layoutGraph(
     }
   }
 
-  return GraphLayout(nodes: placed, width: canvasW, height: canvasH);
+  return GraphLayout(nodes: placed, edges: edges, width: canvasW, height: canvasH);
 }
 
 class _HexCell {
