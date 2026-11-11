@@ -19,7 +19,7 @@ class GraphScreen extends StatefulWidget {
   State<GraphScreen> createState() => _GraphScreenState();
 }
 
-class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin {
+class _GraphScreenState extends State<GraphScreen> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
@@ -30,18 +30,10 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
-  AnimationController? _camera;
-  Animation<Matrix4>? _cameraAnim;
 
   @override
   void initState() {
     super.initState();
-    _camera = AnimationController(vsync: this, duration: const Duration(milliseconds: 420))
-      ..addListener(() {
-        final anim = _cameraAnim;
-        if (anim == null) return;
-        _transform.value = anim.value;
-      });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
       _resumed = true;
@@ -52,7 +44,6 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
   @override
   void dispose() {
     _suggestDebounce?.cancel();
-    _camera?.dispose();
     _search.dispose();
     _searchFocus.dispose();
     _transform.dispose();
@@ -73,31 +64,24 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
         break;
       }
     }
-    final end = Matrix4.identity();
+    final matrix = Matrix4.identity();
     if (target == null) {
-      end.translateByDouble(
+      matrix.translateByDouble(
         (viewport.width - layout.width) / 2,
         (viewport.height - layout.height) / 2,
         0,
         1,
       );
-    } else {
-      final scale = _transform.value.getMaxScaleOnAxis().clamp(0.55, 2.4);
-      final tx = viewport.width / 2 - target.center.dx * scale;
-      final ty = viewport.height / 2 - target.center.dy * scale;
-      end
-        ..translateByDouble(tx, ty, 0, 1)
-        ..scaleByDouble(scale, scale, scale, 1);
-    }
-    final cam = _camera;
-    if (cam == null) {
-      _transform.value = end;
+      _transform.value = matrix;
       return;
     }
-    _cameraAnim = Matrix4Tween(begin: _transform.value.clone(), end: end).animate(
-      CurvedAnimation(parent: cam, curve: Curves.easeInOutCubic),
-    );
-    cam.forward(from: 0);
+    final scale = _transform.value.getMaxScaleOnAxis().clamp(0.45, 3.5);
+    final tx = viewport.width / 2 - target.center.dx * scale;
+    final ty = viewport.height / 2 - target.center.dy * scale;
+    matrix
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(scale, scale, scale, 1);
+    _transform.value = matrix;
   }
 
   void _requestMapForViewport(GraphController graph, GraphLayout layout, Size viewport) {
@@ -428,15 +412,6 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
   }
 
   GraphLayout _layoutFor(GraphController graph, Size viewport) {
-    final edges = [
-      for (final raw in graph.worldEdges)
-        GraphEdge(
-          source: raw['source'] ?? '',
-          target: raw['target'] ?? '',
-          type: raw['type'] ?? 'related',
-        ),
-    ];
-    final focus = graph.focusId;
     final nodes = [
       for (final topic in graph.worldTopics)
         if (topic.q != null && topic.r != null)
@@ -445,7 +420,7 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
             title: topic.title,
             depth: topic.depth,
             distance: topic.depth,
-            kind: kindRelativeToFocus(nodeId: topic.id, focusId: focus, edges: edges),
+            kind: topic.id == graph.focusId ? 'focus' : topic.kind,
             description: topic.description,
             q: topic.q,
             r: topic.r,
@@ -777,7 +752,7 @@ class _NodeCard extends StatelessWidget {
     final dark = scheme.brightness == Brightness.dark;
     final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
-        : roleFill(node.role, scheme);
+        : depthFill(node.depth, scheme);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: (centerHighlight || focused) ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),

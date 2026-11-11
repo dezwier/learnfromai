@@ -62,9 +62,8 @@ def ensure_world_placed(session: Session) -> int:
     if not nodes:
         return 0
     edges = list(session.exec(select(KnowledgeEdge)).all())
-    parents_of, _children_of = _parent_child_maps(edges)
+    parents_of, children_of = _parent_child_maps(edges)
     depths, primary_parent = _depths_and_primary(nodes, parents_of)
-    neighbors = _undirected_neighbors(edges)
 
     occupied: set[tuple[int, int]] = set()
     for node in nodes:
@@ -72,48 +71,24 @@ def ensure_world_placed(session: Session) -> int:
             occupied.add((node.q, node.r))
 
     placed = 0
-    by_id = {n.id: n for n in nodes}
-
-    def _commit(node: KnowledgeNode, cell: tuple[int, int], depth: int) -> None:
-        nonlocal placed
-        node.q, node.r = cell
-        node.map_depth = depth
-        occupied.add(cell)
-        session.add(node)
-        placed += 1
-
-    # 1) Parent-chain roots (depth 0) pack near the origin.
-    #    Soft-only nodes (sibling/acquaintance, no parents) wait for anchors in step 3.
-    spiral = spiral_cells(max(len(nodes) * 4, 64))
-    soft_links = _soft_neighbors(edges)
-    tree_linked: set[UUID] = set()
-    for e in edges:
-        if e.relation in {RELATION_PARENT, RELATION_CHILD}:
-            tree_linked.add(e.from_id)
-            tree_linked.add(e.to_id)
-    soft_only = {
-        n.id
-        for n in nodes
-        if depths.get(n.id, 0) == 0
-        and not parents_of.get(n.id)
-        and soft_links.get(n.id)
-        and n.id not in tree_linked
-    }
+    # Roots first (depth 0), stable by id.
     roots = sorted(
-        [
-            n
-            for n in nodes
-            if depths.get(n.id, 0) == 0 and (n.q is None or n.r is None) and n.id not in soft_only
-        ],
+        [n for n in nodes if depths.get(n.id, 0) == 0 and (n.q is None or n.r is None)],
         key=lambda n: str(n.id),
     )
+    spiral = spiral_cells(max(len(roots) * 4, 64))
     for node in roots:
-        cell = _first_free(spiral, occupied)
-        if cell is None:
-            break
-        _commit(node, cell, 0)
+        for cell in spiral:
+            if cell not in occupied:
+                node.q, node.r = cell
+                node.map_depth = 0
+                occupied.add(cell)
+                session.add(node)
+                placed += 1
+                break
 
-    # 2) Parent-chain children hang next to their primary parent (outward).
+    # Refresh placed roots into a lookup for children.
+    by_id = {n.id: n for n in nodes}
     max_depth = max(depths.values(), default=0)
     for depth in range(1, max_depth + 1):
         layer = sorted(
@@ -123,41 +98,25 @@ def ensure_world_placed(session: Session) -> int:
         for node in layer:
             parent_id = primary_parent.get(node.id)
             parent = by_id.get(parent_id) if parent_id else None
-            if parent is not None and parent.q is not None and parent.r is not None:
-                cell = _place_near_anchor(occupied, parent.q, parent.r, outward=True)
+            if parent is None or parent.q is None or parent.r is None:
+                # Fallback: treat like a root near origin.
+                cell = _first_free(spiral_cells(10_000), occupied)
             else:
-                cell = _place_near_any(occupied, by_id, neighbors.get(node.id, []), spiral)
+                cell = _place_near_parent(
+                    occupied,
+                    parent_q=parent.q,
+                    parent_r=parent.r,
+                    outward=True,
+                )
             if cell is None:
                 continue
-            _commit(node, cell, depth)
+            node.q, node.r = cell
+            node.map_depth = depth
+            occupied.add(cell)
+            session.add(node)
+            placed += 1
 
-    # 3) Remaining (siblings / acquaintances / linked roots) sit next to a placed neighbor.
-    pending = sorted(
-        [n for n in nodes if n.q is None or n.r is None],
-        key=lambda n: str(n.id),
-    )
-    progress = True
-    while pending and progress:
-        progress = False
-        still: list[KnowledgeNode] = []
-        for node in pending:
-            cell = _place_near_any(occupied, by_id, neighbors.get(node.id, []), spiral)
-            if cell is None:
-                still.append(node)
-                continue
-            _commit(node, cell, depths.get(node.id, 0))
-            progress = True
-        pending = still
-
-    for node in pending:
-        cell = _first_free(spiral_cells(10_000), occupied)
-        if cell is None:
-            break
-        _commit(node, cell, depths.get(node.id, 0))
-
-    # 4) Pull parent-less siblings/acquaintances that drifted far from their anchors.
-    placed += _tighten_linked_roots(session, nodes, by_id, parents_of, soft_links, occupied)
-
+    # Fill map_depth for already-placed nodes missing it.
     for node in nodes:
         if node.map_depth is None and node.id in depths:
             node.map_depth = depths[node.id]
@@ -295,105 +254,31 @@ def _depths_and_primary(
     return depths, primary
 
 
-def _place_near_anchor(
+def _place_near_parent(
     occupied: set[tuple[int, int]],
-    aq: int,
-    ar: int,
     *,
-    outward: bool = False,
+    parent_q: int,
+    parent_r: int,
+    outward: bool,
 ) -> tuple[int, int] | None:
-    anchor_dist = cube_distance(aq, ar)
+    parent_dist = cube_distance(parent_q, parent_r)
     for radius in range(1, 48):
-        candidates = ring_around(aq, ar, radius)
+        candidates = ring_around(parent_q, parent_r, radius)
         if outward:
             candidates.sort(
                 key=lambda cell: (
-                    0 if cube_distance(cell[0], cell[1]) > anchor_dist else 1,
+                    -cube_distance(cell[0], cell[1]) if cube_distance(cell[0], cell[1]) > parent_dist else 1,
                     cube_distance(cell[0], cell[1]),
                     cell[0],
                     cell[1],
                 )
             )
         else:
-            candidates.sort(key=lambda cell: (cube_distance(cell[0] - aq, cell[1] - ar), cell[0], cell[1]))
+            candidates.sort(key=lambda cell: (cube_distance(cell[0], cell[1]), cell[0], cell[1]))
         for cell in candidates:
             if cell not in occupied:
                 return cell
     return None
-
-
-def _place_near_any(
-    occupied: set[tuple[int, int]],
-    by_id: dict[UUID, KnowledgeNode],
-    neighbor_ids: list[UUID],
-    spiral,
-) -> tuple[int, int] | None:
-    anchors = [
-        by_id[nid]
-        for nid in sorted(neighbor_ids, key=str)
-        if nid in by_id and by_id[nid].q is not None and by_id[nid].r is not None
-    ]
-    for anchor in anchors:
-        cell = _place_near_anchor(occupied, anchor.q, anchor.r, outward=False)
-        if cell is not None:
-            return cell
-    return _first_free(spiral, occupied)
-
-
-def _undirected_neighbors(edges: list[KnowledgeEdge]) -> dict[UUID, list[UUID]]:
-    adj: dict[UUID, set[UUID]] = defaultdict(set)
-    for edge in edges:
-        adj[edge.from_id].add(edge.to_id)
-        adj[edge.to_id].add(edge.from_id)
-    return {key: sorted(values, key=str) for key, values in adj.items()}
-
-
-def _soft_neighbors(edges: list[KnowledgeEdge]) -> dict[UUID, list[UUID]]:
-    """Sibling / acquaintance links only — used to keep soft neighbors near focus."""
-    adj: dict[UUID, set[UUID]] = defaultdict(set)
-    for edge in edges:
-        if edge.relation not in {"sibling", "acquaintance"}:
-            continue
-        adj[edge.from_id].add(edge.to_id)
-        adj[edge.to_id].add(edge.from_id)
-    return {key: sorted(values, key=str) for key, values in adj.items()}
-
-
-def _tighten_linked_roots(
-    session: Session,
-    nodes: list[KnowledgeNode],
-    by_id: dict[UUID, KnowledgeNode],
-    parents_of: dict[UUID, list[UUID]],
-    soft_neighbors: dict[UUID, list[UUID]],
-    occupied: set[tuple[int, int]],
-) -> int:
-    """Move parent-less siblings/acquaintances that sit far from their anchors closer."""
-    moved = 0
-    for node in sorted(nodes, key=lambda n: str(n.id)):
-        if parents_of.get(node.id):
-            continue
-        if node.q is None or node.r is None:
-            continue
-        anchors = [
-            by_id[nid]
-            for nid in soft_neighbors.get(node.id, [])
-            if nid in by_id and by_id[nid].q is not None and by_id[nid].r is not None
-        ]
-        if not anchors:
-            continue
-        best = min(anchors, key=lambda a: (cube_distance(a.q - node.q, a.r - node.r), str(a.id)))
-        if cube_distance(best.q - node.q, best.r - node.r) <= 2:
-            continue
-        occupied.discard((node.q, node.r))
-        cell = _place_near_anchor(occupied, best.q, best.r, outward=False)
-        if cell is None:
-            occupied.add((node.q, node.r))
-            continue
-        node.q, node.r = cell
-        occupied.add(cell)
-        session.add(node)
-        moved += 1
-    return moved
 
 
 def _first_free(cells, occupied: set[tuple[int, int]]) -> tuple[int, int] | None:
