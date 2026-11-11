@@ -163,4 +163,26 @@ void main() {
     expect(byId.containsKey('ext-p1'), isTrue);
     expect(byId.containsKey('ext-s1'), isTrue);
   });
+
+  test('all directs are placed even when maxExtended is zero', () {
+    final layout = layoutGraph(
+      const [
+        GraphNode(id: 'focus', title: 'Dinosaur', depth: 0, kind: 'focus'),
+        GraphNode(id: 'parent', title: 'Reptile', depth: -1, kind: 'parent'),
+        GraphNode(id: 'sibling', title: 'Mammals', depth: 0, kind: 'sibling'),
+        GraphNode(id: 'child', title: 'Saurischia', depth: 1, kind: 'child'),
+        GraphNode(id: 'related', title: 'Mesozoic', depth: 0, kind: 'related'),
+        GraphNode(id: 'ext-1', title: 'Outer', depth: 0, kind: 'extended'),
+      ],
+      const [
+        GraphEdge(source: 'child', target: 'ext-1', type: 'child'),
+      ],
+      focusId: 'focus',
+      viewport: const Size(390, 700),
+      maxExtended: 0,
+    );
+    final ids = {for (final node in layout.nodes) node.id};
+    expect(ids, containsAll(['focus', 'parent', 'sibling', 'child', 'related']));
+    expect(ids.contains('ext-1'), isFalse);
+  });
 }

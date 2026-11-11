@@ -384,6 +384,7 @@ GraphLayout layoutGraph(
   List<GraphEdge> edges, {
   required String focusId,
   Size viewport = const Size(390, 720),
+  int maxExtended = 12,
 }) {
   final width = math.max(viewport.width, 280.0);
   final height = math.max(viewport.height, 360.0);
@@ -462,8 +463,8 @@ GraphLayout layoutGraph(
     }
   }
 
-  final slotBudget = _viewportSlotBudget(width, height, minDirect: directs.length);
-  final fillerSlots = math.max(0, slotBudget - directs.length);
+  // Always place every direct neighbor; outer ring is capped by settings.
+  final fillerSlots = math.max(0, maxExtended);
   // Round-robin fillers by via role so parents/siblings get outer tiles too.
   final pools = <NodeRole, List<GraphNode>>{
     for (final role in viaPreference) role: <GraphNode>[],
@@ -711,23 +712,6 @@ double _nearAnchorScore(
     score += _cellScore(cell, viaRole) * 0.4;
   }
   return score;
-}
-
-/// How many surround hexes can stay readable in the viewport.
-int _viewportSlotBudget(double width, double height, {required int minDirect}) {
-  const minUnit = 26.0;
-  const pad = 8.0;
-  var ring = 2;
-  var total = 0;
-  while (ring <= 5) {
-    final halfExtent = 2.5 + ring * math.sqrt(3);
-    final unit = math.min((width - 2 * pad) / (2 * halfExtent), (height - 2 * pad) / (2 * halfExtent));
-    if (unit < minUnit && total >= minDirect) break;
-    total += ring * 6;
-    if (unit < minUnit) break;
-    ring++;
-  }
-  return math.max(total, minDirect);
 }
 
 double _angleDist(double a, double b) {

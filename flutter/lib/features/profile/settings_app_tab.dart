@@ -116,6 +116,19 @@ class SettingsAppTab extends StatelessWidget {
             onChanged: (value) => graph.savePreferences(prefs.copyWith(acquaintances: value)),
           ),
         ),
+        const SizedBox(height: 16),
+        SettingsFormStyles.settingsRow(
+          context: context,
+          label: 'Outer ring',
+          description: 'Neighbors of neighbors to show (if present).',
+          controlWidth: 120,
+          control: SettingsFormStyles.stepperControl(
+            value: prefs.extended,
+            min: 0,
+            max: 24,
+            onChanged: (value) => graph.savePreferences(prefs.copyWith(extended: value)),
+          ),
+        ),
       ],
     );
   }

@@ -11,6 +11,7 @@ DEFAULTS = {
     "siblings": 3,
     "children": 4,
     "acquaintances": 4,
+    "extended": 12,
 }
 
 CLAMPS = {
@@ -18,6 +19,7 @@ CLAMPS = {
     "siblings": (2, 3),
     "children": (3, 5),
     "acquaintances": (3, 5),
+    "extended": (0, 24),
 }
 
 

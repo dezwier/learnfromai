@@ -385,7 +385,13 @@ class _GraphScreenState extends State<GraphScreen> {
           ),
     ];
     final focus = graph.focusId ?? (nodes.isEmpty ? '' : nodes.first.id);
-    return layoutGraph(nodes, edges, focusId: focus, viewport: viewport);
+    return layoutGraph(
+      nodes,
+      edges,
+      focusId: focus,
+      viewport: viewport,
+      maxExtended: graph.prefs.extended,
+    );
   }
 }
 

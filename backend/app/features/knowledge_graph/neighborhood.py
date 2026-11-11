@@ -309,7 +309,7 @@ def _persist_request(
     counts: dict[str, int],
     job_id: UUID | None,
 ) -> KnowledgeRequest:
-    payload = build_subgraph(session, focus)
+    payload = build_subgraph(session, focus, max_extended=int(counts.get("extended") or 12))
     request = KnowledgeRequest(
         user_id=user_id,
         focus_id=focus.id,

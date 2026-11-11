@@ -19,15 +19,27 @@ def _run_queued(session):
 def test_preferences_defaults_and_clamp(client, auth, user, session):
     response = client.get("/api/v1/me/preferences", headers=auth)
     assert response.status_code == 200
-    assert response.json()["neighborhood"] == {"parents": 2, "siblings": 3, "children": 4, "acquaintances": 4}
+    assert response.json()["neighborhood"] == {
+        "parents": 2,
+        "siblings": 3,
+        "children": 4,
+        "acquaintances": 4,
+        "extended": 12,
+    }
 
     patched = client.patch(
         "/api/v1/me/preferences",
         headers=auth,
-        json={"neighborhood": {"parents": 9, "siblings": 1, "children": 3, "acquaintances": 5}},
+        json={"neighborhood": {"parents": 9, "siblings": 1, "children": 3, "acquaintances": 5, "extended": 99}},
     )
     assert patched.status_code == 200
-    assert patched.json()["neighborhood"] == {"parents": 2, "siblings": 2, "children": 3, "acquaintances": 5}
+    assert patched.json()["neighborhood"] == {
+        "parents": 2,
+        "siblings": 2,
+        "children": 3,
+        "acquaintances": 5,
+        "extended": 24,
+    }
     session.refresh(user)
     assert neighborhood_counts(user)["siblings"] == 2
 

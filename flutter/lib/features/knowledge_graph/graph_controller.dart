@@ -17,12 +17,15 @@ class NeighborhoodPrefs {
     this.siblings = 3,
     this.children = 4,
     this.acquaintances = 4,
+    this.extended = 12,
   });
 
   final int parents;
   final int siblings;
   final int children;
   final int acquaintances;
+  /// How many neighbors-of-neighbors to show around the focus (0–24).
+  final int extended;
 
   factory NeighborhoodPrefs.fromJson(Map<String, dynamic>? raw) {
     if (raw == null) return const NeighborhoodPrefs();
@@ -31,6 +34,7 @@ class NeighborhoodPrefs {
       siblings: (raw['siblings'] as num?)?.toInt() ?? 3,
       children: (raw['children'] as num?)?.toInt() ?? 4,
       acquaintances: (raw['acquaintances'] as num?)?.toInt() ?? 4,
+      extended: (raw['extended'] as num?)?.toInt() ?? 12,
     );
   }
 
@@ -39,14 +43,22 @@ class NeighborhoodPrefs {
         'siblings': siblings,
         'children': children,
         'acquaintances': acquaintances,
+        'extended': extended,
       };
 
-  NeighborhoodPrefs copyWith({int? parents, int? siblings, int? children, int? acquaintances}) {
+  NeighborhoodPrefs copyWith({
+    int? parents,
+    int? siblings,
+    int? children,
+    int? acquaintances,
+    int? extended,
+  }) {
     return NeighborhoodPrefs(
       parents: parents ?? this.parents,
       siblings: siblings ?? this.siblings,
       children: children ?? this.children,
       acquaintances: acquaintances ?? this.acquaintances,
+      extended: extended ?? this.extended,
     );
   }
 }
@@ -206,6 +218,11 @@ class GraphController extends ChangeNotifier {
       if (neighborhood is Map<String, dynamic>) {
         prefs = NeighborhoodPrefs.fromJson(neighborhood);
         notifyListeners();
+      }
+      // Refetch so the API returns the configured outer-ring count.
+      final id = focusId;
+      if (id != null && !refreshing && !loading && !working) {
+        await openExisting(id);
       }
     } on ApiException catch (exc) {
       error = exc.message;

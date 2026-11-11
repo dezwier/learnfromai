@@ -56,7 +56,13 @@ void main() {
       loader: (path) async {
         if (path == '/me/preferences') {
           return {
-            'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
+            'neighborhood': {
+              'parents': 2,
+              'siblings': 3,
+              'children': 4,
+              'acquaintances': 4,
+              'extended': 12,
+            },
           };
         }
         return {'focus_node_id': null, 'incomplete': false, 'nodes': [], 'edges': []};
@@ -112,7 +118,13 @@ void main() {
       loader: (path) async {
         if (path == '/me/preferences') {
           return {
-            'neighborhood': {'parents': 2, 'siblings': 3, 'children': 4, 'acquaintances': 4},
+            'neighborhood': {
+              'parents': 2,
+              'siblings': 3,
+              'children': 4,
+              'acquaintances': 4,
+              'extended': 12,
+            },
           };
         }
         if (path.startsWith('/knowledge/graph/')) return _compact();
