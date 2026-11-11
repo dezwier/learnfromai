@@ -11,6 +11,7 @@ import '../../core/widgets/study_card.dart';
 import '../auth/auth_controller.dart';
 import 'graph_controller.dart';
 import 'graph_layout.dart';
+import 'title_wrap.dart';
 
 class GraphScreen extends StatefulWidget {
   const GraphScreen({super.key});
@@ -25,6 +26,8 @@ class _GraphScreenState extends State<GraphScreen> {
   final _transform = TransformationController();
   String? _transformFocusId;
   Timer? _suggestDebounce;
+  Offset? _searchOutsideDown;
+  var _searchOutsideMoved = false;
   var _resumed = false;
   var _searchOpen = false;
 
@@ -248,7 +251,6 @@ class _GraphScreenState extends State<GraphScreen> {
               onChanged: (value) => _onSearchChanged(graph, value),
               onSubmit: () => _submitSearch(graph),
               onPick: (choice) => _pickSuggestion(graph, choice),
-              onDismiss: _dismissSearch,
             )
           : null,
       body: Stack(
@@ -270,7 +272,36 @@ class _GraphScreenState extends State<GraphScreen> {
                     subtitle: 'Try another topic.',
                   ),
                 ),
-              Expanded(child: _body(context, graph)),
+              Expanded(
+                child: _searchOpen
+                    ? Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: (event) {
+                          _searchOutsideDown = event.position;
+                          _searchOutsideMoved = false;
+                        },
+                        onPointerMove: (event) {
+                          final start = _searchOutsideDown;
+                          if (start == null || _searchOutsideMoved) return;
+                          // Treat as pan once the finger moves past a tap slop.
+                          if ((event.position - start).distanceSquared > 64) {
+                            _searchOutsideMoved = true;
+                          }
+                        },
+                        onPointerUp: (_) {
+                          final wasTap = !_searchOutsideMoved && _searchOutsideDown != null;
+                          _searchOutsideDown = null;
+                          _searchOutsideMoved = false;
+                          if (wasTap) _dismissSearch();
+                        },
+                        onPointerCancel: (_) {
+                          _searchOutsideDown = null;
+                          _searchOutsideMoved = false;
+                        },
+                        child: _body(context, graph),
+                      )
+                    : _body(context, graph),
+              ),
             ],
           ),
           if (graph.working)
@@ -437,7 +468,6 @@ class _SearchBar extends StatelessWidget {
     required this.onChanged,
     required this.onSubmit,
     required this.onPick,
-    required this.onDismiss,
   });
 
   final TextEditingController controller;
@@ -446,7 +476,6 @@ class _SearchBar extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final VoidCallback onSubmit;
   final ValueChanged<TopicChoice> onPick;
-  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -507,7 +536,6 @@ class _SearchBar extends StatelessWidget {
                         ),
                         onChanged: onChanged,
                         onSubmitted: (_) => onSubmit(),
-                        onTapOutside: (_) => onDismiss(),
                       ),
                     ),
                     IconButton(
@@ -615,6 +643,7 @@ class _NodeCard extends StatelessWidget {
                         maxLines: 3,
                         minFontSize: 12,
                         maxFontSize: (node.radius * 0.5).clamp(18.0, 30.0),
+                        hyphenateWords: true,
                         align: Alignment.bottomCenter,
                         style: TextStyle(
                           height: 1.1,
@@ -629,7 +658,7 @@ class _NodeCard extends StatelessWidget {
                         height: descBudget,
                         child: _FittingLabel(
                           text: node.description!.trim(),
-                          maxLines: 12,
+                          maxLines: 5,
                           minFontSize: 10,
                           maxFontSize: (node.radius * 0.34).clamp(13.0, 20.0),
                           align: Alignment.topCenter,
@@ -665,6 +694,7 @@ class _NodeCard extends StatelessWidget {
               maxLines: 4,
               minFontSize: 8,
               maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
+              hyphenateWords: true,
               style: TextStyle(
                 height: 1.15,
                 fontWeight: FontWeight.w500,
@@ -678,7 +708,7 @@ class _NodeCard extends StatelessWidget {
   }
 }
 
-/// Scales font to the tile. Wraps only between words; never mid-word.
+/// Scales font to the tile. Titles keep whole words until min size, then hyphenate.
 class _FittingLabel extends StatelessWidget {
   const _FittingLabel({
     required this.text,
@@ -686,6 +716,7 @@ class _FittingLabel extends StatelessWidget {
     required this.maxLines,
     required this.minFontSize,
     required this.maxFontSize,
+    this.hyphenateWords = false,
     this.align = Alignment.center,
   });
 
@@ -694,6 +725,7 @@ class _FittingLabel extends StatelessWidget {
   final int maxLines;
   final double minFontSize;
   final double maxFontSize;
+  final bool hyphenateWords;
   final Alignment align;
 
   @override
@@ -701,7 +733,6 @@ class _FittingLabel extends StatelessWidget {
     final scaler = MediaQuery.textScalerOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Keep a margin so painted glyphs never force a mid-word break.
         final maxWidth = (constraints.maxWidth - 2).clamp(0.0, double.infinity);
         final maxHeight = constraints.maxHeight.isFinite
             ? constraints.maxHeight
@@ -709,107 +740,33 @@ class _FittingLabel extends StatelessWidget {
         if (maxWidth <= 1 || text.trim().isEmpty) {
           return const SizedBox.shrink();
         }
-        final fontSize = _fitFontSize(
+        final laidOut = layoutTitle(
           text: text,
           style: style,
           maxWidth: maxWidth,
           maxHeight: maxHeight,
           maxLines: maxLines,
-          minSize: minFontSize,
-          maxSize: maxFontSize,
+          minFontSize: minFontSize,
+          maxFontSize: maxFontSize,
           textScaler: scaler,
+          hyphenateAtMinSize: hyphenateWords,
         );
         return SizedBox.expand(
           child: Align(
             alignment: align,
             child: Text(
-              text,
+              laidOut.text,
               textAlign: TextAlign.center,
               softWrap: true,
               maxLines: maxLines,
-              overflow: TextOverflow.clip,
-              style: style.copyWith(fontSize: fontSize),
+              overflow: TextOverflow.ellipsis,
+              style: style.copyWith(fontSize: laidOut.fontSize),
             ),
           ),
         );
       },
     );
   }
-}
-
-double _fitFontSize({
-  required String text,
-  required TextStyle style,
-  required double maxWidth,
-  required double maxHeight,
-  required int maxLines,
-  required double minSize,
-  required double maxSize,
-  required TextScaler textScaler,
-}) {
-  final words = [
-    for (final w in text.split(RegExp(r'\s+')))
-      if (w.isNotEmpty) w,
-  ];
-  if (words.isEmpty) return minSize;
-
-  var lo = minSize;
-  var hi = maxSize;
-  var best = minSize;
-  for (var i = 0; i < 16; i++) {
-    final mid = (lo + hi) / 2;
-    if (_textFits(
-      text: text,
-      words: words,
-      style: style.copyWith(fontSize: mid),
-      maxWidth: maxWidth,
-      maxHeight: maxHeight,
-      maxLines: maxLines,
-      textScaler: textScaler,
-    )) {
-      best = mid;
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  return best;
-}
-
-bool _textFits({
-  required String text,
-  required List<String> words,
-  required TextStyle style,
-  required double maxWidth,
-  required double maxHeight,
-  required int maxLines,
-  required TextScaler textScaler,
-}) {
-  // Safety margin vs measurement vs paint differences (esp. with custom fonts).
-  final wordLimit = maxWidth * 0.96;
-  for (final word in words) {
-    final wordPainter = TextPainter(
-      text: TextSpan(text: word, style: style),
-      textDirection: TextDirection.ltr,
-      textScaler: textScaler,
-      maxLines: 1,
-    )..layout();
-    if (wordPainter.width > wordLimit) return false;
-  }
-
-  final painter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    textDirection: TextDirection.ltr,
-    textAlign: TextAlign.center,
-    textScaler: textScaler,
-    maxLines: maxLines,
-  )..layout(maxWidth: maxWidth);
-  if (painter.didExceedMaxLines) return false;
-  if (painter.height > maxHeight + 0.5) return false;
-  for (final metric in painter.computeLineMetrics()) {
-    if (metric.width > maxWidth + 0.5) return false;
-  }
-  return true;
 }
 
 void _paintHexDepth(Canvas canvas, Path path, Color color, {required bool dark}) {

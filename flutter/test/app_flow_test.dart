@@ -59,9 +59,9 @@ void main() {
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    expect(find.text('Saurischia'), findsOneWidget);
-    expect(find.text('Mammals'), findsOneWidget);
-    expect(find.text('Mesozoic'), findsOneWidget);
+    expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
+    expect(find.byWidgetPredicate(_titleLooksLike('Mammals')), findsWidgets);
+    expect(find.byWidgetPredicate(_titleLooksLike('Mesozoic')), findsWidgets);
     expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
     expect(find.byTooltip('Search'), findsOneWidget);
   });
@@ -120,7 +120,7 @@ void main() {
     await pending;
     await tester.pumpAndSettle();
     expect(graph.focusId, '2');
-    expect(find.text('Saurischia'), findsOneWidget);
+    expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
   });
 
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
@@ -140,6 +140,25 @@ void main() {
     await tester.tapAt(const Offset(24, 180));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('panning the graph keeps search open', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+
+    final gesture = await tester.startGesture(const Offset(200, 280));
+    await gesture.moveBy(const Offset(0, -80));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
   });
 
   testWidgets('typing in search lists existing topics and opens without focus post', (tester) async {
@@ -231,6 +250,17 @@ void main() {
   test('api client maps the error envelope', () {
     expect(ApiException(401, 'UNAUTHORIZED', 'Not authenticated').code, 'UNAUTHORIZED');
   });
+}
+
+/// Titles may hard-hyphenate under the test font; compare without '-' / newlines.
+bool Function(Widget) _titleLooksLike(String title) {
+  return (widget) {
+    if (widget is! Text) return false;
+    final raw = widget.data;
+    if (raw == null) return false;
+    return raw.replaceAll('-', '').replaceAll('\n', '') == title ||
+        raw.replaceAll('-', '').replaceAll('\n', '').contains(title);
+  };
 }
 
 Map<String, dynamic> _compact() {
