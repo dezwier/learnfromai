@@ -168,7 +168,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     topic = str(payload.get("topic") or "").strip() or None
     set_progress(session, job, stage="resolve", message="Resolving topic…", fraction=0.05)
     # Collapse leftover near-duplicates from earlier generations before linking more.
-    consolidate_near_duplicates(session)
+    consolidate_near_duplicates(session, job=job)
     session.commit()
     renew_lease(session, job)
     # Consolidate may have deleted focus_id; fall back to topic lookup for the keeper.
@@ -266,7 +266,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": False}
 
 
-def consolidate_near_duplicates(session: Session) -> int:
+def consolidate_near_duplicates(session: Session, job: GenerationJob | None = None) -> int:
     """Merge existing same_topic nodes into one canonical row. Returns merges performed."""
     rows = list(session.exec(select(KnowledgeNode).order_by(KnowledgeNode.created_at, KnowledgeNode.name)).all())
     if len(rows) < 2:
@@ -279,6 +279,8 @@ def consolidate_near_duplicates(session: Session) -> int:
     claimed: set[UUID] = set()
     merges = 0
     for index, keep in enumerate(rows):
+        if job is not None and index > 0 and index % 40 == 0:
+            renew_lease(session, job)
         if keep.id in claimed:
             continue
         cluster = [keep]
@@ -635,7 +637,12 @@ def _persist_request(
     counts: dict[str, int],
     job_id: UUID | None,
 ) -> KnowledgeRequest:
-    payload = build_subgraph(session, focus, max_extended=int(counts.get("extended") or 12))
+    payload = build_subgraph(
+        session,
+        focus,
+        max_extended=int(counts.get("extended") or 12),
+        counts=counts,
+    )
     request = KnowledgeRequest(
         user_id=user_id,
         focus_id=focus.id,
@@ -660,7 +667,13 @@ def _persist_request(
     return request
 
 
-def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int = 36) -> dict:
+def build_subgraph(
+    session: Session,
+    focus: KnowledgeNode,
+    *,
+    max_extended: int = 36,
+    counts: dict[str, int] | None = None,
+) -> dict:
     """Direct neighborhood first, then unique neighbors-of-neighbors as `extended`."""
     kinds: dict[UUID, str] = {focus.id: "focus"}
     depths: dict[UUID, int] = {focus.id: 0}
@@ -776,9 +789,12 @@ def build_subgraph(session: Session, focus: KnowledgeNode, *, max_extended: int 
         if edge.from_id == focus.id
         or (edge.from_id in set(direct_ids) and kinds.get(edge.to_id) == "extended")
     ]
+    incomplete = False
+    if counts is not None:
+        incomplete = not is_complete(session, focus.id, counts)
     return {
         "focus_node_id": str(focus.id),
-        "incomplete": False,
+        "incomplete": incomplete,
         "nodes": node_payload,
         "edges": edge_payload,
     }

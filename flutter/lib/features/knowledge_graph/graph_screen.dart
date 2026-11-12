@@ -160,14 +160,13 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   Future<void> _goToHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
-    await graph.openNode(node.id);
+    await graph.openExisting(node.id);
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
     // Keep the drawer on the destination topic while the graph loads — no blank gap.
     setState(() => _highlighted = node);
-    if (node.id == graph.focusId) return;
-    await graph.openNode(node.id);
+    await graph.openExisting(node.id);
     if (!mounted) return;
     final focusId = graph.focusId;
     final layout = _layout;

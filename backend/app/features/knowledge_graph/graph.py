@@ -34,7 +34,9 @@ def focus_or_enqueue(
     focus = ensure_focus_node(session, topic=topic, node_id=node_id)
     session.flush()
     if is_complete(session, focus.id, counts):
-        payload = build_subgraph(session, focus, max_extended=counts["extended"])
+        payload = build_subgraph(
+            session, focus, max_extended=counts["extended"], counts=counts
+        )
         request = KnowledgeRequest(
             user_id=user.id,
             focus_id=focus.id,
@@ -60,7 +62,9 @@ def focus_or_enqueue(
 def graph_for_focus(session: Session, *, user: User, focus_id: UUID) -> dict:
     focus = ensure_focus_node(session, node_id=focus_id)
     counts = neighborhood_counts(user)
-    payload = build_subgraph(session, focus, max_extended=counts["extended"])
+    payload = build_subgraph(
+        session, focus, max_extended=counts["extended"], counts=counts
+    )
     request = KnowledgeRequest(
         user_id=user.id,
         focus_id=focus.id,

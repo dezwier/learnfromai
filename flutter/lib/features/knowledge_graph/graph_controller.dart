@@ -92,6 +92,7 @@ class GraphController extends ChangeNotifier {
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
   int _suggestToken = 0;
+  int _fillToken = 0;
 
   String? get focusId {
     final raw = categoryGraph?['focus_node_id'];
@@ -156,14 +157,22 @@ class GraphController extends ChangeNotifier {
     await _focus(body: {'node_id': id});
   }
 
-  /// Open an existing node via GET graph — no expand/LLM job.
+  /// Open an existing node via GET graph — show it immediately, then fill if needed.
   Future<void> openExisting(String id) async {
-    if (refreshing || loading || working) return;
-    if (focusId == id && categoryGraph != null) {
+    if (refreshing || loading) return;
+    if (focusId == id && categoryGraph != null && categoryGraph?['incomplete'] != true) {
       suggestions = [];
       notifyListeners();
       return;
     }
+    if (focusId == id && categoryGraph != null) {
+      suggestions = [];
+      notifyListeners();
+      await _fillNeighborhood(id);
+      return;
+    }
+    // Navigating away cancels an in-flight background fill for the previous focus.
+    final fillGeneration = ++_fillToken;
     final first = categoryGraph == null;
     loading = first;
     refreshing = !first;
@@ -173,12 +182,14 @@ class GraphController extends ChangeNotifier {
     suggestions = [];
     progressMessage = null;
     notifyListeners();
+    var opened = false;
     try {
       categoryGraph = await _get('/knowledge/graph/$id');
       final focus = focusId;
       if (focus != null && (focusHistory.isEmpty || focusHistory.last != focus)) {
         focusHistory.add(focus);
       }
+      opened = true;
     } on ApiException catch (exc) {
       error = exc.message;
     } finally {
@@ -188,12 +199,52 @@ class GraphController extends ChangeNotifier {
       progressMessage = null;
       notifyListeners();
     }
+    // POST focus: returns immediately when complete, else expands without blanking the graph.
+    if (opened && focusId == id && fillGeneration == _fillToken) {
+      await _fillNeighborhood(id);
+    }
+  }
+
+  /// Expand an incomplete neighborhood without blanking the current graph.
+  Future<void> _fillNeighborhood(String id) async {
+    if (loading || refreshing) return;
+    final token = ++_fillToken;
+    working = true;
+    pendingNodeId = id;
+    progressMessage = 'Filling related topics…';
+    error = null;
+    notifyListeners();
+    try {
+      final payload = await _post('/knowledge/focus', body: {'node_id': id});
+      if (token != _fillToken) return;
+      if (payload['job_id'] != null) {
+        await _waitForJob(payload['job_id'].toString());
+        if (token != _fillToken || focusId != id) return;
+        categoryGraph = await _get('/knowledge/graph/$id');
+      } else if (focusId == id) {
+        categoryGraph = payload;
+      }
+    } on ApiException catch (exc) {
+      if (token != _fillToken) return;
+      if (exc.status == 409) {
+        candidates = _choices(exc.details);
+      } else {
+        error = exc.message;
+      }
+    } finally {
+      if (token == _fillToken) {
+        working = false;
+        pendingNodeId = null;
+        progressMessage = null;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> choose(TopicChoice choice) async {
     candidates = [];
     notifyListeners();
-    await openNode(choice.id);
+    await openExisting(choice.id);
   }
 
   Future<void> back() async {
