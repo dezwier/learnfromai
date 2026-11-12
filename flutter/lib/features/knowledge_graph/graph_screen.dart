@@ -439,6 +439,11 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
+                onExpandToTopic: () {
+                  final node = _highlighted;
+                  if (node == null) return;
+                  unawaited(_openRelatedTopic(graph, node));
+                },
               ),
             ),
           if (graph.working && showFloats)
@@ -711,6 +716,7 @@ class _HighlightDrawer extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onOpenRelated,
+    required this.onExpandToTopic,
     this.layout,
     this.focusId,
     this.busy = false,
@@ -731,6 +737,8 @@ class _HighlightDrawer extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
+  /// Fired when the sheet is opened from collapsed (swipe up / handle tap).
+  final VoidCallback onExpandToTopic;
 
   @override
   State<_HighlightDrawer> createState() => _HighlightDrawerState();
@@ -885,8 +893,10 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
   }
 
   void _snap({double velocity = 0}) {
-    final open = velocity < -400 || (velocity <= 400 && _extent.value >= 0.35);
-    _extent.animateTo(open ? 1 : 0, curve: Curves.easeOutCubic);
+    final opening = velocity < -400 || (velocity <= 400 && _extent.value >= 0.35);
+    final wasCollapsed = !_expanded;
+    _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
+    if (opening && wasCollapsed) widget.onExpandToTopic();
   }
 
   void _onDragEnd(DragEndDetails details) {
@@ -905,7 +915,9 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
       _bodyScroll.jumpTo(0);
     }
-    _extent.animateTo(_expanded ? 0 : 1, curve: Curves.easeOutCubic);
+    final opening = !_expanded;
+    _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
+    if (opening) widget.onExpandToTopic();
   }
 
   Future<void> _collapseThen(VoidCallback action) async {
