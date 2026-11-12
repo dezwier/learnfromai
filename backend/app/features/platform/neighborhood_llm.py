@@ -144,8 +144,8 @@ class GeminiNeighborhoodLLM:
             "pairs (Paleontology/Palaeontology, Archaeology/Archeology), or title-vs-title+Documentary/"
             "Film/Series/Album/Podcast/Show as separate topics in this response. Prefer the simpler/"
             "American spelling when both exist. "
-            "Descriptions are one or two sentences that stand alone and must not refer to the seed topic by name "
-            "or as 'this topic'. "
+            "Descriptions are one short sentence that stands alone and must not refer to the seed topic by name "
+            "or as 'this topic'. Keep names short. "
             "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
             "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
             "No duplicates across buckets. Seed topic: "
@@ -186,7 +186,7 @@ class GeminiNeighborhoodLLM:
             "generationConfig": {
                 "temperature": self.temperature,
                 "responseMimeType": "application/json",
-                "maxOutputTokens": 4096,
+                "maxOutputTokens": 8192,
             },
         }
         logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -197,14 +197,13 @@ class GeminiNeighborhoodLLM:
             if callable(heartbeat):
                 heartbeat()
             try:
-                with httpx.Client(timeout=60) as client:
+                with httpx.Client(timeout=90) as client:
                     response = client.post(url, json=body, headers={"x-goog-api-key": self.api_key})
                 if response.status_code == 402:
                     raise generation_unavailable("The model account has no credits left", terminal=True)
                 response.raise_for_status()
                 payload = response.json()
-                text = payload["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(_strip_fences(text))
+                parsed = _parse_gemini_payload(payload)
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", prompt_version)
                 meta = payload.get("usageMetadata") or {}
@@ -214,9 +213,15 @@ class GeminiNeighborhoodLLM:
                     int(meta.get("candidatesTokenCount") or 0),
                 )
                 return parsed, usage
-            except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError) as exc:
+            except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                logger.info("gemini neighborhood retry %s: %s", attempt, type(exc).__name__)
+                body["generationConfig"]["maxOutputTokens"] = min(16384, 8192 * (2 ** (attempt - 1)))
+                logger.info(
+                    "gemini neighborhood retry %s: %s (%s)",
+                    attempt,
+                    type(exc).__name__,
+                    str(exc)[:160],
+                )
         raise generation_unavailable("Gemini did not return valid JSON") from last_error
 
 
@@ -255,6 +260,43 @@ def _strip_fences(text: str) -> str:
         stripped = re.sub(r"^```(?:json)?", "", stripped).strip()
         stripped = re.sub(r"```$", "", stripped).strip()
     return stripped
+
+
+def _loads_json_object(text: str) -> dict:
+    """Parse a JSON object, tolerating fences or leading/trailing chatter."""
+    stripped = _strip_fences(text)
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        parsed = json.loads(stripped[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("Gemini JSON root must be an object")
+    return parsed
+
+
+def _parse_gemini_payload(payload: dict) -> dict:
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        prompt_feedback = payload.get("promptFeedback") or {}
+        raise ValueError(f"Gemini returned no candidates ({prompt_feedback})")
+    candidate = candidates[0] if isinstance(candidates[0], dict) else {}
+    finish = str(candidate.get("finishReason") or "")
+    if finish in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"}:
+        raise ValueError(f"Gemini blocked the response ({finish})")
+    parts = ((candidate.get("content") or {}).get("parts")) or []
+    chunks = [str(part.get("text") or "") for part in parts if isinstance(part, dict)]
+    text = "".join(chunks).strip()
+    if not text:
+        raise ValueError(f"Gemini returned empty text (finish={finish or 'unknown'})")
+    try:
+        return _loads_json_object(text)
+    except json.JSONDecodeError as exc:
+        preview = re.sub(r"\s+", " ", text)[:180]
+        raise ValueError(f"Invalid JSON from Gemini: {exc.msg}; preview={preview!r}") from exc
 
 
 def parse_uuid(value: object) -> UUID | None:

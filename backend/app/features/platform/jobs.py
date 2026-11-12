@@ -145,7 +145,19 @@ def retry_later(session: Session, job_id: UUID, token: UUID, code: str, message:
     if job.attempts >= job.max_attempts:
         job.state = "failed"
         job.lease_until = None
+        job.progress = {
+            "stage": "failed",
+            "message": "Could not generate related topics",
+            "fraction": 1.0,
+        }
     else:
+        # Space retries so the UI does not thrash Resolving↔Asking every few seconds.
+        delay = min(300, max(20, 15 * (2 ** max(0, job.attempts - 1))))
         job.state = "queued"
-        job.lease_until = utcnow() + timedelta(seconds=min(300, 2**job.attempts))
+        job.lease_until = utcnow() + timedelta(seconds=delay)
+        job.progress = {
+            "stage": "retry",
+            "message": f"Model hiccup — retrying in about {delay}s…",
+            "fraction": 0.12,
+        }
     session.commit()

@@ -166,7 +166,16 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     }
     focus_id = parse_uuid(payload.get("focus_id"))
     topic = str(payload.get("topic") or "").strip() or None
-    set_progress(session, job, stage="resolve", message="Resolving topic…", fraction=0.05)
+    if int(job.attempts or 0) > 1:
+        set_progress(
+            session,
+            job,
+            stage="resolve",
+            message=f"Retrying neighborhood (attempt {job.attempts})…",
+            fraction=0.05,
+        )
+    else:
+        set_progress(session, job, stage="resolve", message="Resolving topic…", fraction=0.05)
     # Collapse leftover near-duplicates from earlier generations before linking more.
     consolidate_near_duplicates(session, job=job)
     session.commit()
