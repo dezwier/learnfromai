@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.core.time import utcnow
 from app.features.platform.models import GenerationJob
 
@@ -27,8 +28,14 @@ def enqueue(
         else:
             query = query.where(GenerationJob.user_id == user_id)
         existing = session.exec(query).first()
-        if existing is not None:
+        # Reuse in-flight work only. Terminal jobs must not block a fresh expand.
+        if existing is not None and existing.state in {"queued", "running"}:
             return existing
+        if existing is not None and existing.state not in {"queued", "running"}:
+            # Free the key so a new row can use it (unique index may not exist; still keep one logical key).
+            existing.idempotency_key = f"{idempotency_key}:done:{existing.id}"
+            session.add(existing)
+            session.flush()
     job = GenerationJob(
         user_id=user_id,
         type=job_type,
@@ -77,6 +84,42 @@ def claim_next(session: Session) -> tuple[GenerationJob, UUID] | None:
         session.commit()
         return job, token
     return None
+
+
+def renew_lease(session: Session, job: GenerationJob) -> None:
+    """Extend the running lease so long LLM/consolidate work is not reclaimed mid-flight.
+
+    Jobs invoked without a worker claim (tests) have no lease_token; those still commit.
+    Always re-read the row before writing so a stale in-memory token cannot overwrite
+    a lease another worker already stole.
+    """
+    settings = get_settings()
+    token = job.lease_token
+    progress = job.progress
+    payload = job.payload
+    job_id = job.id
+    if token is None:
+        job.updated_at = utcnow()
+        session.add(job)
+        session.commit()
+        return
+    session.expire(job)
+    fresh = session.get(GenerationJob, job_id)
+    if fresh is None or fresh.lease_token != token or fresh.state != "running":
+        raise AppError("JOB_LEASE_LOST", "Job lease was taken by another worker", 409)
+    fresh.progress = progress
+    fresh.payload = payload
+    fresh.lease_until = utcnow() + timedelta(seconds=settings.job_lease_seconds)
+    fresh.updated_at = utcnow()
+    session.add(fresh)
+    session.commit()
+    session.refresh(fresh)
+    job.progress = fresh.progress
+    job.payload = fresh.payload
+    job.lease_until = fresh.lease_until
+    job.lease_token = fresh.lease_token
+    job.updated_at = fresh.updated_at
+    job.state = fresh.state
 
 
 def finish(session: Session, job_id: UUID, token: UUID, result: dict) -> bool:

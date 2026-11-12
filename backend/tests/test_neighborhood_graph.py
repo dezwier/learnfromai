@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlmodel import func, select
 
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
@@ -400,3 +402,62 @@ def test_near_duplicate_titles_map_together(session, user):
     assert documentary.id == last_dance.id
     assert focus.id == dinosaurs.id
     assert session.exec(select(func.count()).select_from(KnowledgeNode)).one() == 2
+
+
+def test_expand_survives_focus_merged_away_during_resolve(session, user):
+    """Consolidate may delete the job's focus_id; expand must follow the topic to the keeper."""
+    from app.features.knowledge_graph.neighborhood import expand_neighborhood
+    from app.features.platform.models import GenerationJob
+
+    keeper = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles.")
+    drop = KnowledgeNode(name="Dinosaur", name_key="dinosaur", description=None)
+    session.add_all([keeper, drop])
+    session.commit()
+
+    job = GenerationJob(
+        type="expand_neighborhood",
+        state="running",
+        user_id=user.id,
+        payload={
+            "focus_id": str(drop.id),
+            "topic": "Dinosaur",
+            "parents": 2,
+            "siblings": 3,
+            "children": 4,
+            "acquaintances": 4,
+        },
+    )
+    session.add(job)
+    session.commit()
+
+    result = expand_neighborhood(session, job)
+    session.commit()
+
+    assert result["focus_id"] == str(keeper.id)
+    assert session.get(KnowledgeNode, drop.id) is None
+    from app.features.knowledge_graph.neighborhood import relation_counts
+
+    have = relation_counts(session, keeper.id)
+    assert have["parents"] >= 2
+    assert have["siblings"] >= 3
+    assert have["children"] >= 4
+    assert have["acquaintances"] >= 4
+
+
+def test_failed_expand_can_be_reenqueued(client, auth, session):
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    assert first.status_code == 202
+    job_id = first.json()["job_id"]
+    job = session.get(GenerationJob, UUID(job_id))
+    assert job is not None
+    job.state = "failed"
+    job.error_code = "GENERATION_UNAVAILABLE"
+    session.add(job)
+    session.commit()
+
+    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    assert again.status_code == 202
+    assert again.json()["job_id"] != job_id
+    fresh = _run_queued(session)
+    assert fresh is not None
+    assert fresh.state == "succeeded"

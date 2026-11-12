@@ -192,7 +192,10 @@ class GeminiNeighborhoodLLM:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
+        heartbeat = getattr(self, "heartbeat", None)
         for attempt in range(1, 4):
+            if callable(heartbeat):
+                heartbeat()
             try:
                 with httpx.Client(timeout=60) as client:
                     response = client.post(url, json=body, headers={"x-goog-api-key": self.api_key})

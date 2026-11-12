@@ -35,3 +35,43 @@ def test_expired_lease_is_reclaimed_and_backoff_hides_the_retry(session, user):
     assert token_2 != token
     retry_later(session, again.id, token_2, "TRANSIENT", "later")
     assert claim_next(session) is None
+
+
+def test_renew_lease_extends_until_and_detects_steal(session, user):
+    from app.core.errors import AppError
+    from app.features.platform.jobs import renew_lease
+
+    job = enqueue(session, job_type="noop", user_id=user.id, payload={})
+    session.commit()
+    claimed, token = claim_next(session)
+    original_until = claimed.lease_until
+    claimed.lease_until = utcnow() - timedelta(seconds=1)
+    session.add(claimed)
+    session.commit()
+
+    renew_lease(session, claimed)
+    session.refresh(claimed)
+    assert claimed.lease_token == token
+    assert claimed.lease_until is not None
+    assert claimed.lease_until > original_until
+    assert claimed.lease_until > utcnow()
+
+    # Another worker steals after the lease lapses again.
+    claimed.lease_until = utcnow() - timedelta(seconds=1)
+    session.add(claimed)
+    session.commit()
+    stolen, token_2 = claim_next(session)
+    assert stolen.id == job.id
+    assert token_2 != token
+
+    # First worker still thinks it owns `token`; renew must refuse without clobbering.
+    stolen.lease_token = token
+    try:
+        renew_lease(session, stolen)
+        raised = False
+    except AppError as exc:
+        raised = True
+        assert exc.code == "JOB_LEASE_LOST"
+    assert raised
+    session.refresh(stolen)
+    assert stolen.lease_token == token_2

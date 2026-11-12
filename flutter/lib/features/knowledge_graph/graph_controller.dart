@@ -324,8 +324,11 @@ class GraphController extends ChangeNotifier {
     try {
       final payload = await _post('/knowledge/focus', body: body);
       if (payload['job_id'] != null) {
-        await _waitForJob(payload['job_id'].toString());
-        final focus = payload['focus_node_id']?.toString() ??
+        final job = await _waitForJob(payload['job_id'].toString());
+        final result = job['result'];
+        final resultFocus = result is Map ? result['focus_id']?.toString() : null;
+        final focus = resultFocus ??
+            payload['focus_node_id']?.toString() ??
             (categoryGraph?['focus_node_id']?.toString()) ??
             body['node_id']?.toString();
         if (focus == null) {
@@ -355,7 +358,7 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  Future<void> _waitForJob(String jobId) async {
+  Future<Map<String, dynamic>> _waitForJob(String jobId) async {
     working = true;
     progressMessage = 'Waiting for a worker…';
     notifyListeners();
@@ -367,7 +370,7 @@ class GraphController extends ChangeNotifier {
       }
       notifyListeners();
       final state = job['state']?.toString();
-      if (state == 'succeeded') return;
+      if (state == 'succeeded') return job;
       if (state == 'failed') {
         throw ApiException(
           500,
