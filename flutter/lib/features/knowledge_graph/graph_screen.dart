@@ -2112,12 +2112,13 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
   }) {
+    final description = (node.description ?? '').trim();
     return CustomPaint(
       painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: node.radius * 0.42,
-          vertical: node.radius * 0.55,
+          horizontal: node.radius * 0.55,
+          vertical: node.radius * 0.58,
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -2126,6 +2127,7 @@ class _NodeCard extends StatelessWidget {
             final maxH = constraints.maxHeight;
             if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
 
+            final hasDesc = description.isNotEmpty;
             const titleMaxLines = 3;
             final titleStyleBase = TextStyle(
               fontFamily: 'tt_ramilas',
@@ -2133,27 +2135,50 @@ class _NodeCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: scheme.onSurface,
             );
+            final titleBudget = hasDesc ? maxH * 0.4 : maxH * 0.9;
             final titleLaid = layoutTitle(
               text: node.title,
               style: titleStyleBase,
               maxWidth: maxW,
-              maxHeight: maxH * 0.9,
+              maxHeight: titleBudget,
               maxLines: titleMaxLines,
               minFontSize: 12,
-              maxFontSize: (node.radius * 0.48).clamp(16.0, 28.0),
+              maxFontSize: (node.radius * 0.4).clamp(15.0, 26.0),
               textScaler: scaler,
               hyphenateAtMinSize: true,
             );
             final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
 
             return Center(
-              child: Text(
-                titleLaid.text,
-                textAlign: TextAlign.center,
-                softWrap: true,
-                maxLines: titleMaxLines,
-                overflow: TextOverflow.ellipsis,
-                style: titleStyle,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    titleLaid.text,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    maxLines: titleMaxLines,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle,
+                  ),
+                  if (hasDesc) ...[
+                    SizedBox(height: (node.radius * 0.08).clamp(4.0, 10.0)),
+                    Text(
+                      description,
+                      textAlign: TextAlign.center,
+                      softWrap: true,
+                      maxLines: 5,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramillas',
+                        height: 1.25,
+                        fontWeight: FontWeight.w500,
+                        color: scheme.onSurface.withValues(alpha: 0.72),
+                        fontSize: (node.radius * 0.15).clamp(11.0, 14.0),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             );
           },

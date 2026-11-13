@@ -341,13 +341,15 @@ const graphSideGap = 8.0;
 /// Equal inset so unit hexes (and the flower outline) leave a thin strip.
 const hexGapInset = 0.08;
 
-/// Flat-top axial cells for the 4-hex focus flower:
-/// one on top, two side-by-side below, one under those (diamond).
+/// Flat-top axial cells for the 7-hex focus flower (center + six around).
 const flowerCells = <(int, int)>[
-  (0, -1), // top
-  (-1, 0), // middle-left
-  (1, -1), // middle-right
-  (0, 0), // bottom
+  (0, 0), // center
+  (1, 0),
+  (1, -1),
+  (0, -1),
+  (-1, 0),
+  (-1, 1),
+  (0, 1),
 ];
 
 /// Pixel centroid of [flowerCells] for lattice size 1 (outline is shifted by this).
@@ -424,7 +426,7 @@ Offset _snap(Offset p) => Offset(
 
 String _pointKey(Offset p) => '${p.dx},${p.dy}';
 
-/// Outer boundary of the 4-hex flower, origin-centered on the cell centroid.
+/// Outer boundary of the 7-hex flower, origin-centered on the cell centroid.
 List<Offset> hexFlowerOutline(double R) {
   final counts = <String, int>{};
   final ends = <String, (Offset, Offset)>{};
@@ -585,7 +587,7 @@ bool pointInHexFlower(Offset local, {required double latticeSize}) {
 
 Size flatHexBounds(double radius) => Size(radius * 2, radius * math.sqrt(3));
 
-/// Bounding box of the 4-hex flower for unit circumradius [unitRadius].
+/// Bounding box of the 7-hex flower for unit circumradius [unitRadius].
 Size hexFlowerBounds(double unitRadius) {
   final outline = hexFlowerOutline(unitRadius);
   var minX = double.infinity;
@@ -602,7 +604,7 @@ Size hexFlowerBounds(double unitRadius) {
 }
 
 /// Tight honeycomb on a flat-top axial lattice.
-/// Focus is one solid 4-hex flower; direct neighbors on the first free ring;
+/// Focus is one solid 7-hex flower; direct neighbors on the first free ring;
 /// neighbors-of-neighbors sit next to the direct neighbor they hang off.
 GraphLayout layoutGraph(
   List<GraphNode> nodes,
@@ -710,15 +712,14 @@ GraphLayout layoutGraph(
     }
   }
 
-  // Neighbors sit on the first free cells around the 4-flower (same thin gap
-  // as hex-to-hex), not on ring 2 as if a 7-flower still occupied the center.
+  // Neighbors sit on ring 2+ (ring 1 is the flower petals).
   final occupied = {for (final c in flowerCells) '${c.$1},${c.$2}'};
   final cellPool = math.max(
     directs.length + fillers.length + 18,
     fillers.isEmpty ? directs.length : 30,
   );
   final cells = [
-    for (final cell in _ringCells(fromRing: 1, count: math.max(cellPool + occupied.length, 1)))
+    for (final cell in _ringCells(fromRing: 2, count: math.max(cellPool, 1)))
       if (!occupied.contains('${cell.q},${cell.r}')) cell,
   ];
   final used = <int>{};
@@ -770,8 +771,7 @@ GraphLayout layoutGraph(
     cellByNodeId[node.id] = cells[best];
   }
 
-  // Unit lattice size = 1. Focus flower is drawn centered on its cell centroid;
-  // shift neighbors by the same amount so gaps match the diamond (not cell 0,0).
+  // Unit lattice size = 1. Focus flower is centered on the lattice origin.
   final focusBounds = hexFlowerBounds(1.0);
   final origin = flowerCentroidUnit;
   final centers = <(GraphNode, Offset, bool)>[
@@ -793,11 +793,9 @@ GraphLayout layoutGraph(
     maxY = math.max(maxY, c.$2.dy + b.height / 2);
   }
 
-  // Zoom like the 7-flower: fit focus + ring 2, then push in so outer hexes
-  // may sit outside the viewport. Focus stays at the canvas center.
+  // Fit focus + ring 2, then push in so outer hexes may sit outside the viewport.
   const pad = 8.0;
   const defaultZoomIn = 1.8;
-  // Use the legacy 7-hex footprint for zoom so the 4-flower reads the same size.
   final footprintHalf = math.max(5.0, 3 * math.sqrt(3)) / 2;
   final nearHalf = footprintHalf + 2 * math.sqrt(3);
   final fitNear = math.min(
@@ -884,7 +882,7 @@ List<_HexCell> _cellsOnRing(int ring) {
 }
 
 double _cellScore(_HexCell cell, NodeRole role) {
-  // Score against the flower centroid so "above/below/side" match the diamond.
+  // Score against the flower centroid so "above/below/side" match the layout.
   final c = axialToPixel(cell.q, cell.r, 1.0) - flowerCentroidUnit;
   final angle = math.atan2(c.dy, c.dx);
   final north = _angleDist(angle, -math.pi / 2);
@@ -1051,7 +1049,7 @@ class HexagonBorder extends ShapeBorder {
   ShapeBorder scale(double t) => this;
 }
 
-/// Outline of the solid 4-hex focus flower.
+/// Outline of the solid 7-hex focus flower.
 class HexFlowerBorder extends ShapeBorder {
   const HexFlowerBorder();
 

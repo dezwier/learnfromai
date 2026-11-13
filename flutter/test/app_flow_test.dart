@@ -81,7 +81,7 @@ void main() {
     expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
     expect(find.byWidgetPredicate(_titleLooksLike('Mammals')), findsWidgets);
     expect(find.byWidgetPredicate(_titleLooksLike('Mesozoic')), findsWidgets);
-    expect(find.textContaining('Extinct Mesozoic reptiles'), findsOneWidget);
+    expect(find.textContaining('Extinct Mesozoic reptiles'), findsWidgets);
     expect(find.byTooltip('Search'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
     expect(find.text('0 / 100 XP'), findsOneWidget);
@@ -403,7 +403,7 @@ void main() {
     expect((byId['4']!.center.dx - focus.center.dx).abs(), greaterThan((byId['4']!.center.dy - focus.center.dy).abs()));
     expect(byId['4']!.role, NodeRole.sibling);
     expect(byId['2']!.isFlower, isTrue);
-    // 4-cell diamond (top / two / bottom) spans ~2.5× a unit hex width.
+    // 7-hex flower spans ~2.5× a unit hex width.
     expect(byId['2']!.width / byId['4']!.width, closeTo(2.5, 0.15));
   });
 

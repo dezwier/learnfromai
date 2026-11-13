@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('focus is a solid 4-hex flower with parallel outer inset', () {
+  test('focus is a solid 7-hex flower with parallel outer inset', () {
     const viewport = Size(390, 700);
     final layout = layoutGraph(
       const [
@@ -35,11 +35,11 @@ void main() {
     expect(byId['2']!.center.dx, closeTo(layout.width / 2, 0.5));
     expect(byId['2']!.center.dy, closeTo(layout.height / 2, 0.5));
     expect(hitTestNode(layout, byId['2']!.center), '2');
-    expect(flowerCells.length, 4);
+    expect(flowerCells.length, 7);
 
     const R = 40.0;
     final outline = hexFlowerOutline(R);
-    expect(outline.length, greaterThanOrEqualTo(10));
+    expect(outline.length, greaterThanOrEqualTo(12));
 
     final full = Path()
       ..fillType = PathFillType.nonZero
@@ -54,15 +54,12 @@ void main() {
     expect(fullBounds.width - insetBounds.width, closeTo(expected * 2, expected * 0.45));
     expect(fullBounds.height - insetBounds.height, closeTo(expected * 2, expected * 0.45));
 
-    // Free ring-1 cells sit outside the flower silhouette (same gap strip as unit hexes).
+    // Ring 1 is fully occupied by petals; ring-2 cells sit outside the flower.
     final ring1 = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
     final occupied = {for (final c in flowerCells) '${c.$1},${c.$2}'};
-    final free = [
-      for (final cell in ring1)
-        if (!occupied.contains('${cell.$1},${cell.$2}')) cell,
-    ];
-    expect(free.length, 3);
-    for (final cell in free) {
+    expect(ring1.every((cell) => occupied.contains('${cell.$1},${cell.$2}')), isTrue);
+    final ring2 = [(2, 0), (2, -2), (0, -2), (-2, 0), (-2, 2), (0, 2)];
+    for (final cell in ring2) {
       final neighbor = axialToPixel(cell.$1, cell.$2, R) - flowerCentroidUnit * R;
       expect(flower.contains(neighbor), isFalse);
     }
