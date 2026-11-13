@@ -194,6 +194,94 @@ void main() {
     expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
   });
 
+  testWidgets('incomplete focus shows request FAB and does not auto-enqueue on open', (tester) async {
+    var posts = 0;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        posts += 1;
+        return {
+          'status': 'queued',
+          'job_id': 'job-req',
+          'focus_node_id': '2',
+          'progress': {'message': 'Asking the model…'},
+        };
+      },
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Asking the model…'},
+          },
+      loader: (path) async => _compactIncomplete(),
+    )..categoryGraph = _compactIncomplete();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    expect(posts, 0);
+    expect(find.byTooltip('Request neighbors'), findsOneWidget);
+    expect(find.text('Parents'), findsNothing);
+
+    await tester.tap(find.byTooltip('Request neighbors'));
+    await tester.pump();
+    expect(posts, 1);
+    expect(graph.activeJobCount, 1);
+    expect(find.byTooltip('Show running jobs'), findsOneWidget);
+    graph.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('dwell on incomplete tile checks without changing focus or posting', (tester) async {
+    var posts = 0;
+    final gets = <String>[];
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        posts += 1;
+        return {};
+      },
+      loader: (path) async {
+        gets.add(path);
+        if (path.startsWith('/knowledge/graph/1')) {
+          return {
+            'focus_node_id': '1',
+            'incomplete': true,
+            'nodes': [
+              {'id': '1', 'title': 'Reptiles', 'kind': 'focus'},
+            ],
+            'edges': <Map<String, dynamic>>[],
+          };
+        }
+        return _compact();
+      },
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    // Parent tile sits above the focus, clear of the bottom drawer.
+    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Reptiles')).first);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(posts, 0);
+    expect(graph.focusId, '2');
+    expect(gets.any((path) => path.startsWith('/knowledge/graph/1')), isTrue);
+    expect(find.byTooltip('Request neighbors'), findsOneWidget);
+  });
+
+  test('openExisting does not enqueue when incomplete', () async {
+    var posts = 0;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        posts += 1;
+        return {};
+      },
+      loader: (path) async => _compactIncomplete(),
+    );
+    await graph.openExisting('2');
+    expect(posts, 0);
+    expect(graph.categoryGraph?['incomplete'], isTrue);
+    expect(graph.activeJobCount, 0);
+  });
+
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
@@ -336,6 +424,12 @@ bool Function(Widget) _titleLooksLike(String title) {
     return raw.replaceAll('-', '').replaceAll('\n', '') == title ||
         raw.replaceAll('-', '').replaceAll('\n', '').contains(title);
   };
+}
+
+Map<String, dynamic> _compactIncomplete() {
+  final graph = _compact();
+  graph['incomplete'] = true;
+  return graph;
 }
 
 Map<String, dynamic> _compact() {

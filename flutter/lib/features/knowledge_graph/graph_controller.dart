@@ -131,6 +131,8 @@ class GraphController extends ChangeNotifier {
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
   final List<TrackedJob> trackedJobs = [];
+  /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
+  String? lastCompletedNodeId;
   int _suggestToken = 0;
   Timer? _jobPoller;
   var _polling = false;
@@ -237,18 +239,30 @@ class GraphController extends ChangeNotifier {
     await _focus(body: {'node_id': id});
   }
 
-  /// Open an existing node via GET graph, then enqueue expand without blocking.
-  Future<void> openExisting(String id, {String? title}) async {
-    if (refreshing || loading) return;
-    if (focusId == id && categoryGraph != null && categoryGraph?['incomplete'] != true) {
-      suggestions = [];
+  void clearLastCompleted() {
+    lastCompletedNodeId = null;
+  }
+
+  /// GET neighborhood for [id] without changing the current focus graph.
+  Future<Map<String, dynamic>?> fetchGraph(String id) async {
+    try {
+      return await _get('/knowledge/graph/$id');
+    } on ApiException catch (exc) {
+      error = exc.message;
       notifyListeners();
-      return;
+      return null;
     }
-    if (focusId == id && categoryGraph != null) {
+  }
+
+  /// Open an existing node via GET graph (no expand enqueue).
+  Future<void> openExisting(String id, {String? title, Map<String, dynamic>? knownPayload}) async {
+    if (refreshing || loading) return;
+    if (focusId == id &&
+        categoryGraph != null &&
+        knownPayload == null &&
+        categoryGraph?['incomplete'] != true) {
       suggestions = [];
       notifyListeners();
-      unawaited(enqueueNeighborhood(id, title: title));
       return;
     }
     final first = categoryGraph == null;
@@ -258,10 +272,13 @@ class GraphController extends ChangeNotifier {
     candidates = [];
     suggestions = [];
     notifyListeners();
-    var openedId = id;
     try {
-      categoryGraph = await _get('/knowledge/graph/$id');
-      openedId = focusId ?? id;
+      if (knownPayload != null && knownPayload['nodes'] is List) {
+        categoryGraph = knownPayload;
+      } else {
+        categoryGraph = await _get('/knowledge/graph/$id');
+      }
+      final openedId = focusId ?? id;
       if (focusHistory.isEmpty || focusHistory.last != openedId) {
         focusHistory.add(openedId);
       }
@@ -271,52 +288,6 @@ class GraphController extends ChangeNotifier {
       loading = false;
       refreshing = false;
       notifyListeners();
-    }
-    if (error == null && categoryGraph?['incomplete'] == true) {
-      unawaited(enqueueNeighborhood(openedId, title: title));
-    }
-  }
-
-  /// POST focus. If the neighborhood is complete, switch focus to [id].
-  /// If incomplete, enqueue the expand and keep the current graph.
-  /// Returns true when focus switched.
-  Future<bool> openIfCompleteOrEnqueue(String id, {String? title}) async {
-    if (focusId == id && categoryGraph != null && categoryGraph?['incomplete'] != true) {
-      return false;
-    }
-    if (jobForNode(id) != null) {
-      _ensurePoller();
-      return false;
-    }
-    try {
-      final payload = await _post('/knowledge/focus', body: {'node_id': id});
-      final jobId = payload['job_id']?.toString();
-      if (jobId != null) {
-        _trackJobFromPayload(payload, id: id, title: title);
-        return false;
-      }
-      // Neighbors are complete — change to that tile.
-      if (payload['nodes'] is List) {
-        categoryGraph = payload;
-      } else {
-        categoryGraph = await _get('/knowledge/graph/$id');
-      }
-      final openedId = focusId ?? id;
-      if (focusHistory.isEmpty || focusHistory.last != openedId) {
-        focusHistory.add(openedId);
-      }
-      suggestions = [];
-      notifyListeners();
-      return true;
-    } on ApiException catch (exc) {
-      if (exc.status == 409) {
-        candidates = _choices(exc.details);
-        notifyListeners();
-      } else {
-        error = exc.message;
-        notifyListeners();
-      }
-      return false;
     }
   }
 
@@ -330,15 +301,18 @@ class GraphController extends ChangeNotifier {
       final payload = await _post('/knowledge/focus', body: {'node_id': id});
       final jobId = payload['job_id']?.toString();
       if (jobId == null) {
-        // Already complete — refresh graph if we're still on this focus.
-        if (focusId == id || focusId == payload['focus_node_id']?.toString()) {
-          if (payload['nodes'] is List) {
-            categoryGraph = payload;
-          } else {
-            categoryGraph = await _get('/knowledge/graph/$id');
-          }
-          notifyListeners();
+        // Already complete — adopt that graph and signal completion to the UI.
+        final openedId = payload['focus_node_id']?.toString() ?? id;
+        if (payload['nodes'] is List) {
+          categoryGraph = payload;
+        } else {
+          categoryGraph = await _get('/knowledge/graph/$id');
         }
+        if (focusHistory.isEmpty || focusHistory.last != (focusId ?? openedId)) {
+          focusHistory.add(focusId ?? openedId);
+        }
+        lastCompletedNodeId = openedId;
+        notifyListeners();
         return;
       }
       _trackJobFromPayload(payload, id: id, title: title);
@@ -623,12 +597,11 @@ class GraphController extends ChangeNotifier {
             final result = job['result'];
             final resultFocus = result is Map ? result['focus_id']?.toString() : null;
             final loadId = resultFocus ?? tracked.nodeId;
-            // Soft-refresh the current view so neighbor expands appear without jumping focus.
-            final refreshId =
-                (focusId == tracked.nodeId || focusId == loadId) ? loadId : focusId;
-            if (refreshId != null) {
+            lastCompletedNodeId = loadId;
+            // Soft-refresh only when the completed node is already the focus.
+            if (focusId == tracked.nodeId || focusId == loadId) {
               try {
-                categoryGraph = await _get('/knowledge/graph/$refreshId');
+                categoryGraph = await _get('/knowledge/graph/$loadId');
               } on ApiException {
                 // Keep current graph.
               }

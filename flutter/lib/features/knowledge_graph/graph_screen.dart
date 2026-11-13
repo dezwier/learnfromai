@@ -37,10 +37,12 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _drawerRaised = false;
   var _jobsPanelOpen = false;
   PlacedNode? _highlighted;
-  /// Last tile the user explicitly tapped (survives center-highlight overwrites).
-  String? _tappedTileId;
   GraphLayout? _layout;
   Size _viewport = Size.zero;
+  Timer? _dwellTimer;
+  /// Cached completeness for highlighted nodes: true = incomplete neighbors.
+  final Map<String, bool> _incompleteByNode = {};
+  var _handlingJobCompletion = false;
 
   @override
   void initState() {
@@ -58,6 +60,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    _dwellTimer?.cancel();
     _suggestDebounce?.cancel();
     _panController
       ..removeListener(_onPanTick)
@@ -84,7 +87,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
-    _tappedTileId = null;
+    _dwellTimer?.cancel();
     // Focus is laid out at the canvas center; translate so that lands in view.
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
@@ -116,26 +119,18 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   }
 
   void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
-    final graph = context.read<GraphController>();
-    // Second tap: go there if neighbors are complete; otherwise enqueue without switching.
-    if (_tappedTileId == node.id && node.id != graph.focusId) {
-      _tappedTileId = null;
-      _panTargetId = node.id;
-      unawaited(_animatePanTo(node.center, _viewport));
-      unawaited(_openIfCompleteOrEnqueue(graph, node));
-      return;
-    }
-    _tappedTileId = node.id == graph.focusId ? null : node.id;
     _panTargetId = node.id;
-    if (_highlighted?.id != node.id ||
+    final changed = _highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
-        _highlighted?.description != node.description) {
+        _highlighted?.description != node.description;
+    if (changed) {
       setState(() {
         if (_highlighted?.id != node.id && !keepDrawerRaised) {
           _drawerRaised = false;
         }
         _highlighted = node;
       });
+      _scheduleDwell(node.id);
     }
     unawaited(_animatePanTo(node.center, _viewport));
   }
@@ -147,31 +142,97 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     if (pin != null && node?.id == pin) {
       _panTargetId = null;
     }
-    // Don't let sticky center-highlight steal away from an explicit tile tap.
-    if (_tappedTileId != null && node?.id != _tappedTileId) return;
     if (node?.id == _highlighted?.id &&
         node?.title == _highlighted?.title &&
         node?.description == _highlighted?.description) {
       return;
     }
+    final idChanged = _highlighted?.id != node?.id;
     setState(() {
-      if (_highlighted?.id != node?.id) _drawerRaised = false;
+      if (idChanged) _drawerRaised = false;
       _highlighted = node;
     });
+    if (idChanged) _scheduleDwell(node?.id);
+  }
+
+  /// null = unknown, true = incomplete, false = complete.
+  bool? _knownIncomplete(String id, GraphController graph) {
+    if (id == graph.focusId) return graph.categoryGraph?['incomplete'] == true;
+    return _incompleteByNode[id];
+  }
+
+  void _scheduleDwell(String? nodeId) {
+    _dwellTimer?.cancel();
+    if (nodeId == null) return;
+    final graph = context.read<GraphController>();
+    if (nodeId == graph.focusId) {
+      _incompleteByNode[nodeId] = graph.categoryGraph?['incomplete'] == true;
+      return;
+    }
+    _dwellTimer = Timer(const Duration(seconds: 1), () {
+      unawaited(_onDwell(nodeId));
+    });
+  }
+
+  Future<void> _onDwell(String nodeId) async {
+    if (!mounted || _highlighted?.id != nodeId) return;
+    final graph = context.read<GraphController>();
+    if (nodeId == graph.focusId) return;
+    final payload = await graph.fetchGraph(nodeId);
+    if (!mounted || _highlighted?.id != nodeId) return;
+    if (payload == null) return;
+    final incomplete = payload['incomplete'] == true;
+    setState(() => _incompleteByNode[nodeId] = incomplete);
+    if (incomplete) return;
+    await graph.openExisting(nodeId, title: _highlighted?.title, knownPayload: payload);
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId);
   }
 
   Future<void> _goToHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
-    await graph.openExisting(node.id);
-  }
-
-  Future<void> _openIfCompleteOrEnqueue(GraphController graph, PlacedNode node) async {
-    final switched = await graph.openIfCompleteOrEnqueue(node.id, title: node.title);
-    if (!mounted || !switched) return;
+    await graph.openExisting(node.id, title: node.title);
+    if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _syncHighlightedFromLayout(graph.focusId);
+  }
+
+  Future<void> _requestNeighbors(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null) return;
+    await graph.enqueueNeighborhood(node.id, title: node.title);
+  }
+
+  Future<void> _handleJobCompleted(GraphController graph) async {
+    final id = graph.lastCompletedNodeId;
+    if (id == null || _handlingJobCompletion) return;
+    _handlingJobCompletion = true;
+    graph.clearLastCompleted();
+    _incompleteByNode[id] = false;
+    try {
+      if (_highlighted?.id != id) {
+        if (mounted) setState(() {});
+        return;
+      }
+      final payload = await graph.fetchGraph(id);
+      if (!mounted) return;
+      if (payload != null) {
+        await graph.openExisting(id, title: _highlighted?.title, knownPayload: payload);
+      } else {
+        await graph.openExisting(id, title: _highlighted?.title);
+      }
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      _syncHighlightedFromLayout(graph.focusId);
+      if (mounted) setState(() {});
+    } finally {
+      _handlingJobCompletion = false;
+    }
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
@@ -395,14 +456,32 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     final drawerClearance =
         drawerVisible ? _HighlightDrawer.collapsedHeight(safeBottom) + 12 : 16.0;
     final floatBottom = drawerClearance + keyboard;
-    final canGoToHighlight =
-        !_searchOpen && !_profileOpen && _highlighted != null && _highlighted!.id != graph.focusId;
+    final highlight = _highlighted;
+    final knownIncomplete =
+        highlight == null ? null : _knownIncomplete(highlight.id, graph);
+    final canRequestNeighbors = !_searchOpen &&
+        !_profileOpen &&
+        highlight != null &&
+        knownIncomplete == true &&
+        graph.jobForNode(highlight.id) == null;
+    final canGoToHighlight = !_searchOpen &&
+        !_profileOpen &&
+        highlight != null &&
+        highlight.id != graph.focusId &&
+        knownIncomplete == false;
+    final showRelations = highlight != null && knownIncomplete == false;
     // Hide graph chrome while the sheet is up — drawer is stacked above these floats.
     final showFloats = !_searchOpen && !_profileOpen && !_drawerRaised;
     if (_jobsPanelOpen && !graph.hasActiveJobs) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_jobsPanelOpen) return;
         setState(() => _jobsPanelOpen = false);
+      });
+    }
+    if (graph.lastCompletedNodeId != null && !_handlingJobCompletion) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_handleJobCompleted(graph));
       });
     }
     return Scaffold(
@@ -512,7 +591,21 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  if (canGoToHighlight) ...[
+                  if (canRequestNeighbors) ...[
+                    FloatingActionButton.small(
+                      heroTag: 'graph-request',
+                      tooltip: 'Request neighbors',
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
+                      elevation: 1.5,
+                      focusElevation: 2,
+                      hoverElevation: 2,
+                      highlightElevation: 2,
+                      onPressed: () => unawaited(_requestNeighbors(graph)),
+                      child: const Icon(Icons.auto_awesome, size: 20),
+                    ),
+                    const SizedBox(height: 10),
+                  ] else if (canGoToHighlight) ...[
                     FloatingActionButton.small(
                       heroTag: 'graph-go',
                       tooltip: 'Go to topic',
@@ -522,7 +615,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                       focusElevation: 2,
                       hoverElevation: 2,
                       highlightElevation: 2,
-                      onPressed: () => _goToHighlighted(graph),
+                      onPressed: () => unawaited(_goToHighlighted(graph)),
                       child: const Icon(Icons.arrow_forward, size: 20),
                     ),
                     const SizedBox(height: 10),
@@ -563,25 +656,20 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 node: _highlighted!,
                 layout: _layout,
                 focusId: graph.focusId,
-                busy: graph.jobForNode(_highlighted!.id) != null ||
-                    graph.refreshing ||
-                    graph.loading,
-                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage ??
-                    graph.progressMessage,
+                busy: graph.jobForNode(_highlighted!.id) != null,
+                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
+                showRelations: showRelations,
+                canRequestNeighbors: canRequestNeighbors,
                 canViewInGraph: canGoToHighlight,
                 onRaisedChanged: (raised) {
                   if (_drawerRaised == raised) return;
                   setState(() => _drawerRaised = raised);
                 },
-                onViewInGraph: () => _goToHighlighted(graph),
+                onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
+                onViewInGraph: () => unawaited(_goToHighlighted(graph)),
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
-                onExpandToTopic: () {
-                  final node = _highlighted;
-                  if (node == null) return;
-                  unawaited(_openIfCompleteOrEnqueue(graph, node));
-                },
               ),
             ),
           if (_searchOpen)
@@ -694,15 +782,6 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
             _panController.stop();
             _panAnimation = null;
             _panTargetId = null;
-          },
-          onInteractionUpdate: (details) {
-            // Real pan/zoom (not a tap) — drop the second-tap open candidate.
-            if (_tappedTileId == null) return;
-            if (details.pointerCount > 1 ||
-                details.scale != 1.0 ||
-                details.focalPointDelta.distanceSquared > 4) {
-              _tappedTileId = null;
-            }
           },
           child: SizedBox(
             width: layout.width,
@@ -859,12 +938,14 @@ class _HighlightDrawer extends StatefulWidget {
     super.key,
     required this.node,
     required this.canViewInGraph,
+    required this.canRequestNeighbors,
+    required this.showRelations,
     required this.onRaisedChanged,
+    required this.onRequestNeighbors,
     required this.onViewInGraph,
     required this.onEdit,
     required this.onDelete,
     required this.onOpenRelated,
-    required this.onExpandToTopic,
     this.layout,
     this.focusId,
     this.busy = false,
@@ -881,14 +962,15 @@ class _HighlightDrawer extends StatefulWidget {
   final String? focusId;
   final bool busy;
   final String? progressMessage;
+  final bool showRelations;
+  final bool canRequestNeighbors;
   final bool canViewInGraph;
   final ValueChanged<bool> onRaisedChanged;
+  final VoidCallback onRequestNeighbors;
   final VoidCallback onViewInGraph;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
-  /// Fired when the sheet is opened from collapsed (swipe up / handle tap).
-  final VoidCallback onExpandToTopic;
 
   @override
   State<_HighlightDrawer> createState() => _HighlightDrawerState();
@@ -1044,9 +1126,7 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
 
   void _snap({double velocity = 0}) {
     final opening = velocity < -400 || (velocity <= 400 && _extent.value >= 0.35);
-    final wasCollapsed = !_expanded;
     _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
-    if (opening && wasCollapsed) widget.onExpandToTopic();
   }
 
   void _onDragEnd(DragEndDetails details) {
@@ -1067,7 +1147,6 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
     }
     final opening = !_expanded;
     _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
-    if (opening) widget.onExpandToTopic();
   }
 
   Future<void> _collapseThen(VoidCallback action) async {
@@ -1182,7 +1261,15 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                             const SizedBox(height: 18),
                             Row(
                               children: [
-                                if (widget.canViewInGraph) ...[
+                                if (widget.canRequestNeighbors) ...[
+                                  _DrawerIconButton(
+                                    tooltip: 'Request neighbors',
+                                    icon: Icons.auto_awesome,
+                                    filled: true,
+                                    onPressed: widget.onRequestNeighbors,
+                                  ),
+                                  const SizedBox(width: 8),
+                                ] else if (widget.canViewInGraph) ...[
                                   _DrawerIconButton(
                                     tooltip: 'View in graph',
                                     icon: Icons.arrow_forward,
@@ -1210,9 +1297,9 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                               _DrawerProgressCard(
                                 message: widget.progressMessage ?? 'Loading related topics…',
                               ),
-                              if (widget.layout != null) const SizedBox(height: 12),
+                              if (widget.showRelations) const SizedBox(height: 12),
                             ],
-                            if (widget.layout != null)
+                            if (widget.showRelations && widget.layout != null)
                               _RelationsCard(
                                 node: widget.node,
                                 layout: widget.layout!,
