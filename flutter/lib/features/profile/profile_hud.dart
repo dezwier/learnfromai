@@ -14,25 +14,19 @@ class ProfileTopFade extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      height: height(context),
-      child: IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.88),
-                Colors.black.withValues(alpha: 0.58),
-                Colors.black.withValues(alpha: 0.25),
-                Colors.black.withValues(alpha: 0.0),
-              ],
-              stops: const [0.0, 0.32, 0.68, 1.0],
-            ),
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.88),
+              Colors.black.withValues(alpha: 0.58),
+              Colors.black.withValues(alpha: 0.25),
+              Colors.black.withValues(alpha: 0.0),
+            ],
+            stops: const [0.0, 0.32, 0.68, 1.0],
           ),
         ),
       ),

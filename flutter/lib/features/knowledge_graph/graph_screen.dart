@@ -645,8 +645,9 @@ class _GraphScreenState extends State<GraphScreen>
         highlight.id != graph.focusId;
     // Show whatever neighbors we already have; Request covers under-budget fills.
     final showRelations = highlight != null;
-    // Hide graph chrome while the sheet is up — drawer is stacked above these floats.
-    final showFloats = !_searchOpen && !_profileOpen && !_drawerRaised;
+    // Graph chrome stays mounted so it can fade with the drawer.
+    final showChrome = !_searchOpen && !_profileOpen;
+    final chromeOpaque = showChrome && !_drawerRaised;
     if (_jobsPanelOpen && !graph.hasActiveJobs) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_jobsPanelOpen) return;
@@ -708,25 +709,48 @@ class _GraphScreenState extends State<GraphScreen>
               ),
             ],
           ),
-          if (!_profileOpen && !_drawerRaised) const ProfileTopFade(),
-          if (!_profileOpen && !_drawerRaised)
+          if (showChrome)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: ProfileHud(onTap: _openProfile),
+              height: ProfileTopFade.height(context),
+              child: IgnorePointer(
+                ignoring: !chromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: const ProfileTopFade(),
+                ),
+              ),
+            ),
+          if (showChrome)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                ignoring: !chromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ProfileHud(onTap: _openProfile),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          // Floats under the drawer so a raised sheet fully covers them.
-          if (showFloats && _jobsPanelOpen)
+          // Floats under the drawer; fade out while the sheet is raised.
+          if (showChrome && chromeOpaque && _jobsPanelOpen)
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -734,98 +758,114 @@ class _GraphScreenState extends State<GraphScreen>
                 child: const ColoredBox(color: Color(0x00000000)),
               ),
             ),
-          if (showFloats)
+          if (showChrome)
             Positioned(
               left: 16,
               bottom: floatBottom,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_jobsPanelOpen && graph.hasActiveJobs) ...[
-                    _JobsPanel(
-                      jobs: graph.trackedJobs.where((j) => j.isActive).toList(),
-                      onSelect: (job) {
-                        setState(() => _jobsPanelOpen = false);
-                        unawaited(_openTrackedJob(graph, job));
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (graph.hasActiveJobs)
-                    _JobsBadgeButton(
-                      count: graph.activeJobCount,
-                      open: _jobsPanelOpen,
-                      onPressed: () => setState(() => _jobsPanelOpen = !_jobsPanelOpen),
-                    ),
-                ],
+              child: IgnorePointer(
+                ignoring: !chromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_jobsPanelOpen && graph.hasActiveJobs) ...[
+                        _JobsPanel(
+                          jobs: graph.trackedJobs.where((j) => j.isActive).toList(),
+                          onSelect: (job) {
+                            setState(() => _jobsPanelOpen = false);
+                            unawaited(_openTrackedJob(graph, job));
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      if (graph.hasActiveJobs)
+                        _JobsBadgeButton(
+                          count: graph.activeJobCount,
+                          open: _jobsPanelOpen,
+                          onPressed: () => setState(() => _jobsPanelOpen = !_jobsPanelOpen),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          if (showFloats)
+          if (showChrome)
             Positioned(
               right: 16,
               bottom: floatBottom,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (canRequestNeighbors) ...[
-                    FloatingActionButton.small(
-                      heroTag: 'graph-request',
-                      tooltip: 'Request neighbors',
-                      backgroundColor: scheme.primary,
-                      foregroundColor: scheme.onPrimary,
-                      elevation: 1.5,
-                      focusElevation: 2,
-                      hoverElevation: 2,
-                      highlightElevation: 2,
-                      onPressed: () => unawaited(_requestNeighbors(graph)),
-                      child: const Icon(Icons.auto_awesome, size: 20),
-                    ),
-                    const SizedBox(height: 10),
-                  ] else if (canGoToHighlight) ...[
-                    FloatingActionButton.small(
-                      heroTag: 'graph-go',
-                      tooltip: 'Go to topic',
-                      backgroundColor: scheme.primary,
-                      foregroundColor: scheme.onPrimary,
-                      elevation: 1.5,
-                      focusElevation: 2,
-                      hoverElevation: 2,
-                      highlightElevation: 2,
-                      onPressed: () => unawaited(_goToHighlighted(graph)),
-                      child: const Icon(Icons.arrow_forward, size: 20),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (graph.canGoBack) ...[
-                    FloatingActionButton.small(
-                      heroTag: 'graph-back',
-                      tooltip: 'Previous topic',
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      foregroundColor: scheme.onSurfaceVariant,
-                      elevation: 1.5,
-                      focusElevation: 2,
-                      hoverElevation: 2,
-                      highlightElevation: 2,
-                      onPressed: () => graph.back(),
-                      child: const Icon(Icons.arrow_back, size: 20),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  FloatingActionButton.small(
-                    heroTag: 'graph-search',
-                    tooltip: 'Search',
-                    backgroundColor: scheme.surfaceContainerHighest,
-                    foregroundColor: scheme.onSurfaceVariant,
-                    elevation: 1.5,
-                    focusElevation: 2,
-                    hoverElevation: 2,
-                    highlightElevation: 2,
-                    onPressed: _openSearch,
-                    child: const Icon(Icons.search, size: 20),
+              child: IgnorePointer(
+                ignoring: !chromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (canRequestNeighbors) ...[
+                        FloatingActionButton.small(
+                          heroTag: 'graph-request',
+                          tooltip: 'Request neighbors',
+                          backgroundColor: scheme.primary,
+                          foregroundColor: scheme.onPrimary,
+                          elevation: 1.5,
+                          focusElevation: 2,
+                          hoverElevation: 2,
+                          highlightElevation: 2,
+                          onPressed: () => unawaited(_requestNeighbors(graph)),
+                          child: const Icon(Icons.auto_awesome, size: 20),
+                        ),
+                        const SizedBox(height: 6),
+                      ] else if (canGoToHighlight) ...[
+                        FloatingActionButton.small(
+                          heroTag: 'graph-go',
+                          tooltip: 'Go to topic',
+                          backgroundColor: scheme.primary,
+                          foregroundColor: scheme.onPrimary,
+                          elevation: 1.5,
+                          focusElevation: 2,
+                          hoverElevation: 2,
+                          highlightElevation: 2,
+                          onPressed: () => unawaited(_goToHighlighted(graph)),
+                          child: const Icon(Icons.arrow_forward, size: 20),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      if (graph.canGoBack) ...[
+                        FloatingActionButton.small(
+                          heroTag: 'graph-back',
+                          tooltip: 'Previous topic',
+                          backgroundColor: scheme.surfaceContainerHighest,
+                          foregroundColor: scheme.onSurfaceVariant,
+                          elevation: 1.5,
+                          focusElevation: 2,
+                          hoverElevation: 2,
+                          highlightElevation: 2,
+                          onPressed: () => graph.back(),
+                          child: const Icon(Icons.arrow_back, size: 20),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      FloatingActionButton.small(
+                        heroTag: 'graph-search',
+                        tooltip: 'Search',
+                        backgroundColor: scheme.surfaceContainerHighest,
+                        foregroundColor: scheme.onSurfaceVariant,
+                        elevation: 1.5,
+                        focusElevation: 2,
+                        hoverElevation: 2,
+                        highlightElevation: 2,
+                        onPressed: _openSearch,
+                        child: const Icon(Icons.search, size: 20),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           if (drawerVisible)
@@ -2168,7 +2208,7 @@ class _NodeCard extends StatelessWidget {
       painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: node.radius * 0.55,
+          horizontal: node.radius * 0.62,
           vertical: node.radius * 0.58,
         ),
         child: LayoutBuilder(
