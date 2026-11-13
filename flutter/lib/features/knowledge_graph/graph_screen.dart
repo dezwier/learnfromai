@@ -52,6 +52,8 @@ class _GraphScreenState extends State<GraphScreen>
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
   var _pendingFocusMorph = false;
+  /// Drawer relation tap in flight — keep sheet stable until the new focus lands.
+  String? _openingRelatedId;
 
   @override
   void initState() {
@@ -313,6 +315,9 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _onHighlightFromCenter(PlacedNode? node) {
     if (!mounted) return;
+    // Drawer owns the topic while raised or mid relation-open — don't thrash it
+    // from camera morph / recenter.
+    if (_openingRelatedId != null || _drawerRaised) return;
     final pin = _panTargetId;
     // Keep the pan pin until the animation finishes — do not clear on first match.
     if (pin != null && node?.id != pin) return;
@@ -411,14 +416,28 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
-    // Keep the drawer on the destination topic while the graph loads — no blank gap.
-    setState(() => _highlighted = node);
-    await graph.openExisting(node.id, title: node.title);
-    if (!mounted) return;
-    // Let LayoutBuilder apply the post-fill graph before syncing the drawer node.
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    _syncHighlightedFromLayout(graph.focusId);
+    // Title switches immediately; relations stay pulsed until the new focus settles
+    // so we don't flash the old neighborhood's edge view mid-load / morph.
+    _panTargetId = node.id;
+    setState(() {
+      _highlighted = node;
+      _openingRelatedId = node.id;
+    });
+    try {
+      await graph.openExisting(node.id, title: node.title);
+      if (!mounted) return;
+      // Wait for LayoutBuilder's post-frame adopt — not merely the network return.
+      for (var i = 0; i < 12; i++) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        if (graph.focusId == node.id && _transformFocusId == node.id) break;
+      }
+      _syncHighlightedFromLayout(graph.focusId);
+    } finally {
+      if (mounted && _openingRelatedId == node.id) {
+        setState(() => _openingRelatedId = null);
+      }
+    }
   }
 
   Future<void> _openTrackedJob(GraphController graph, TrackedJob job) async {
@@ -639,12 +658,15 @@ class _GraphScreenState extends State<GraphScreen>
         highlight != null &&
         knownIncomplete == true &&
         graph.jobForNode(highlight.id) == null;
+    final openingRelated =
+        _openingRelatedId != null && _openingRelatedId == highlight?.id;
     final canGoToHighlight = !_searchOpen &&
         !_profileOpen &&
         highlight != null &&
-        highlight.id != graph.focusId;
-    // Show whatever neighbors we already have; Request covers under-budget fills.
-    final showRelations = highlight != null;
+        highlight.id != graph.focusId &&
+        !openingRelated;
+    // Hide stale/partial relation lists while a drawer hop is in flight.
+    final showRelations = highlight != null && !openingRelated;
     // Graph chrome stays mounted so it can fade with the drawer.
     final showChrome = !_searchOpen && !_profileOpen;
     final chromeOpaque = showChrome && !_drawerRaised;
@@ -872,12 +894,14 @@ class _GraphScreenState extends State<GraphScreen>
             Positioned.fill(
               child: _HighlightDrawer(
                 node: _highlighted!,
-                layout: _layout,
+                // Settled layout only — morphing display layout thrash-rebuilds relations.
+                layout: _settledLayout,
                 focusId: graph.focusId,
                 busy: graph.jobForNode(_highlighted!.id) != null,
                 progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
+                relationsPending: openingRelated,
                 showRelations: showRelations,
-                canRequestNeighbors: canRequestNeighbors,
+                canRequestNeighbors: canRequestNeighbors && !openingRelated,
                 canViewInGraph: canGoToHighlight,
                 onRaisedChanged: (raised) {
                   if (_drawerRaised == raised) return;
@@ -1192,6 +1216,7 @@ class _HighlightDrawer extends StatefulWidget {
     this.focusId,
     this.busy = false,
     this.progressMessage,
+    this.relationsPending = false,
   });
 
   /// Collapsed content height (above the home-indicator inset).
@@ -1204,6 +1229,7 @@ class _HighlightDrawer extends StatefulWidget {
   final String? focusId;
   final bool busy;
   final String? progressMessage;
+  final bool relationsPending;
   final bool showRelations;
   final bool canRequestNeighbors;
   final bool canViewInGraph;
@@ -1539,9 +1565,17 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                               _DrawerProgressCard(
                                 message: widget.progressMessage ?? 'Loading related topics…',
                               ),
-                              if (widget.showRelations) const SizedBox(height: 12),
+                              if (widget.showRelations || widget.relationsPending)
+                                const SizedBox(height: 12),
                             ],
-                            if (widget.showRelations && widget.layout != null)
+                            if (widget.relationsPending)
+                              const SizedBox(
+                                height: 168,
+                                child: PulsePlaceholder(
+                                  borderRadius: BorderRadius.all(Radius.circular(16)),
+                                ),
+                              )
+                            else if (widget.showRelations && widget.layout != null)
                               _RelationsCard(
                                 node: widget.node,
                                 layout: widget.layout!,

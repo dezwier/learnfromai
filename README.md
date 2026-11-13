@@ -4,6 +4,25 @@ A Flutter client and a FastAPI service for one shared knowledge graph. Sign in, 
 
 The product contract is `docs/SPEC.md`. Architecture is in `docs/ARCHITECTURE.md`.
 
+## Learning modules (target design)
+
+Four layers share one graph. Trajectory and content do not talk to each other directly — they both read **learner state**, and sparse events decide what to replan or regenerate.
+
+![Learning modules: universe, learner state, trajectory, and content](docs/images/learning-modules.jpg)
+
+### Concrete walkthrough
+
+| Step | What happens | Example |
+|------|----------------|---------|
+| Request | Focus / expand into the shared universe | Goal node: **Transformers** |
+| Universe | Neighborhood already has (or grows) related topics | Embeddings, Attention, Softmax, Positional encoding, … |
+| Trajectory | Planner picks a short path from known → goal | `Embeddings → Softmax → Dot-product attention → Multi-head → Transformers` |
+| Learn | Generate only when the user opens a tile | Open **Attention**: 1 screen explanation, 1 worked QKV example, 1 comprehension check |
+| Retain | Schedule retrieval separately from “reading” | Next day: cloze on “query vs key”; compare attention vs convolution |
+| Feedback | Typed signal → patch state → maybe replan | Fail check on Attention → insert **Dot product** before it; bump Attention content to a simpler band — do **not** regenerate the whole path |
+
+UI lenses on the same graph: **canvas** = explore universe, **path overlay / queue** = trajectory, **tile sheet** = learn + retain.
+
 ## Local API
 
 Postgres is required. Docker Compose publishes Postgres 16 on port **5433** so it does not collide with a Postgres already listening on 5432:
