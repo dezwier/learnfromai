@@ -1,6 +1,7 @@
 """Import every table model so SQLModel.metadata is complete."""
 
 from app.features.accounts.models import User
+from app.features.content.models import KnowledgeBit
 from app.features.graph_extend.models import ExtendRequest
 from app.features.knowledge_graph.category_models import KnowledgeCategory, KnowledgeCategoryEdge
 from app.features.knowledge_graph.models import Concept, Edge, Graph
@@ -10,7 +11,12 @@ from app.features.knowledge_graph.node_models import (
     KnowledgeRequest,
     KnowledgeRequestNode,
 )
-from app.features.platform.models import GenerationJob, GenerationJobWatcher, LlmUsage, WorkerHeartbeat
+from app.features.platform.models import (
+    GenerationJob,
+    GenerationJobWatcher,
+    LlmUsage,
+    WorkerHeartbeat,
+)
 
 
 def register_models() -> None:
@@ -30,4 +36,5 @@ def register_models() -> None:
         KnowledgeEdge,
         KnowledgeRequest,
         KnowledgeRequestNode,
+        KnowledgeBit,
     )

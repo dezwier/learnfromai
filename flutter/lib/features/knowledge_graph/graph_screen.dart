@@ -10,6 +10,7 @@ import '../profile/profile_hud.dart';
 import '../profile/profile_screen.dart';
 import 'graph_controller.dart';
 import 'graph_layout.dart';
+import 'learn_sheet.dart';
 import 'title_wrap.dart';
 
 class GraphScreen extends StatefulWidget {
@@ -389,9 +390,16 @@ class _GraphScreenState extends State<GraphScreen>
 
   Future<void> _handleJobCompleted(GraphController graph) async {
     final id = graph.lastCompletedNodeId;
+    final jobType = graph.lastCompletedJobType;
     if (id == null || _handlingJobCompletion) return;
     _handlingJobCompletion = true;
     graph.clearLastCompleted();
+    // Learn sheet listens for content jobs itself — don't remount the graph.
+    if (jobType == 'expand_content') {
+      _handlingJobCompletion = false;
+      if (mounted) setState(() {});
+      return;
+    }
     _incompleteByNode[id] = false;
     try {
       if (_highlighted?.id != id) {
@@ -478,6 +486,10 @@ class _GraphScreenState extends State<GraphScreen>
       setState(() => _highlighted = n);
       return;
     }
+  }
+
+  Future<void> _openLearn(PlacedNode node) async {
+    await showLearnSheet(context, nodeId: node.id, title: node.title);
   }
 
   Future<void> _editHighlighted(GraphController graph) async {
@@ -909,6 +921,11 @@ class _GraphScreenState extends State<GraphScreen>
                 },
                 onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
                 onViewInGraph: () => unawaited(_goToHighlighted(graph)),
+                onLearn: () {
+                  final node = _highlighted;
+                  if (node == null) return;
+                  unawaited(_openLearn(node));
+                },
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
@@ -1209,6 +1226,7 @@ class _HighlightDrawer extends StatefulWidget {
     required this.onRaisedChanged,
     required this.onRequestNeighbors,
     required this.onViewInGraph,
+    required this.onLearn,
     required this.onEdit,
     required this.onDelete,
     required this.onOpenRelated,
@@ -1236,6 +1254,7 @@ class _HighlightDrawer extends StatefulWidget {
   final ValueChanged<bool> onRaisedChanged;
   final VoidCallback onRequestNeighbors;
   final VoidCallback onViewInGraph;
+  final VoidCallback onLearn;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
@@ -1546,6 +1565,13 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                                   ),
                                   const SizedBox(width: 8),
                                 ],
+                                _DrawerIconButton(
+                                  tooltip: 'Learn',
+                                  icon: Icons.menu_book_outlined,
+                                  filled: !widget.canRequestNeighbors && !widget.canViewInGraph,
+                                  onPressed: widget.onLearn,
+                                ),
+                                const SizedBox(width: 8),
                                 _DrawerIconButton(
                                   tooltip: 'Edit',
                                   icon: Icons.edit_outlined,

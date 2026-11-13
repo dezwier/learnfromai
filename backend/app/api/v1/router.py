@@ -13,6 +13,7 @@ from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
 from app.features.accounts.profile import merge_profile_prefs, profile_fields
+from app.features.content.service import content_for_node, content_or_expand
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
 from app.features.knowledge_graph.node_ops import delete_knowledge_node, update_knowledge_node
 from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
@@ -44,6 +45,10 @@ class FocusBody(BaseModel):
 class KnowledgeNodePatchBody(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=8000)
+
+
+class KnowledgeContentBody(BaseModel):
+    expand: bool = False
 
 
 class PreferencesBody(BaseModel):
@@ -204,6 +209,30 @@ def patch_knowledge_node(
         description=body.description,
     )
     session.commit()
+    return payload
+
+
+@router.get("/knowledge/nodes/{node_id}/content")
+def get_knowledge_node_content(
+    node_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    return content_for_node(session, node_id)
+
+
+@router.post("/knowledge/nodes/{node_id}/content")
+def post_knowledge_node_content(
+    node_id: UUID,
+    body: KnowledgeContentBody,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    payload, status = content_or_expand(session, user=user, node_id=node_id, expand=body.expand)
+    session.commit()
+    response.status_code = status
     return payload
 
 

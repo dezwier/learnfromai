@@ -61,12 +61,81 @@ class NeighborhoodPrefs {
   }
 }
 
+class TopicBit {
+  const TopicBit({
+    required this.id,
+    required this.kind,
+    required this.body,
+    this.band = 'default',
+    this.recipeVersion = 1,
+    this.position = 0,
+  });
+
+  final String id;
+  final String kind;
+  final String band;
+  final int recipeVersion;
+  final int position;
+  final Map<String, dynamic> body;
+
+  factory TopicBit.fromJson(Map<String, dynamic> raw) {
+    final body = raw['body'];
+    return TopicBit(
+      id: raw['id']?.toString() ?? '',
+      kind: raw['kind']?.toString() ?? '',
+      band: raw['band']?.toString() ?? 'default',
+      recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
+      position: (raw['position'] as num?)?.toInt() ?? 0,
+      body: body is Map ? Map<String, dynamic>.from(body) : const {},
+    );
+  }
+}
+
+class TopicContent {
+  const TopicContent({
+    required this.nodeId,
+    required this.incomplete,
+    required this.bits,
+    this.band = 'default',
+    this.recipeVersion = 1,
+  });
+
+  final String nodeId;
+  final bool incomplete;
+  final String band;
+  final int recipeVersion;
+  final List<TopicBit> bits;
+
+  TopicBit? bit(String kind) {
+    for (final bit in bits) {
+      if (bit.kind == kind) return bit;
+    }
+    return null;
+  }
+
+  factory TopicContent.fromJson(Map<String, dynamic> raw) {
+    final rows = raw['bits'];
+    return TopicContent(
+      nodeId: raw['node_id']?.toString() ?? '',
+      incomplete: raw['incomplete'] == true,
+      band: raw['band']?.toString() ?? 'default',
+      recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
+      bits: [
+        if (rows is List)
+          for (final row in rows)
+            if (row is Map) TopicBit.fromJson(Map<String, dynamic>.from(row)),
+      ],
+    );
+  }
+}
+
 class TrackedJob {
   const TrackedJob({
     required this.jobId,
     required this.nodeId,
     required this.title,
     required this.state,
+    this.type = 'expand_neighborhood',
     this.progressMessage,
     this.fraction = 0,
     this.errorMessage,
@@ -76,6 +145,7 @@ class TrackedJob {
   final String nodeId;
   final String title;
   final String state;
+  final String type;
   final String? progressMessage;
   final double fraction;
   final String? errorMessage;
@@ -88,12 +158,14 @@ class TrackedJob {
     double? fraction,
     String? errorMessage,
     String? title,
+    String? type,
   }) {
     return TrackedJob(
       jobId: jobId,
       nodeId: nodeId,
       title: title ?? this.title,
       state: state ?? this.state,
+      type: type ?? this.type,
       progressMessage: progressMessage ?? this.progressMessage,
       fraction: fraction ?? this.fraction,
       errorMessage: errorMessage,
@@ -129,6 +201,7 @@ class GraphController extends ChangeNotifier {
   final List<TrackedJob> trackedJobs = [];
   /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
   String? lastCompletedNodeId;
+  String? lastCompletedJobType;
   int _suggestToken = 0;
   Timer? _jobPoller;
   var _polling = false;
@@ -244,6 +317,7 @@ class GraphController extends ChangeNotifier {
 
   void clearLastCompleted() {
     lastCompletedNodeId = null;
+    lastCompletedJobType = null;
   }
 
   /// GET neighborhood for [id] without changing the current focus graph.
@@ -291,6 +365,43 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// GET shared learn / example / check bits (never enqueues).
+  Future<TopicContent?> fetchContent(String nodeId) async {
+    try {
+      final raw = await _get('/knowledge/nodes/$nodeId/content');
+      return TopicContent.fromJson(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Request shared content expand when incomplete; track the job like neighborhood.
+  Future<TopicContent?> enqueueContent(String id, {String? title}) async {
+    if (jobForNode(id) != null) {
+      _ensurePoller();
+      return fetchContent(id);
+    }
+    try {
+      final payload = await _post('/knowledge/nodes/$id/content', body: {'expand': true});
+      final jobId = payload['job_id']?.toString();
+      if (jobId == null) {
+        return TopicContent.fromJson(payload);
+      }
+      _trackJobFromPayload(payload, id: id, title: title, type: 'expand_content');
+      return TopicContent(
+        nodeId: payload['focus_node_id']?.toString() ?? id,
+        incomplete: true,
+        bits: const [],
+      );
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// POST focus; if a job is returned, track it without awaiting completion.
   Future<void> enqueueNeighborhood(String id, {String? title}) async {
     if (jobForNode(id) != null) {
@@ -327,7 +438,12 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  void _trackJobFromPayload(Map<String, dynamic> payload, {required String id, String? title}) {
+  void _trackJobFromPayload(
+    Map<String, dynamic> payload, {
+    required String id,
+    String? title,
+    String type = 'expand_neighborhood',
+  }) {
     final jobId = payload['job_id']?.toString();
     if (jobId == null) return;
     final focusNodeId = payload['focus_node_id']?.toString() ?? id;
@@ -340,6 +456,7 @@ class GraphController extends ChangeNotifier {
         nodeId: focusNodeId,
         title: title ?? _titleForNode(focusNodeId) ?? 'Topic',
         state: 'queued',
+        type: type,
         progressMessage: message ?? 'Waiting for a worker…',
         fraction: fraction,
       ),
@@ -488,6 +605,7 @@ class GraphController extends ChangeNotifier {
             nodeId: nodeId,
             title: item['title']?.toString() ?? 'Topic',
             state: item['state']?.toString() ?? 'queued',
+            type: item['type']?.toString() ?? 'expand_neighborhood',
             progressMessage: progress is Map ? progress['message']?.toString() : null,
             fraction: progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0,
           ),
@@ -595,11 +713,15 @@ class GraphController extends ChangeNotifier {
           if (state == 'succeeded') {
             trackedJobs.removeWhere((j) => j.jobId == tracked.jobId);
             final result = job['result'];
-            final resultFocus = result is Map ? result['focus_id']?.toString() : null;
+            final resultFocus = result is Map
+                ? (result['focus_id'] ?? result['node_id'])?.toString()
+                : null;
             final loadId = resultFocus ?? tracked.nodeId;
             lastCompletedNodeId = loadId;
-            // Soft-refresh only when the completed node is already the focus.
-            if (focusId == tracked.nodeId || focusId == loadId) {
+            lastCompletedJobType = tracked.type;
+            // Soft-refresh neighborhood only for expand_neighborhood jobs.
+            if (tracked.type != 'expand_content' &&
+                (focusId == tracked.nodeId || focusId == loadId)) {
               try {
                 categoryGraph = await _get('/knowledge/graph/$loadId');
               } on ApiException {
@@ -613,7 +735,10 @@ class GraphController extends ChangeNotifier {
             trackedJobs.removeWhere((j) => j.jobId == tracked.jobId);
             // Surface briefly via error only if user is on that topic.
             if (focusId == tracked.nodeId) {
-              error = job['error_message']?.toString() ?? 'Neighborhood generation failed';
+              error = job['error_message']?.toString() ??
+                  (tracked.type == 'expand_content'
+                      ? 'Content generation failed'
+                      : 'Neighborhood generation failed');
             }
             notifyListeners();
             continue;

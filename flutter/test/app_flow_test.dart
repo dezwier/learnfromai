@@ -297,6 +297,116 @@ void main() {
     expect(graph.activeJobCount, 0);
   });
 
+  test('enqueueContent posts expand and tracks content job', () async {
+    Map<String, dynamic>? lastBody;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        expect(path, '/knowledge/nodes/2/content');
+        lastBody = body is Map ? Map<String, dynamic>.from(body) : null;
+        return {
+          'status': 'queued',
+          'job_id': 'job-content',
+          'focus_node_id': '2',
+          'progress': {'message': 'Writing learn · example · check…'},
+        };
+      },
+      loader: (path) async {
+        if (path == '/knowledge/nodes/2/content') {
+          return {
+            'node_id': '2',
+            'incomplete': true,
+            'bits': <Map<String, dynamic>>[],
+          };
+        }
+        return _compact();
+      },
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          },
+    );
+    final queued = await graph.enqueueContent('2', title: 'Dinosaurs');
+    expect(lastBody?['expand'], isTrue);
+    expect(queued?.incomplete, isTrue);
+    expect(graph.activeJobCount, 1);
+    expect(graph.trackedJobs.first.type, 'expand_content');
+    expect(graph.jobForNode('2')?.jobId, 'job-content');
+  });
+
+  testWidgets('Learn sheet loads bits after content job completes', (tester) async {
+    var polls = 0;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        if (path == '/knowledge/nodes/2/content') {
+          return {
+            'status': 'queued',
+            'job_id': 'job-content',
+            'focus_node_id': '2',
+            'progress': {'message': 'Writing learn · example · check…'},
+          };
+        }
+        return {};
+      },
+      loader: (path) async {
+        if (path == '/knowledge/nodes/2/content') {
+          if (polls >= 2) return _contentReady();
+          return {
+            'node_id': '2',
+            'incomplete': true,
+            'bits': <Map<String, dynamic>>[],
+          };
+        }
+        if (path == '/me/preferences') {
+          return {
+            'neighborhood': {'total': 16, 'extended': 12},
+          };
+        }
+        return _compact();
+      },
+      jobLoader: (jobId) async {
+        polls += 1;
+        if (polls < 2) {
+          return {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          };
+        }
+        return {
+          'id': jobId,
+          'state': 'succeeded',
+          'result': {'node_id': '2'},
+        };
+      },
+    )..categoryGraph = _compact();
+
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    // Expand drawer (handle tap), then open Learn.
+    await tester.tap(find.text('Dinosaurs').last);
+    await tester.pumpAndSettle();
+    final learn = find.byTooltip('Learn');
+    if (learn.evaluate().isEmpty) {
+      // Drawer may still be collapsed — drag the sheet up.
+      await tester.drag(find.text('Dinosaurs').last, const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+    expect(find.byTooltip('Learn'), findsWidgets);
+    await tester.tap(find.byTooltip('Learn').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Learn'), findsWidgets);
+    expect(find.byType(PulsePlaceholder), findsWidgets);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('What is Dinosaurs'), findsWidgets);
+    expect(find.textContaining('Which statement best fits'), findsWidgets);
+  });
+
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
@@ -445,6 +555,45 @@ Map<String, dynamic> _compactIncomplete() {
   final graph = _compact();
   graph['incomplete'] = true;
   return graph;
+}
+
+Map<String, dynamic> _contentReady() {
+  return {
+    'node_id': '2',
+    'incomplete': false,
+    'band': 'default',
+    'recipe_version': 1,
+    'bits': [
+      {
+        'id': 'b1',
+        'kind': 'learn',
+        'position': 0,
+        'body': {'title': 'What is Dinosaurs?', 'markdown': '**Dinosaurs** are extinct reptiles.'},
+      },
+      {
+        'id': 'b2',
+        'kind': 'example',
+        'position': 1,
+        'body': {'title': 'Dinosaurs in practice', 'markdown': 'Explain fossils to a friend.'},
+      },
+      {
+        'id': 'b3',
+        'kind': 'check',
+        'position': 2,
+        'body': {
+          'question': 'Which statement best fits Dinosaurs?',
+          'choices': [
+            'Dinosaurs are a learning topic with a clear core idea.',
+            'Dinosaurs are unrelated to anything nearby.',
+            'Dinosaurs have no practical uses.',
+            'Dinosaurs only exist as a random label.',
+          ],
+          'answer_index': 0,
+          'explanation': 'The first choice matches the introduction.',
+        },
+      },
+    ],
+  };
 }
 
 Map<String, dynamic> _compact() {

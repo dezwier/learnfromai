@@ -21,6 +21,7 @@ The worker locks the graph row only while merging nodes and edges. It does not c
 
 - `accounts` — Firebase exchange and users
 - `knowledge_graph` — the shared graph, nodes, edges, and the workspace payload
+- `content` — shared learn / example / check bits and `expand_content` jobs
 - `graph_extend` — extend requests and the merge
 - `platform` — jobs, LLM client, quota, worker heartbeat
 
@@ -31,4 +32,5 @@ The worker locks the graph row only while merging nodes and edges. It does not c
 - `concepts` — nodes, with `title`, `summary`, and `canonical_key`
 - `edges` — `from_concept_id`, `to_concept_id`, `type`
 - `extend_requests` — one row per request, from any user
-- `generation_jobs`, `llm_usage`, `worker_heartbeats`
+- `knowledge_nodes`, `knowledge_edges`, `knowledge_bits`
+- `generation_jobs`, `generation_job_watchers`, `llm_usage`, `worker_heartbeats`
