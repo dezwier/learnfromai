@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
@@ -65,6 +66,8 @@ class PlacedNode {
     this.isFlower = false,
     this.description,
     this.viaRole,
+    this.opacity = 1,
+    this.flowerAmount,
   });
 
   final String id;
@@ -84,15 +87,56 @@ class PlacedNode {
   final String? description;
   /// For [NodeRole.extended]: role of the direct neighbor this tile hangs off.
   final NodeRole? viaRole;
+  /// 0–1 visibility while morphing layouts (departing / arriving tiles).
+  final double opacity;
+  /// 0 = hex tile, 1 = focus flower; null means use [isFlower].
+  final double? flowerAmount;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
   double get drawnRadius => radius * (1 - hexGapInset);
 
+  double get effectiveFlowerAmount => flowerAmount ?? (isFlower ? 1 : 0);
+
   bool contains(Offset point) {
     final local = point - center;
-    if (!isFlower) return pointInFlatHex(local, drawnRadius);
-    return pointInHexFlower(local, latticeSize: radius);
+    if (effectiveFlowerAmount >= 0.5) {
+      return pointInHexFlower(local, latticeSize: radius);
+    }
+    return pointInFlatHex(local, drawnRadius);
+  }
+
+  PlacedNode copyWith({
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+    double? radius,
+    bool? isFlower,
+    NodeRole? role,
+    String? title,
+    String? description,
+    double? opacity,
+    double? flowerAmount,
+  }) {
+    return PlacedNode(
+      id: id,
+      title: title ?? this.title,
+      depth: depth,
+      distance: distance,
+      kind: kind,
+      role: role ?? this.role,
+      x: x ?? this.x,
+      y: y ?? this.y,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      radius: radius ?? this.radius,
+      isFlower: isFlower ?? this.isFlower,
+      description: description ?? this.description,
+      viaRole: viaRole,
+      opacity: opacity ?? this.opacity,
+      flowerAmount: flowerAmount ?? this.flowerAmount,
+    );
   }
 }
 
@@ -108,6 +152,78 @@ class GraphLayout {
   final List<GraphEdge> edges;
   final double width;
   final double height;
+}
+
+/// Translate every tile so [anchorId]'s center matches [targetCenter].
+GraphLayout shiftLayoutToAnchor(GraphLayout layout, String anchorId, Offset targetCenter) {
+  PlacedNode? anchor;
+  for (final node in layout.nodes) {
+    if (node.id == anchorId) {
+      anchor = node;
+      break;
+    }
+  }
+  if (anchor == null) return layout;
+  final delta = targetCenter - anchor.center;
+  if (delta.distanceSquared < 0.01) return layout;
+  return GraphLayout(
+    width: layout.width,
+    height: layout.height,
+    edges: layout.edges,
+    nodes: [
+      for (final node in layout.nodes)
+        node.copyWith(x: node.x + delta.dx, y: node.y + delta.dy),
+    ],
+  );
+}
+
+PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
+  final tt = t.clamp(0.0, 1.0);
+  final flower = lerpDouble(a.effectiveFlowerAmount, b.effectiveFlowerAmount, tt)!;
+  return PlacedNode(
+    id: b.id,
+    title: tt < 0.5 ? a.title : b.title,
+    depth: b.depth,
+    distance: b.distance,
+    kind: b.kind,
+    role: tt < 0.5 ? a.role : b.role,
+    description: tt < 0.5 ? a.description : b.description,
+    viaRole: tt < 0.5 ? a.viaRole : b.viaRole,
+    x: lerpDouble(a.x, b.x, tt)!,
+    y: lerpDouble(a.y, b.y, tt)!,
+    width: lerpDouble(a.width, b.width, tt)!,
+    height: lerpDouble(a.height, b.height, tt)!,
+    radius: lerpDouble(a.radius, b.radius, tt)!,
+    isFlower: flower >= 0.5,
+    opacity: lerpDouble(a.opacity, b.opacity, tt)!,
+    flowerAmount: flower,
+  );
+}
+
+/// Morph [from] → [to]. Shared ids lerp; leavers fade out; arrivals fade in.
+GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
+  final tt = Curves.easeInOutCubic.transform(t.clamp(0.0, 1.0));
+  final fromById = {for (final n in from.nodes) n.id: n};
+  final toById = {for (final n in to.nodes) n.id: n};
+  final ids = {...fromById.keys, ...toById.keys};
+  final nodes = <PlacedNode>[];
+  for (final id in ids) {
+    final a = fromById[id];
+    final b = toById[id];
+    if (a != null && b != null) {
+      nodes.add(lerpPlacedNode(a, b, tt));
+    } else if (a != null) {
+      nodes.add(a.copyWith(opacity: 1 - tt));
+    } else if (b != null) {
+      nodes.add(b.copyWith(opacity: tt));
+    }
+  }
+  return GraphLayout(
+    nodes: nodes,
+    edges: tt < 0.5 ? from.edges : to.edges,
+    width: lerpDouble(from.width, to.width, tt)!,
+    height: lerpDouble(from.height, to.height, tt)!,
+  );
 }
 
 /// Edge `type` as stored by the API → display [NodeRole].

@@ -185,4 +185,37 @@ void main() {
     expect(ids, containsAll(['focus', 'parent', 'sibling', 'child', 'related']));
     expect(ids.contains('ext-1'), isFalse);
   });
+
+  test('focus morph keeps the new focus anchored and fades leavers', () {
+    const viewport = Size(390, 700);
+    final from = layoutGraph(
+      const [
+        GraphNode(id: 'a', title: 'A', depth: 0, kind: 'focus'),
+        GraphNode(id: 'b', title: 'B', depth: 1, kind: 'child'),
+        GraphNode(id: 'c', title: 'C', depth: 0, kind: 'sibling'),
+      ],
+      const [],
+      focusId: 'a',
+      viewport: viewport,
+    );
+    final to = layoutGraph(
+      const [
+        GraphNode(id: 'b', title: 'B', depth: 0, kind: 'focus'),
+        GraphNode(id: 'a', title: 'A', depth: -1, kind: 'parent'),
+        GraphNode(id: 'd', title: 'D', depth: 1, kind: 'child'),
+      ],
+      const [],
+      focusId: 'b',
+      viewport: viewport,
+    );
+    final bTo = to.nodes.firstWhere((n) => n.id == 'b');
+    final aligned = shiftLayoutToAnchor(from, 'b', bTo.center);
+    final mid = morphGraphLayouts(aligned, to, 0.5);
+    final byId = {for (final n in mid.nodes) n.id: n};
+    expect(byId['b']!.center.dx, closeTo(bTo.center.dx, 1.0));
+    expect(byId['b']!.center.dy, closeTo(bTo.center.dy, 1.0));
+    expect(byId['c']!.opacity, lessThan(0.6));
+    expect(byId['d']!.opacity, greaterThan(0.4));
+    expect(byId['b']!.effectiveFlowerAmount, greaterThan(0.4));
+  });
 }

@@ -19,11 +19,12 @@ class GraphScreen extends StatefulWidget {
   State<GraphScreen> createState() => _GraphScreenState();
 }
 
-class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStateMixin {
+class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
   late final AnimationController _panController;
+  late final AnimationController _layoutMorph;
   Animation<Matrix4>? _panAnimation;
   String? _transformFocusId;
   /// While set, ignore center-highlight updates that aren't this id (avoids drawer flicker mid-pan).
@@ -38,11 +39,15 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _jobsPanelOpen = false;
   PlacedNode? _highlighted;
   GraphLayout? _layout;
+  GraphLayout? _settledLayout;
+  GraphLayout? _morphFrom;
+  GraphLayout? _morphTo;
   Size _viewport = Size.zero;
   Timer? _dwellTimer;
   /// Cached completeness for highlighted nodes: true = incomplete neighbors.
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
+  var _pendingFocusMorph = false;
 
   @override
   void initState() {
@@ -51,6 +56,10 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
       vsync: this,
       duration: const Duration(milliseconds: 420),
     )..addListener(_onPanTick);
+    _layoutMorph = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    )..addListener(_onLayoutMorphTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
       _resumed = true;
@@ -65,6 +74,9 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     _panController
       ..removeListener(_onPanTick)
       ..dispose();
+    _layoutMorph
+      ..removeListener(_onLayoutMorphTick)
+      ..dispose();
     _search.dispose();
     _searchFocus.dispose();
     _transform.dispose();
@@ -77,18 +89,102 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     _transform.value = anim.value;
   }
 
-  void _resetTransformIfFocusChanged({
+  void _onLayoutMorphTick() {
+    if (!mounted) return;
+    setState(() {});
+    if (!_layoutMorph.isCompleted) return;
+    _morphFrom = null;
+    _morphTo = null;
+    // Neighbors finished rearranging — ease the grown focus into true center.
+    _animateCameraToCanvasCenter(
+      viewport: _viewport,
+      canvas: Size(_settledLayout?.width ?? _viewport.width, _settledLayout?.height ?? _viewport.height),
+    );
+  }
+
+  GraphLayout _displayLayout(GraphLayout settled) {
+    final from = _morphFrom;
+    final to = _morphTo;
+    if (from != null && to != null && (_layoutMorph.isAnimating || _layoutMorph.value < 1)) {
+      if (_layoutMorph.isCompleted) return settled;
+      return morphGraphLayouts(from, to, _layoutMorph.value);
+    }
+    return settled;
+  }
+
+  void _beginFocusMorph({
+    required GraphLayout previous,
+    required GraphLayout next,
+    required String focusId,
+    required Size viewport,
+  }) {
+    PlacedNode? nextFocus;
+    for (final node in next.nodes) {
+      if (node.id == focusId) {
+        nextFocus = node;
+        break;
+      }
+    }
+    // Keep the tapped/highlighted tile fixed on screen while it grows into focus.
+    Offset screenPin = Offset(viewport.width / 2, viewport.height / 2);
+    for (final node in previous.nodes) {
+      if (node.id != focusId) continue;
+      screenPin = MatrixUtils.transformPoint(_transform.value, node.center);
+      break;
+    }
+    final aligned = nextFocus == null
+        ? previous
+        : shiftLayoutToAnchor(previous, focusId, nextFocus.center);
+    _morphFrom = aligned;
+    _morphTo = next;
+    _settledLayout = next;
+    _panController.stop();
+    _panAnimation = null;
+    if (nextFocus != null) {
+      final scale = _transform.value.getMaxScaleOnAxis();
+      _transform.value = _matrixPinning(
+        nextFocus.center,
+        screenPin,
+        scale: scale,
+      );
+    }
+    _layoutMorph.forward(from: 0);
+  }
+
+  void _adoptLayout({
+    required GraphLayout next,
+    required String? focusId,
+    required Size viewport,
+  }) {
+    final previous = _settledLayout;
+    final focusChanged = focusId != _transformFocusId;
+    if (!focusChanged || previous == null || focusId == null || previous.nodes.isEmpty) {
+      _settledLayout = next;
+      _morphFrom = null;
+      _morphTo = null;
+      _layoutMorph.stop();
+      _layoutMorph.value = 1;
+      if (focusChanged) {
+        _snapCameraToCanvasCenter(focusId: focusId, viewport: viewport, canvas: Size(next.width, next.height));
+      }
+      return;
+    }
+    _transformFocusId = focusId;
+    _panTargetId = null;
+    _dwellTimer?.cancel();
+    _beginFocusMorph(previous: previous, next: next, focusId: focusId, viewport: viewport);
+  }
+
+  void _snapCameraToCanvasCenter({
     required String? focusId,
     required Size viewport,
     required Size canvas,
   }) {
-    if (_transformFocusId == focusId) return;
     _transformFocusId = focusId;
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
     _dwellTimer?.cancel();
-    // Focus is laid out at the canvas center; translate so that lands in view.
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
       (viewport.height - canvas.height) / 2,
@@ -96,9 +192,32 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     );
   }
 
+  void _animateCameraToCanvasCenter({required Size viewport, required Size canvas}) {
+    if (viewport.isEmpty) return;
+    final end = Matrix4.translationValues(
+      (viewport.width - canvas.width) / 2,
+      (viewport.height - canvas.height) / 2,
+      0,
+    );
+    final begin = _transform.value.clone();
+    _panController.stop();
+    _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
+      CurvedAnimation(parent: _panController, curve: Curves.easeInOutCubic),
+    );
+    unawaited(_panController.forward(from: 0).then((_) {
+      if (!mounted) return;
+      _panAnimation = null;
+    }));
+  }
+
   Matrix4 _matrixCentering(Offset scenePoint, Size viewport, {required double scale}) {
+    return _matrixPinning(scenePoint, Offset(viewport.width / 2, viewport.height / 2), scale: scale);
+  }
+
+  /// Place [scenePoint] at [screenPoint] under the current scale.
+  Matrix4 _matrixPinning(Offset scenePoint, Offset screenPoint, {required double scale}) {
     return Matrix4.identity()
-      ..translateByDouble(viewport.width / 2, viewport.height / 2, 0, 1)
+      ..translateByDouble(screenPoint.dx, screenPoint.dy, 0, 1)
       ..scaleByDouble(scale, scale, scale, 1)
       ..translateByDouble(-scenePoint.dx, -scenePoint.dy, 0, 1);
   }
@@ -741,10 +860,29 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         _viewport = viewport;
-        final layout = _layoutFor(graph, viewport);
+        final nextLayout = _layoutFor(graph, viewport);
+        final focusId = graph.focusId;
+        if (_settledLayout == null || focusId != _transformFocusId) {
+          if (!_pendingFocusMorph) {
+            _pendingFocusMorph = true;
+            final previous = _settledLayout;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _pendingFocusMorph = false;
+              if (!mounted) return;
+              if (previous != null && focusId != null && focusId != _transformFocusId) {
+                _adoptLayout(next: nextLayout, focusId: focusId, viewport: viewport);
+              } else if (_settledLayout == null || focusId != _transformFocusId) {
+                _adoptLayout(next: nextLayout, focusId: focusId, viewport: viewport);
+              }
+            });
+          }
+        } else if (!_layoutMorph.isAnimating) {
+          _settledLayout = nextLayout;
+        }
+        final layout = _displayLayout(_settledLayout ?? nextLayout);
         _layout = layout;
         final highlighted = _highlighted;
-        if (highlighted != null) {
+        if (highlighted != null && !_layoutMorph.isAnimating) {
           final focus = graph.focusId;
           final matchId = focus == highlighted.id ? focus : highlighted.id;
           for (final n in layout.nodes) {
@@ -760,11 +898,6 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
             break;
           }
         }
-        _resetTransformIfFocusChanged(
-          focusId: graph.focusId,
-          viewport: viewport,
-          canvas: Size(layout.width, layout.height),
-        );
         // Generous margins so zoomed-out pan is free on both axes (portrait
         // viewports otherwise clamp vertical travel much harder than horizontal).
         final panSlack = math.max(viewport.width, viewport.height);
@@ -791,6 +924,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
               focusId: graph.focusId,
               highlightId: _highlighted?.id,
               pendingId: graph.refreshing ? graph.pendingNodeId : null,
+              morphing: _layoutMorph.isAnimating,
               transform: _transform,
               viewport: viewport,
               onSelect: _selectNode,
@@ -1713,12 +1847,14 @@ class _GraphView extends StatefulWidget {
     required this.viewport,
     required this.onSelect,
     required this.onHighlight,
+    this.morphing = false,
   });
 
   final GraphLayout layout;
   final String? focusId;
   final String? highlightId;
   final String? pendingId;
+  final bool morphing;
   final TransformationController transform;
   final Size viewport;
   final ValueChanged<PlacedNode> onSelect;
@@ -1759,7 +1895,7 @@ class _GraphViewState extends State<_GraphView> {
   }
 
   void _onTransform() {
-    if (!mounted) return;
+    if (!mounted || widget.morphing) return;
     final next = _tileAtViewportCenter(
       layout: widget.layout,
       transform: widget.transform.value,
@@ -1799,12 +1935,19 @@ class _GraphViewState extends State<_GraphView> {
               height: node.height + shadowPad * 2,
               child: Padding(
                 padding: const EdgeInsets.all(shadowPad),
-                child: _NodeCard(
-                  node: node,
-                  focused: node.id == widget.focusId,
-                  pending: node.id == widget.pendingId,
-                  centerHighlight: node.id == (widget.highlightId ?? _centerId),
-                  onTap: () => widget.onSelect(node),
+                child: Opacity(
+                  opacity: node.opacity.clamp(0.0, 1.0),
+                  child: IgnorePointer(
+                    ignoring: node.opacity < 0.35,
+                    child: _NodeCard(
+                      node: node,
+                      focused: node.id == widget.focusId,
+                      pending: node.id == widget.pendingId,
+                      centerHighlight:
+                          !widget.morphing && node.id == (widget.highlightId ?? _centerId),
+                      onTap: () => widget.onSelect(node),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1895,31 +2038,44 @@ class _NodeCard extends StatelessWidget {
     final base = pending
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
         : nodeFill(node, scheme);
+    final flower = node.effectiveFlowerAmount;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       builder: (context, spotlight, _) {
         // Focus flower: shadow only — color/scale look wrong on the big tile.
-        final fill = node.isFlower ? base : _intensifyFill(base, spotlight, dark: dark);
-        final scale = node.isFlower ? 1.0 : 1.0 + 0.045 * spotlight;
-        final child = node.isFlower
-            ? _flowerCard(
-                scheme: scheme,
-                fill: fill,
-                dark: dark,
-                spotlight: spotlight,
-              )
-            : _tileCard(
-                scheme: scheme,
-                fill: fill,
-                dark: dark,
-                spotlight: spotlight,
-              );
+        final fill = flower >= 0.85
+            ? base
+            : _intensifyFill(base, spotlight * (1 - flower), dark: dark);
+        final scale = flower >= 0.85 ? 1.0 : 1.0 + 0.045 * spotlight * (1 - flower);
+        final hex = _tileCard(
+          scheme: scheme,
+          fill: fill,
+          dark: dark,
+          spotlight: spotlight,
+        );
+        final bloom = _flowerCard(
+          scheme: scheme,
+          fill: base,
+          dark: dark,
+          spotlight: spotlight,
+        );
+        final child = flower <= 0.02
+            ? hex
+            : flower >= 0.98
+                ? bloom
+                : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Opacity(opacity: 1 - flower, child: hex),
+                      Opacity(opacity: flower, child: bloom),
+                    ],
+                  );
         // Clip to hex/flower silhouette so the focus AABB cannot steal taps
         // meant for neighbors-of-neighbors sitting in its bounding box.
         return ClipPath(
-          clipper: node.isFlower ? const _FlowerTapClipper() : const _HexTapClipper(),
+          clipper: flower >= 0.5 ? const _FlowerTapClipper() : const _HexTapClipper(),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTap,
