@@ -47,6 +47,23 @@ class GenerationJob(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
+class GenerationJobWatcher(SQLModel, table=True):
+    """Users who care about a shared expand job (badge / job list)."""
+
+    __tablename__ = "generation_job_watchers"
+    __table_args__ = (
+        Index("uq_generation_job_watchers_job_user", "job_id", "user_id", unique=True),
+        Index("ix_generation_job_watchers_user", "user_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    job_id: UUID = Field(foreign_key="generation_jobs.id", index=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    node_id: UUID = Field(foreign_key="knowledge_nodes.id", index=True)
+    title: str = Field(default="", max_length=512)
+    created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
 class LlmUsage(SQLModel, table=True):
     __tablename__ = "llm_usage"
 

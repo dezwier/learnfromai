@@ -35,7 +35,7 @@ def clean_db():
             text(
                 "TRUNCATE TABLE knowledge_request_nodes, knowledge_requests, knowledge_edges, "
                 "knowledge_nodes, knowledge_category_edges, knowledge_categories, "
-                "extend_requests, llm_usage, generation_jobs, edges, concepts, graphs, "
+                "extend_requests, llm_usage, generation_job_watchers, generation_jobs, edges, concepts, graphs, "
                 "worker_heartbeats, users RESTART IDENTITY CASCADE"
             )
         )

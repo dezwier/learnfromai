@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/networking/api_client.dart';
@@ -63,6 +65,46 @@ class NeighborhoodPrefs {
   }
 }
 
+class TrackedJob {
+  const TrackedJob({
+    required this.jobId,
+    required this.nodeId,
+    required this.title,
+    required this.state,
+    this.progressMessage,
+    this.fraction = 0,
+    this.errorMessage,
+  });
+
+  final String jobId;
+  final String nodeId;
+  final String title;
+  final String state;
+  final String? progressMessage;
+  final double fraction;
+  final String? errorMessage;
+
+  bool get isActive => state == 'queued' || state == 'running';
+
+  TrackedJob copyWith({
+    String? state,
+    String? progressMessage,
+    double? fraction,
+    String? errorMessage,
+    String? title,
+  }) {
+    return TrackedJob(
+      jobId: jobId,
+      nodeId: nodeId,
+      title: title ?? this.title,
+      state: state ?? this.state,
+      progressMessage: progressMessage ?? this.progressMessage,
+      fraction: fraction ?? this.fraction,
+      errorMessage: errorMessage,
+    );
+  }
+}
+
 class GraphController extends ChangeNotifier {
   GraphController({
     this.api,
@@ -83,16 +125,16 @@ class GraphController extends ChangeNotifier {
   Map<String, dynamic>? categoryGraph;
   bool loading = false;
   bool refreshing = false;
-  bool working = false;
-  String? pendingNodeId;
   String? error;
-  String? progressMessage;
   List<TopicChoice> candidates = [];
   List<TopicChoice> suggestions = [];
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
+  final List<TrackedJob> trackedJobs = [];
   int _suggestToken = 0;
-  int _fillToken = 0;
+  Timer? _jobPoller;
+  var _polling = false;
+  var _disposed = false;
 
   String? get focusId {
     final raw = categoryGraph?['focus_node_id'];
@@ -102,15 +144,54 @@ class GraphController extends ChangeNotifier {
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
+  int get activeJobCount => trackedJobs.where((j) => j.isActive).length;
+
+  bool get hasActiveJobs => activeJobCount > 0;
+
+  /// True while any neighborhood expand is in flight (badge / drawer), not a nav lock.
+  bool get working => hasActiveJobs;
+
+  String? get progressMessage {
+    final focus = focusId;
+    if (focus != null) {
+      final forFocus = jobForNode(focus);
+      if (forFocus != null) return forFocus.progressMessage;
+    }
+    if (trackedJobs.isEmpty) return null;
+    return trackedJobs.first.progressMessage;
+  }
+
+  String? get pendingNodeId {
+    final focus = focusId;
+    if (focus != null && jobForNode(focus) != null) return focus;
+    return trackedJobs.isEmpty ? null : trackedJobs.first.nodeId;
+  }
+
+  TrackedJob? jobForNode(String nodeId) {
+    for (final job in trackedJobs) {
+      if (job.nodeId == nodeId && job.isActive) return job;
+    }
+    return null;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _jobPoller?.cancel();
+    _jobPoller = null;
+    super.dispose();
+  }
+
   Future<void> resume() async {
-    if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing || working) return;
+    if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing) return;
     await loadPreferences();
     await _focus(body: const {});
+    unawaited(refreshTrackedJobs());
   }
 
   Future<void> search(String topic) async {
     final trimmed = topic.trim();
-    if (trimmed.isEmpty || refreshing || loading || working) return;
+    if (trimmed.isEmpty || refreshing || loading) return;
     suggestions = [];
     final previous = List<String>.of(focusHistory);
     focusHistory.clear();
@@ -151,14 +232,13 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<void> openNode(String id) async {
-    if (refreshing || loading || working) return; // one expand at a time; graph stays pannable
+    if (refreshing || loading) return;
     if (focusId == id && categoryGraph != null) return;
-    pendingNodeId = id;
     await _focus(body: {'node_id': id});
   }
 
-  /// Open an existing node via GET graph — show it immediately, then fill if needed.
-  Future<void> openExisting(String id) async {
+  /// Open an existing node via GET graph, then enqueue expand without blocking.
+  Future<void> openExisting(String id, {String? title}) async {
     if (refreshing || loading) return;
     if (focusId == id && categoryGraph != null && categoryGraph?['incomplete'] != true) {
       suggestions = [];
@@ -168,74 +248,77 @@ class GraphController extends ChangeNotifier {
     if (focusId == id && categoryGraph != null) {
       suggestions = [];
       notifyListeners();
-      await _fillNeighborhood(id);
+      unawaited(enqueueNeighborhood(id, title: title));
       return;
     }
-    // Navigating away cancels an in-flight background fill for the previous focus.
-    final fillGeneration = ++_fillToken;
     final first = categoryGraph == null;
     loading = first;
     refreshing = !first;
-    pendingNodeId = id;
     error = null;
     candidates = [];
     suggestions = [];
-    progressMessage = null;
     notifyListeners();
-    var opened = false;
+    var openedId = id;
     try {
       categoryGraph = await _get('/knowledge/graph/$id');
-      final focus = focusId;
-      if (focus != null && (focusHistory.isEmpty || focusHistory.last != focus)) {
-        focusHistory.add(focus);
+      openedId = focusId ?? id;
+      if (focusHistory.isEmpty || focusHistory.last != openedId) {
+        focusHistory.add(openedId);
       }
-      opened = true;
     } on ApiException catch (exc) {
       error = exc.message;
     } finally {
       loading = false;
       refreshing = false;
-      pendingNodeId = null;
-      progressMessage = null;
       notifyListeners();
     }
-    // POST focus: returns immediately when complete, else expands without blanking the graph.
-    if (opened && focusId == id && fillGeneration == _fillToken) {
-      await _fillNeighborhood(id);
+    if (error == null && categoryGraph?['incomplete'] == true) {
+      unawaited(enqueueNeighborhood(openedId, title: title));
     }
   }
 
-  /// Expand an incomplete neighborhood without blanking the current graph.
-  Future<void> _fillNeighborhood(String id) async {
-    if (loading || refreshing) return;
-    final token = ++_fillToken;
-    working = true;
-    pendingNodeId = id;
-    progressMessage = 'Filling related topics…';
-    error = null;
-    notifyListeners();
+  /// POST focus; if a job is returned, track it without awaiting completion.
+  Future<void> enqueueNeighborhood(String id, {String? title}) async {
+    if (jobForNode(id) != null) {
+      _ensurePoller();
+      return;
+    }
     try {
       final payload = await _post('/knowledge/focus', body: {'node_id': id});
-      if (token != _fillToken) return;
-      if (payload['job_id'] != null) {
-        await _waitForJob(payload['job_id'].toString());
-        if (token != _fillToken || focusId != id) return;
-        categoryGraph = await _get('/knowledge/graph/$id');
-      } else if (focusId == id) {
-        categoryGraph = payload;
+      final jobId = payload['job_id']?.toString();
+      if (jobId == null) {
+        // Already complete — refresh graph if we're still on this focus.
+        if (focusId == id || focusId == payload['focus_node_id']?.toString()) {
+          if (payload['nodes'] is List) {
+            categoryGraph = payload;
+          } else {
+            categoryGraph = await _get('/knowledge/graph/$id');
+          }
+          notifyListeners();
+        }
+        return;
       }
+      final focusNodeId = payload['focus_node_id']?.toString() ?? id;
+      final progress = payload['progress'];
+      final message = progress is Map ? progress['message']?.toString() : null;
+      final fraction = progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0.0;
+      _upsertTracked(
+        TrackedJob(
+          jobId: jobId,
+          nodeId: focusNodeId,
+          title: title ?? _titleForNode(focusNodeId) ?? 'Topic',
+          state: 'queued',
+          progressMessage: message ?? 'Waiting for a worker…',
+          fraction: fraction,
+        ),
+      );
+      _ensurePoller();
     } on ApiException catch (exc) {
-      if (token != _fillToken) return;
       if (exc.status == 409) {
         candidates = _choices(exc.details);
+        notifyListeners();
       } else {
         error = exc.message;
-      }
-    } finally {
-      if (token == _fillToken) {
-        working = false;
-        pendingNodeId = null;
-        progressMessage = null;
         notifyListeners();
       }
     }
@@ -244,14 +327,14 @@ class GraphController extends ChangeNotifier {
   Future<void> choose(TopicChoice choice) async {
     candidates = [];
     notifyListeners();
-    await openExisting(choice.id);
+    await openExisting(choice.id, title: choice.title);
   }
 
   Future<void> back() async {
     if (!canGoBack) return;
     final current = focusHistory.removeLast();
     final previous = focusHistory.last;
-    await _focus(body: {'node_id': previous}, record: false);
+    await openExisting(previous);
     if (error != null) focusHistory.add(current);
   }
 
@@ -260,7 +343,7 @@ class GraphController extends ChangeNotifier {
     String? title,
     String? description,
   }) async {
-    if (refreshing || loading || working) return false;
+    if (refreshing || loading) return false;
     error = null;
     notifyListeners();
     try {
@@ -285,13 +368,14 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<bool> deleteNode(String id) async {
-    if (refreshing || loading || working) return false;
+    if (refreshing || loading) return false;
     final wasFocus = focusId == id;
     error = null;
     notifyListeners();
     try {
       await _delete('/knowledge/nodes/$id');
       focusHistory.removeWhere((entry) => entry == id);
+      trackedJobs.removeWhere((j) => j.nodeId == id);
       if (wasFocus) {
         if (focusHistory.isNotEmpty) {
           await openExisting(focusHistory.last);
@@ -353,14 +437,46 @@ class GraphController extends ChangeNotifier {
         prefs = NeighborhoodPrefs.fromJson(neighborhood);
         notifyListeners();
       }
-      // Refetch so the API returns the configured outer-ring count.
       final id = focusId;
-      if (id != null && !refreshing && !loading && !working) {
+      if (id != null && !refreshing && !loading) {
         await openExisting(id);
       }
     } on ApiException catch (exc) {
       error = exc.message;
       notifyListeners();
+    }
+  }
+
+  Future<void> refreshTrackedJobs() async {
+    try {
+      final raw = await _get('/jobs?state=queued,running');
+      final list = raw['jobs'];
+      if (list is! List) return;
+      final next = <TrackedJob>[];
+      for (final item in list) {
+        if (item is! Map) continue;
+        final jobId = item['id']?.toString();
+        final nodeId = item['focus_node_id']?.toString();
+        if (jobId == null || nodeId == null) continue;
+        final progress = item['progress'];
+        next.add(
+          TrackedJob(
+            jobId: jobId,
+            nodeId: nodeId,
+            title: item['title']?.toString() ?? 'Topic',
+            state: item['state']?.toString() ?? 'queued',
+            progressMessage: progress is Map ? progress['message']?.toString() : null,
+            fraction: progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0,
+          ),
+        );
+      }
+      trackedJobs
+        ..clear()
+        ..addAll(next);
+      notifyListeners();
+      if (trackedJobs.isNotEmpty) _ensurePoller();
+    } on ApiException {
+      // Ignore list failures; individual polls still work.
     }
   }
 
@@ -370,22 +486,31 @@ class GraphController extends ChangeNotifier {
     refreshing = !first;
     error = null;
     candidates = [];
-    progressMessage = null;
     notifyListeners();
     try {
       final payload = await _post('/knowledge/focus', body: body);
+      final focus = payload['focus_node_id']?.toString() ?? body['node_id']?.toString();
       if (payload['job_id'] != null) {
-        final job = await _waitForJob(payload['job_id'].toString());
-        final result = job['result'];
-        final resultFocus = result is Map ? result['focus_id']?.toString() : null;
-        final focus = resultFocus ??
-            payload['focus_node_id']?.toString() ??
-            (categoryGraph?['focus_node_id']?.toString()) ??
-            body['node_id']?.toString();
-        if (focus == null) {
-          throw ApiException(500, 'JOB', 'Neighborhood job finished without a focus');
+        if (focus != null) {
+          try {
+            categoryGraph = await _get('/knowledge/graph/$focus');
+          } on ApiException {
+            // Keep prior graph if GET fails while job is queued.
+          }
         }
-        categoryGraph = await _get('/knowledge/graph/$focus');
+        final progress = payload['progress'];
+        _upsertTracked(
+          TrackedJob(
+            jobId: payload['job_id'].toString(),
+            nodeId: focus ?? payload['job_id'].toString(),
+            title: body['topic']?.toString() ?? _titleForNode(focus ?? '') ?? 'Topic',
+            state: 'queued',
+            progressMessage:
+                progress is Map ? progress['message']?.toString() : 'Waiting for a worker…',
+            fraction: progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0,
+          ),
+        );
+        _ensurePoller();
       } else {
         categoryGraph = payload;
       }
@@ -402,36 +527,102 @@ class GraphController extends ChangeNotifier {
     } finally {
       loading = false;
       refreshing = false;
-      working = false;
-      pendingNodeId = null;
-      progressMessage = null;
       notifyListeners();
     }
   }
 
-  Future<Map<String, dynamic>> _waitForJob(String jobId) async {
-    working = true;
-    progressMessage = 'Waiting for a worker…';
-    notifyListeners();
-    for (var attempt = 0; attempt < 180; attempt++) {
-      final job = await _job(jobId);
-      final progress = job['progress'];
-      if (progress is Map && progress['message'] != null) {
-        progressMessage = progress['message'].toString();
-      }
-      notifyListeners();
-      final state = job['state']?.toString();
-      if (state == 'succeeded') return job;
-      if (state == 'failed') {
-        throw ApiException(
-          500,
-          job['error_code']?.toString() ?? 'JOB_FAILED',
-          job['error_message']?.toString() ?? 'Neighborhood generation failed',
-        );
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 700));
+  void _upsertTracked(TrackedJob job) {
+    final index = trackedJobs.indexWhere((j) => j.jobId == job.jobId || j.nodeId == job.nodeId);
+    if (index >= 0) {
+      trackedJobs[index] = job;
+    } else {
+      trackedJobs.insert(0, job);
     }
-    throw ApiException(504, 'JOB_TIMEOUT', 'Neighborhood generation timed out');
+    notifyListeners();
+  }
+
+  void _ensurePoller() {
+    if (_jobPoller != null) return;
+    _jobPoller = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_pollTrackedJobs());
+    });
+    unawaited(_pollTrackedJobs());
+  }
+
+  Future<void> _pollTrackedJobs() async {
+    if (_polling || _disposed) return;
+    if (trackedJobs.isEmpty) {
+      _jobPoller?.cancel();
+      _jobPoller = null;
+      return;
+    }
+    _polling = true;
+    try {
+      final snapshot = List<TrackedJob>.of(trackedJobs);
+      for (final tracked in snapshot) {
+        if (!tracked.isActive) continue;
+        try {
+          final job = await _job(tracked.jobId);
+          if (_disposed) return;
+          final state = job['state']?.toString() ?? tracked.state;
+          final progress = job['progress'];
+          final message = progress is Map ? progress['message']?.toString() : tracked.progressMessage;
+          final fraction =
+              progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? tracked.fraction : tracked.fraction;
+          if (state == 'succeeded') {
+            trackedJobs.removeWhere((j) => j.jobId == tracked.jobId);
+            final result = job['result'];
+            final resultFocus = result is Map ? result['focus_id']?.toString() : null;
+            final loadId = resultFocus ?? tracked.nodeId;
+            if (focusId == tracked.nodeId || focusId == loadId) {
+              try {
+                categoryGraph = await _get('/knowledge/graph/$loadId');
+              } on ApiException {
+                // Keep current graph.
+              }
+            }
+            notifyListeners();
+            continue;
+          }
+          if (state == 'failed') {
+            trackedJobs.removeWhere((j) => j.jobId == tracked.jobId);
+            // Surface briefly via error only if user is on that topic.
+            if (focusId == tracked.nodeId) {
+              error = job['error_message']?.toString() ?? 'Neighborhood generation failed';
+            }
+            notifyListeners();
+            continue;
+          }
+          _upsertTracked(
+            tracked.copyWith(
+              state: state,
+              progressMessage: message,
+              fraction: fraction,
+            ),
+          );
+        } on ApiException {
+          // Keep tracking; next tick retries.
+        }
+      }
+      if (trackedJobs.isEmpty) {
+        _jobPoller?.cancel();
+        _jobPoller = null;
+      }
+    } finally {
+      _polling = false;
+    }
+  }
+
+  String? _titleForNode(String id) {
+    if (id.isEmpty) return null;
+    final nodes = categoryGraph?['nodes'];
+    if (nodes is! List) return null;
+    for (final raw in nodes) {
+      if (raw is Map && raw['id']?.toString() == id) {
+        return raw['title']?.toString();
+      }
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> _get(String path) async {

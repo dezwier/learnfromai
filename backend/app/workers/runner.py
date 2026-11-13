@@ -56,10 +56,9 @@ def beat() -> None:
 def run_forever() -> None:
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
+    # One claim per loop; scale parallelism with Railway worker replicas.
+    _ = settings.job_worker_concurrency
     while True:
         beat()
-        worked = False
-        for _ in range(max(1, settings.job_worker_concurrency)):
-            worked = run_once() or worked
-        if not worked:
+        if not run_once():
             time.sleep(settings.job_idle_seconds)

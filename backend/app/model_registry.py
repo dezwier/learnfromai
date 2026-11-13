@@ -10,13 +10,14 @@ from app.features.knowledge_graph.node_models import (
     KnowledgeRequest,
     KnowledgeRequestNode,
 )
-from app.features.platform.models import GenerationJob, LlmUsage, WorkerHeartbeat
+from app.features.platform.models import GenerationJob, GenerationJobWatcher, LlmUsage, WorkerHeartbeat
 
 
 def register_models() -> None:
     _ = (
         User,
         GenerationJob,
+        GenerationJobWatcher,
         LlmUsage,
         WorkerHeartbeat,
         Graph,

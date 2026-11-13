@@ -14,7 +14,7 @@ from app.features.knowledge_graph.neighborhood import (
 )
 from app.features.knowledge_graph.node_models import KnowledgeRequest
 from app.features.knowledge_graph.preferences import neighborhood_counts
-from app.features.platform.jobs import enqueue
+from app.features.platform.jobs import enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
 
@@ -96,31 +96,32 @@ def _enqueue_expand(
     topic: str | None,
     counts: dict[str, int],
 ) -> GenerationJob:
-    # Reuse an in-flight job for the same focus + counts.
+    # One shared expand per focus+counts across all users (shared graph).
     idempotency = (
         f"expand_neighborhood:{focus.id}:"
         f"{counts['parents']}-{counts['siblings']}-{counts['children']}-{counts['acquaintances']}"
     )
-    existing = session.exec(
-        select(GenerationJob).where(
-            GenerationJob.user_id == user.id,
-            GenerationJob.idempotency_key == idempotency,
-            col(GenerationJob.state).in_(["queued", "running"]),
-        )
-    ).first()
-    if existing is not None:
-        return existing
-    return enqueue(
+    job = enqueue(
         session,
         job_type="expand_neighborhood",
         user_id=user.id,
         idempotency_key=idempotency,
+        shared=True,
         payload={
             "focus_id": str(focus.id),
             "topic": topic or focus.name,
+            "requested_by": str(user.id),
             **counts,
         },
     )
+    ensure_watcher(
+        session,
+        job=job,
+        user_id=user.id,
+        node_id=focus.id,
+        title=focus.name,
+    )
+    return job
 
 
 # Compatibility for older imports/tests.

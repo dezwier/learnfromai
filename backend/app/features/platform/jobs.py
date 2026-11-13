@@ -4,12 +4,12 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import or_
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.time import utcnow
-from app.features.platform.models import GenerationJob
+from app.features.platform.models import GenerationJob, GenerationJobWatcher
 
 
 def enqueue(
@@ -19,14 +19,17 @@ def enqueue(
     payload: dict,
     user_id: UUID | None = None,
     idempotency_key: str | None = None,
+    shared: bool = False,
 ) -> GenerationJob:
+    """Enqueue a job. When shared=True, coalesce by idempotency_key across all users."""
     settings = get_settings()
     if idempotency_key:
         query = select(GenerationJob).where(GenerationJob.idempotency_key == idempotency_key)
-        if user_id is None:
-            query = query.where(GenerationJob.user_id.is_(None))  # type: ignore[union-attr]
-        else:
-            query = query.where(GenerationJob.user_id == user_id)
+        if not shared:
+            if user_id is None:
+                query = query.where(GenerationJob.user_id.is_(None))  # type: ignore[union-attr]
+            else:
+                query = query.where(GenerationJob.user_id == user_id)
         existing = session.exec(query).first()
         # Reuse in-flight work only. Terminal jobs must not block a fresh expand.
         if existing is not None and existing.state in {"queued", "running"}:
@@ -36,16 +39,94 @@ def enqueue(
             existing.idempotency_key = f"{idempotency_key}:done:{existing.id}"
             session.add(existing)
             session.flush()
+    # Shared expands use user_id=None so the system unique key enforces one active expand.
     job = GenerationJob(
-        user_id=user_id,
+        user_id=None if shared else user_id,
         type=job_type,
         payload=payload,
         idempotency_key=idempotency_key,
         max_attempts=settings.job_max_attempts,
+        progress={"stage": "queued", "message": "Waiting for a worker…", "fraction": 0},
     )
     session.add(job)
     session.flush()
     return job
+
+
+def ensure_watcher(
+    session: Session,
+    *,
+    job: GenerationJob,
+    user_id: UUID,
+    node_id: UUID,
+    title: str,
+) -> GenerationJobWatcher:
+    existing = session.exec(
+        select(GenerationJobWatcher).where(
+            GenerationJobWatcher.job_id == job.id,
+            GenerationJobWatcher.user_id == user_id,
+        )
+    ).first()
+    if existing is not None:
+        if title and existing.title != title:
+            existing.title = title[:512]
+            session.add(existing)
+        return existing
+    row = GenerationJobWatcher(
+        job_id=job.id,
+        user_id=user_id,
+        node_id=node_id,
+        title=(title or "")[:512],
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def user_watches_job(session: Session, *, job_id: UUID, user_id: UUID) -> bool:
+    return (
+        session.exec(
+            select(GenerationJobWatcher.id).where(
+                GenerationJobWatcher.job_id == job_id,
+                GenerationJobWatcher.user_id == user_id,
+            )
+        ).first()
+        is not None
+    )
+
+
+def list_watched_jobs(
+    session: Session,
+    *,
+    user_id: UUID,
+    states: set[str] | None = None,
+) -> list[dict]:
+    active = states or {"queued", "running"}
+    rows = session.exec(
+        select(GenerationJobWatcher, GenerationJob)
+        .join(GenerationJob, GenerationJob.id == GenerationJobWatcher.job_id)
+        .where(GenerationJobWatcher.user_id == user_id)
+        .where(col(GenerationJob.state).in_(sorted(active)))
+        .order_by(col(GenerationJobWatcher.created_at).desc())
+    ).all()
+    out: list[dict] = []
+    for watcher, job in rows:
+        progress = job.progress if isinstance(job.progress, dict) else {}
+        focus_id = (job.payload or {}).get("focus_id") or str(watcher.node_id)
+        out.append(
+            {
+                "id": str(job.id),
+                "type": job.type,
+                "state": job.state,
+                "progress": progress,
+                "focus_node_id": str(focus_id),
+                "title": watcher.title or (job.payload or {}).get("topic") or "Topic",
+                "created_at": watcher.created_at.isoformat() if watcher.created_at else None,
+                "error_code": job.error_code,
+                "error_message": job.error_message,
+            }
+        )
+    return out
 
 
 def claim_next(session: Session) -> tuple[GenerationJob, UUID] | None:
@@ -130,6 +211,8 @@ def finish(session: Session, job_id: UUID, token: UUID, result: dict) -> bool:
     job.result = result
     job.error_code = None
     job.lease_until = None
+    if job.idempotency_key:
+        job.idempotency_key = f"{job.idempotency_key}:done:{job.id}"
     job.updated_at = utcnow()
     session.commit()
     return True

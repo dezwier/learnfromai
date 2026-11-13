@@ -152,7 +152,15 @@ def set_progress(session: Session, job: GenerationJob, *, stage: str, message: s
 
 def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     payload = job.payload or {}
-    user_id = job.user_id
+    user_id = job.user_id or parse_uuid(payload.get("requested_by"))
+    if user_id is None:
+        from app.features.platform.models import GenerationJobWatcher
+
+        watcher = session.exec(
+            select(GenerationJobWatcher).where(GenerationJobWatcher.job_id == job.id)
+        ).first()
+        if watcher is not None:
+            user_id = watcher.user_id
     if user_id is None:
         from app.core.errors import AppError
 

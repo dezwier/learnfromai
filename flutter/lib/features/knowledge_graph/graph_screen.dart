@@ -35,6 +35,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   var _searchOpen = false;
   var _profileOpen = false;
   var _drawerRaised = false;
+  var _jobsPanelOpen = false;
   PlacedNode? _highlighted;
   /// Last tile the user explicitly tapped (survives center-highlight overwrites).
   String? _tappedTileId;
@@ -166,13 +167,49 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
     // Keep the drawer on the destination topic while the graph loads — no blank gap.
     setState(() => _highlighted = node);
-    await graph.openExisting(node.id);
+    await graph.openExisting(node.id, title: node.title);
     if (!mounted) return;
-    final focusId = graph.focusId;
+    // Let LayoutBuilder apply the post-fill graph before syncing the drawer node.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId);
+  }
+
+  Future<void> _openTrackedJob(GraphController graph, TrackedJob job) async {
+    PlacedNode? placed;
     final layout = _layout;
-    if (focusId == null || layout == null) return;
+    if (layout != null) {
+      for (final n in layout.nodes) {
+        if (n.id == job.nodeId) {
+          placed = n;
+          break;
+        }
+      }
+    }
+    if (placed != null) {
+      _selectNode(placed, keepDrawerRaised: _drawerRaised);
+      return;
+    }
+    await graph.openExisting(job.nodeId, title: job.title);
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(job.nodeId);
+  }
+
+  void _syncHighlightedFromLayout(String? focusId) {
+    final layout = _layout;
+    final current = _highlighted;
+    if (layout == null || current == null) return;
+    final targetId = focusId ?? current.id;
     for (final n in layout.nodes) {
-      if (n.id != focusId) continue;
+      if (n.id != targetId) continue;
+      if (n.id == current.id &&
+          n.title == current.title &&
+          n.description == current.description &&
+          n.role == current.role) {
+        return;
+      }
       setState(() => _highlighted = n);
       return;
     }
@@ -350,7 +387,14 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     final floatBottom = drawerClearance + keyboard;
     final canGoToHighlight =
         !_searchOpen && !_profileOpen && _highlighted != null && _highlighted!.id != graph.focusId;
+    // Hide graph chrome while the sheet is up — drawer is stacked above these floats.
     final showFloats = !_searchOpen && !_profileOpen && !_drawerRaised;
+    if (_jobsPanelOpen && !graph.hasActiveJobs) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_jobsPanelOpen) return;
+        setState(() => _jobsPanelOpen = false);
+      });
+    }
     return Scaffold(
       // Keep the graph still when the keyboard opens; search floats above it.
       resizeToAvoidBottomInset: false,
@@ -358,12 +402,12 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
         children: [
           Column(
             children: [
-              if (graph.categoryGraph?['incomplete'] == true)
+              if (graph.categoryGraph?['incomplete'] == true && !_drawerRaised)
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
                   child: Text('Some surrounding topics are still loading. Open this topic again to continue.'),
                 ),
-              if (graph.error != null)
+              if (graph.error != null && !_drawerRaised)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: StudyCard(
@@ -405,8 +449,8 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
               ),
             ],
           ),
-          if (!_profileOpen) const ProfileTopFade(),
-          if (!_profileOpen)
+          if (!_profileOpen && !_drawerRaised) const ProfileTopFade(),
+          if (!_profileOpen && !_drawerRaised)
             Positioned(
               top: 0,
               left: 0,
@@ -422,34 +466,33 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 ),
               ),
             ),
-          if (drawerVisible)
-            Positioned.fill(
-              child: _HighlightDrawer(
-                node: _highlighted!,
-                layout: _layout,
-                focusId: graph.focusId,
-                busy: graph.working || graph.refreshing || graph.loading,
-                canViewInGraph: canGoToHighlight,
-                onRaisedChanged: (raised) {
-                  if (_drawerRaised == raised) return;
-                  setState(() => _drawerRaised = raised);
-                },
-                onViewInGraph: () => _goToHighlighted(graph),
-                onEdit: () => _editHighlighted(graph),
-                onDelete: () => _confirmDeleteHighlighted(graph),
-                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
-                onExpandToTopic: () {
-                  final node = _highlighted;
-                  if (node == null) return;
-                  unawaited(_openRelatedTopic(graph, node));
-                },
-              ),
-            ),
-          if (graph.working && showFloats)
+          // Floats under the drawer so a raised sheet fully covers them.
+          if (showFloats)
             Positioned(
               left: 16,
               bottom: floatBottom,
-              child: _ProgressChip(message: graph.progressMessage ?? 'Working…'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_jobsPanelOpen && graph.hasActiveJobs) ...[
+                    _JobsPanel(
+                      jobs: graph.trackedJobs.where((j) => j.isActive).toList(),
+                      onSelect: (job) {
+                        setState(() => _jobsPanelOpen = false);
+                        unawaited(_openTrackedJob(graph, job));
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (graph.hasActiveJobs)
+                    _JobsBadgeButton(
+                      count: graph.activeJobCount,
+                      open: _jobsPanelOpen,
+                      onPressed: () => setState(() => _jobsPanelOpen = !_jobsPanelOpen),
+                    ),
+                ],
+              ),
             ),
           if (showFloats)
             Positioned(
@@ -469,7 +512,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                       focusElevation: 2,
                       hoverElevation: 2,
                       highlightElevation: 2,
-                      onPressed: graph.working ? null : () => _goToHighlighted(graph),
+                      onPressed: () => _goToHighlighted(graph),
                       child: const Icon(Icons.arrow_forward, size: 20),
                     ),
                     const SizedBox(height: 10),
@@ -502,6 +545,33 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                     child: const Icon(Icons.search, size: 20),
                   ),
                 ],
+              ),
+            ),
+          if (drawerVisible)
+            Positioned.fill(
+              child: _HighlightDrawer(
+                node: _highlighted!,
+                layout: _layout,
+                focusId: graph.focusId,
+                busy: graph.jobForNode(_highlighted!.id) != null ||
+                    graph.refreshing ||
+                    graph.loading,
+                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage ??
+                    graph.progressMessage,
+                canViewInGraph: canGoToHighlight,
+                onRaisedChanged: (raised) {
+                  if (_drawerRaised == raised) return;
+                  setState(() => _drawerRaised = raised);
+                },
+                onViewInGraph: () => _goToHighlighted(graph),
+                onEdit: () => _editHighlighted(graph),
+                onDelete: () => _confirmDeleteHighlighted(graph),
+                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
+                onExpandToTopic: () {
+                  final node = _highlighted;
+                  if (node == null) return;
+                  unawaited(_openRelatedTopic(graph, node));
+                },
               ),
             ),
           if (_searchOpen)
@@ -575,6 +645,23 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
         _viewport = viewport;
         final layout = _layoutFor(graph, viewport);
         _layout = layout;
+        final highlighted = _highlighted;
+        if (highlighted != null) {
+          final focus = graph.focusId;
+          final matchId = focus == highlighted.id ? focus : highlighted.id;
+          for (final n in layout.nodes) {
+            if (n.id != matchId) continue;
+            if (n.role != highlighted.role ||
+                n.title != highlighted.title ||
+                n.description != highlighted.description) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                _syncHighlightedFromLayout(matchId);
+              });
+            }
+            break;
+          }
+        }
         _resetTransformIfFocusChanged(
           focusId: graph.focusId,
           viewport: viewport,
@@ -663,42 +750,94 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
   }
 }
 
-class _ProgressChip extends StatelessWidget {
-  const _ProgressChip({required this.message});
+class _JobsBadgeButton extends StatelessWidget {
+  const _JobsBadgeButton({
+    required this.count,
+    required this.open,
+    required this.onPressed,
+  });
 
-  final String message;
+  final int count;
+  final bool open;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Badge(
+      isLabelVisible: count > 0,
+      label: Text('$count'),
+      child: FloatingActionButton.small(
+        heroTag: 'graph-jobs',
+        tooltip: open ? 'Hide job queue' : 'Show running jobs',
+        backgroundColor: open ? scheme.primary : scheme.surfaceContainerHighest,
+        foregroundColor: open ? scheme.onPrimary : scheme.onSurfaceVariant,
+        elevation: 1.5,
+        focusElevation: 2,
+        hoverElevation: 2,
+        highlightElevation: 2,
+        onPressed: onPressed,
+        child: const Icon(Icons.hourglass_top, size: 20),
+      ),
+    );
+  }
+}
+
+class _JobsPanel extends StatelessWidget {
+  const _JobsPanel({required this.jobs, required this.onSelect});
+
+  final List<TrackedJob> jobs;
+  final ValueChanged<TrackedJob> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      elevation: 3,
-      color: scheme.surface.withValues(alpha: 0.94),
-      borderRadius: BorderRadius.circular(20),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: scheme.primary.withValues(alpha: 0.8),
+      elevation: 6,
+      color: scheme.surface.withValues(alpha: 0.97),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 280, maxHeight: 280),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          itemCount: jobs.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            color: scheme.onSurface.withValues(alpha: 0.06),
+          ),
+          itemBuilder: (context, index) {
+            final job = jobs[index];
+            return InkWell(
+              onTap: () => onSelect(job),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      job.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      job.progressMessage ?? job.state,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.65),
+                          ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(
-                message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -719,6 +858,7 @@ class _HighlightDrawer extends StatefulWidget {
     this.layout,
     this.focusId,
     this.busy = false,
+    this.progressMessage,
   });
 
   /// Collapsed content height (above the home-indicator inset).
@@ -730,6 +870,7 @@ class _HighlightDrawer extends StatefulWidget {
   final GraphLayout? layout;
   final String? focusId;
   final bool busy;
+  final String? progressMessage;
   final bool canViewInGraph;
   final ValueChanged<bool> onRaisedChanged;
   final VoidCallback onViewInGraph;
@@ -1054,22 +1195,20 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
                                 ),
                               ],
                             ),
-                            if (widget.layout != null && !widget.busy) ...[
-                              const SizedBox(height: 18),
+                            const SizedBox(height: 18),
+                            if (widget.busy) ...[
+                              _DrawerProgressCard(
+                                message: widget.progressMessage ?? 'Loading related topics…',
+                              ),
+                              if (widget.layout != null) const SizedBox(height: 12),
+                            ],
+                            if (widget.layout != null)
                               _RelationsCard(
                                 node: widget.node,
                                 layout: widget.layout!,
                                 focusId: widget.focusId,
                                 onOpen: widget.onOpenRelated,
                               ),
-                            ] else if (widget.busy) ...[
-                              const SizedBox(height: 18),
-                              const SizedBox(
-                                height: 160,
-                                width: double.infinity,
-                                child: PulsePlaceholder(borderRadius: BorderRadius.all(Radius.circular(16))),
-                              ),
-                            ],
                           ],
                         ],
                       ),
@@ -1081,6 +1220,62 @@ class _HighlightDrawerState extends State<_HighlightDrawer>
           ),
         ),
       ],
+    );
+  }
+}
+
+class _DrawerProgressCard extends StatelessWidget {
+  const _DrawerProgressCard({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.onSurface.withValues(
+        alpha: scheme.brightness == Brightness.dark ? 0.10 : 0.045,
+      ),
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                color: scheme.primary.withValues(alpha: 0.85),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Building neighborhood',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.72),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.78),
+                          height: 1.35,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

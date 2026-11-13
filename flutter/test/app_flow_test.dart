@@ -112,9 +112,10 @@ void main() {
     expect(find.text('Neighborhood size'), findsOneWidget);
   });
 
-  testWidgets('job progress barrier appears while generating', (tester) async {
+  testWidgets('job queue tracks expands without blocking navigation', (tester) async {
     var polls = 0;
-    final graph = GraphController(
+    late final GraphController graph;
+    graph = GraphController(
       loader: (path) async {
         if (path == '/me/preferences') {
           return {
@@ -125,6 +126,20 @@ void main() {
               'acquaintances': 4,
               'extended': 12,
             },
+          };
+        }
+        if (path == '/jobs?state=queued,running') {
+          return {
+            'jobs': [
+              for (final j in graph.trackedJobs)
+                {
+                  'id': j.jobId,
+                  'focus_node_id': j.nodeId,
+                  'title': j.title,
+                  'state': j.state,
+                  'progress': {'message': j.progressMessage, 'fraction': j.fraction},
+                },
+            ],
           };
         }
         if (path.startsWith('/knowledge/graph/')) return _compact();
@@ -165,13 +180,17 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(graph.working, isTrue);
-    expect(find.textContaining('Merging Reptiles'), findsOneWidget);
-    // Progress is a non-blocking lower-left chip, not a full-screen barrier.
-    expect(find.byType(CircularProgressIndicator), findsWidgets);
-    await tester.pump(const Duration(milliseconds: 800));
+    expect(graph.activeJobCount, 1);
+    expect(graph.trackedJobs.first.jobId, 'job-1');
+    expect(find.byTooltip('Show running jobs'), findsOneWidget);
+    // Search stays available while a job is tracked.
+    expect(find.byTooltip('Search'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
     await pending;
     await tester.pumpAndSettle();
     expect(graph.focusId, '2');
+    expect(graph.activeJobCount, 0);
     expect(find.byWidgetPredicate(_titleLooksLike('Saurischia')), findsWidgets);
   });
 

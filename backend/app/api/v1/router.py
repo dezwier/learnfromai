@@ -19,6 +19,7 @@ from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, n
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
+from app.features.platform.jobs import list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
 
@@ -112,19 +113,37 @@ def patch_preferences(
     return {"neighborhood": neighborhood_counts(user)}
 
 
+@router.get("/jobs")
+def list_jobs(
+    state: str = "queued,running",
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    states = {part.strip() for part in state.split(",") if part.strip()}
+    if not states:
+        states = {"queued", "running"}
+    return {"jobs": list_watched_jobs(session, user_id=user.id, states=states)}
+
+
 @router.get("/jobs/{job_id}")
 def get_job(job_id: UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     job = session.get(GenerationJob, job_id)
     if job is None:
         raise not_found("Job not found")
-    if job.user_id != user.id and not user.is_admin:
+    if (
+        job.user_id != user.id
+        and not user.is_admin
+        and not user_watches_job(session, job_id=job.id, user_id=user.id)
+    ):
         raise forbidden()
+    focus_id = (job.payload or {}).get("focus_id")
     return {
         "id": str(job.id),
         "type": job.type,
         "state": job.state,
         "progress": job.progress,
         "result": job.result,
+        "focus_node_id": str(focus_id) if focus_id else None,
         "error_code": job.error_code,
         "error_message": job.error_message,
         "attempts": job.attempts,
