@@ -344,7 +344,7 @@ class _GraphScreenState extends State<GraphScreen>
       _incompleteByNode[nodeId] = graph.categoryGraph?['incomplete'] == true;
       return;
     }
-    _dwellTimer = Timer(const Duration(milliseconds: 350), () {
+    _dwellTimer = Timer(const Duration(milliseconds: 250), () {
       unawaited(_onDwell(nodeId));
     });
   }

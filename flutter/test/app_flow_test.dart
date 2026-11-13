@@ -255,7 +255,7 @@ void main() {
     // Animated pan finishes, motion settle samples, then short dwell.
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 80));
-    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
 
     expect(posts, 0);
