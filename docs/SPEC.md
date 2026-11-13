@@ -9,7 +9,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - A node has a UUID, canonical `name`, `name_key`, and a standalone `description`. Names are not globally unique when the model says two same-titled topics are different concepts.
 - Edges are typed `parent`, `child`, `sibling`, or `acquaintance`, and are stored in both directions.
 - Each signed-in user sets a total neighborhood budget (`total`, 8–32, default 16) and how many neighbors-of-neighbors (`extended`, 0–24, default 12) to show. The model chooses how many parents, siblings, children, and acquaintances to return (a bit of each).
-- Focusing a topic that already has enough relations for those settings returns the graph immediately. Otherwise a Railway worker runs an `expand_neighborhood` job: generate topics, merge by `name_key` then LLM sameness, write missing bidirectional edges, and report progress.
+- Focusing or opening a topic returns whatever neighbors already exist (`incomplete` when under the user’s total budget). A Railway worker runs `expand_neighborhood` only when the user explicitly requests neighbors: generate topics, merge by `name_key` then LLM sameness, write missing bidirectional edges, and report progress.
 - Each request stores hop distances and kinds for the returned neighborhood.
 - Profile fields `username`, `full_name`, and `photo_url` live in `users.preferences.profile`. Learning XP/level on the HUD are placeholders until mastery tracking exists.
 
@@ -20,9 +20,9 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `PATCH /api/v1/me` `{username?, full_name?, photo_url?, display_name?, timezone?}`
 - `GET /api/v1/me/preferences`
 - `PATCH /api/v1/me/preferences`
-- `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200) or `{job_id}` (202)
+- `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes?q=` existing-topic autocomplete (no LLM)
-- `GET /api/v1/knowledge/graph` resume latest (may also 202)
+- `GET /api/v1/knowledge/graph` resume latest neighborhood only (no expand)
 - `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/workspace/graph`
@@ -33,4 +33,4 @@ Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `relat
 
 ## Client
 
-Edge-to-edge neighborhood canvas with a top-left profile HUD (avatar, level, name, XP bar). Tapping the HUD opens a profile overlay with Settings, Logout, and learning placeholders. Settings is a Talivo-style sheet with App (appearance + neighborhood tile counts), Profile (username, full name, photo URL), and Account (email/password) tabs. A small neutral search FAB opens a field above the keyboard and lists matching existing topics as the user types; tapping one opens that node without an LLM expand. Submitting a new topic still focuses via the worker. While a job runs, a lower-left chip shows live progress. TT Ramillas is used only on hex tile labels and search result titles; the rest of the UI uses the platform font.
+Edge-to-edge neighborhood canvas with a top-left profile HUD (avatar, level, name, XP bar). Tapping the HUD opens a profile overlay with Settings, Logout, and learning placeholders. Settings is a Talivo-style sheet with App (appearance + neighborhood tile counts), Profile (username, full name, photo URL), and Account (email/password) tabs. A small neutral search FAB opens a field above the keyboard and lists matching existing topics as the user types; tapping one opens that node without an LLM expand. Submitting a new topic opens it immediately; the user requests neighbors explicitly. While a job runs, a lower-left chip shows live progress. TT Ramillas is used only on hex tile labels and search result titles; the rest of the UI uses the platform font.

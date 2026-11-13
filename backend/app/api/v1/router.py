@@ -38,6 +38,7 @@ class ExtendBody(BaseModel):
 class FocusBody(BaseModel):
     topic: str | None = Field(default=None, max_length=200)
     node_id: UUID | None = None
+    expand: bool = False
 
 
 class KnowledgeNodePatchBody(BaseModel):
@@ -163,7 +164,13 @@ def knowledge_focus(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    payload, status = focus_or_enqueue(session, user=user, topic=body.topic, node_id=body.node_id)
+    payload, status = focus_or_enqueue(
+        session,
+        user=user,
+        topic=body.topic,
+        node_id=body.node_id,
+        expand=body.expand,
+    )
     session.commit()
     response.status_code = status
     return payload

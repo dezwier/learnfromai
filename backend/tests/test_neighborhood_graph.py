@@ -53,7 +53,7 @@ def test_legacy_bucket_prefs_sum_to_total(client, auth, user, session):
 
 
 def test_dinosaurs_expand_merge_and_bidirectional_edges(client, auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     job_id = first.json()["job_id"]
     focus_id = first.json()["focus_node_id"]
@@ -85,12 +85,12 @@ def test_dinosaurs_expand_merge_and_bidirectional_edges(client, auth, session):
 
 
 def test_complete_neighborhood_skips_second_llm_job(client, auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     _run_queued(session)
     before = session.exec(select(func.count()).select_from(GenerationJob)).one()
 
-    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert again.status_code == 200
     assert again.json()["focus_node_id"]
     assert "job_id" not in again.json() or again.json().get("nodes")
@@ -98,14 +98,35 @@ def test_complete_neighborhood_skips_second_llm_job(client, auth, session):
     assert after == before
 
 
+def test_focus_without_expand_does_not_enqueue(client, auth, session):
+    opened = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    assert opened.status_code == 200
+    body = opened.json()
+    assert body["incomplete"] is True
+    assert body.get("job_id") is None
+    assert body["focus_node_id"]
+    assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
+
+    resumed = client.get("/api/v1/knowledge/graph", headers=auth)
+    assert resumed.status_code == 200
+    assert resumed.json()["focus_node_id"] == body["focus_node_id"]
+    assert resumed.json().get("job_id") is None
+    assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
+
+    by_id = client.get(f"/api/v1/knowledge/graph/{body['focus_node_id']}", headers=auth)
+    assert by_id.status_code == 200
+    assert by_id.json()["incomplete"] is True
+    assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
+
+
 def test_higher_total_reenqueues(client, auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     focus_id = first.json()["focus_node_id"]
     _run_queued(session)
 
     client.patch("/api/v1/me/preferences", headers=auth, json={"neighborhood": {"total": 24}})
-    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"node_id": focus_id})
+    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"node_id": focus_id, "expand": True})
     assert again.status_code == 202
     assert again.json()["job_id"]
 
@@ -115,7 +136,7 @@ def test_resume_empty_and_latest(client, auth, other_auth, session):
     assert empty.status_code == 200
     assert empty.json()["nodes"] == []
 
-    queued = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    queued = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     focus_id = queued.json()["focus_node_id"]
     _run_queued(session)
 
@@ -451,7 +472,7 @@ def test_expand_survives_focus_merged_away_during_resolve(session, user):
 
 
 def test_failed_expand_can_be_reenqueued(client, auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     job_id = first.json()["job_id"]
     job = session.get(GenerationJob, UUID(job_id))
@@ -461,7 +482,7 @@ def test_failed_expand_can_be_reenqueued(client, auth, session):
     session.add(job)
     session.commit()
 
-    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert again.status_code == 202
     assert again.json()["job_id"] != job_id
     fresh = _run_queued(session)

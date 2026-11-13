@@ -25,30 +25,24 @@ def focus_or_enqueue(
     user: User,
     topic: str | None = None,
     node_id: UUID | None = None,
+    expand: bool = False,
 ) -> tuple[dict, int]:
-    """Return (payload, status). 200 graph or 202 job."""
+    """Return (payload, status). 200 graph or 202 job.
+
+    Opening / searching / resuming only loads the current neighborhood.
+    Expand jobs run only when ``expand`` is true (Request neighbors).
+    """
     counts = neighborhood_counts(user)
     if (topic is None or not str(topic).strip()) and node_id is None:
-        return _resume(session, user=user, counts=counts)
+        return _resume(session, user=user)
 
     focus = ensure_focus_node(session, topic=topic, node_id=node_id)
     session.flush()
     if is_complete(session, focus.id, counts):
-        payload = build_subgraph(
-            session, focus, max_extended=counts["extended"], counts=counts
-        )
-        request = KnowledgeRequest(
-            user_id=user.id,
-            focus_id=focus.id,
-            parents=int(counts.get("total") or 16),
-            siblings=int(counts.get("min_per_bucket") or 2),
-            children=0,
-            acquaintances=0,
-        )
-        session.add(request)
-        session.flush()
-        payload["request_id"] = str(request.id)
-        return payload, 200
+        return _graph_payload(session, user=user, focus=focus, counts=counts), 200
+
+    if not expand:
+        return _graph_payload(session, user=user, focus=focus, counts=counts), 200
 
     job = _enqueue_expand(session, user=user, focus=focus, topic=topic, counts=counts)
     return {
@@ -62,6 +56,10 @@ def focus_or_enqueue(
 def graph_for_focus(session: Session, *, user: User, focus_id: UUID) -> dict:
     focus = ensure_focus_node(session, node_id=focus_id)
     counts = neighborhood_counts(user)
+    return _graph_payload(session, user=user, focus=focus, counts=counts)
+
+
+def _graph_payload(session: Session, *, user: User, focus, counts: dict[str, int]) -> dict:
     payload = build_subgraph(
         session, focus, max_extended=counts["extended"], counts=counts
     )
@@ -79,13 +77,14 @@ def graph_for_focus(session: Session, *, user: User, focus_id: UUID) -> dict:
     return payload
 
 
-def _resume(session: Session, *, user: User, counts: dict[str, int]) -> tuple[dict, int]:
+def _resume(session: Session, *, user: User) -> tuple[dict, int]:
     latest = session.exec(
         select(KnowledgeRequest).where(KnowledgeRequest.user_id == user.id).order_by(col(KnowledgeRequest.created_at).desc())
     ).first()
     if latest is None:
         return {"focus_node_id": None, "incomplete": False, "request_id": None, "nodes": [], "edges": []}, 200
-    return focus_or_enqueue(session, user=user, topic=None, node_id=latest.focus_id)
+    # Never auto top-up on resume — show whatever neighbors already exist.
+    return graph_for_focus(session, user=user, focus_id=latest.focus_id), 200
 
 
 def _enqueue_expand(

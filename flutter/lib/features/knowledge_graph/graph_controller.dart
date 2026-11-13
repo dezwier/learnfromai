@@ -260,10 +260,7 @@ class GraphController extends ChangeNotifier {
   /// Open an existing node via GET graph (no expand enqueue).
   Future<void> openExisting(String id, {String? title, Map<String, dynamic>? knownPayload}) async {
     if (refreshing || loading) return;
-    if (focusId == id &&
-        categoryGraph != null &&
-        knownPayload == null &&
-        categoryGraph?['incomplete'] != true) {
+    if (focusId == id && categoryGraph != null && knownPayload == null) {
       suggestions = [];
       notifyListeners();
       return;
@@ -301,7 +298,7 @@ class GraphController extends ChangeNotifier {
       return;
     }
     try {
-      final payload = await _post('/knowledge/focus', body: {'node_id': id});
+      final payload = await _post('/knowledge/focus', body: {'node_id': id, 'expand': true});
       final jobId = payload['job_id']?.toString();
       if (jobId == null) {
         // Already complete — adopt that graph and signal completion to the UI.

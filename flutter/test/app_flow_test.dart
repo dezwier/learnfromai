@@ -140,14 +140,27 @@ void main() {
         return {'focus_node_id': null, 'nodes': [], 'edges': []};
       },
       poster: (path, {body}) async {
-        final topic = body is Map ? body['topic']?.toString() : null;
-        if (topic == null || topic.isEmpty) {
-          return {'focus_node_id': null, 'nodes': [], 'edges': []};
+        final map = body is Map ? body : const <String, dynamic>{};
+        final expand = map['expand'] == true;
+        final topic = map['topic']?.toString();
+        final nodeId = map['node_id']?.toString();
+        if (!expand) {
+          if ((topic == null || topic.isEmpty) && (nodeId == null || nodeId.isEmpty)) {
+            return {'focus_node_id': null, 'incomplete': false, 'nodes': [], 'edges': []};
+          }
+          return {
+            'focus_node_id': nodeId ?? '2',
+            'incomplete': true,
+            'nodes': [
+              {'id': nodeId ?? '2', 'title': topic ?? 'Dinosaurs', 'kind': 'focus'},
+            ],
+            'edges': <Map<String, dynamic>>[],
+          };
         }
         return {
           'status': 'queued',
           'job_id': 'job-1',
-          'focus_node_id': '2',
+          'focus_node_id': nodeId ?? '2',
           'progress': {'message': 'Asking the model…'},
         };
       },
@@ -170,10 +183,15 @@ void main() {
     );
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    final pending = graph.search('dinosaurs');
+    await graph.search('dinosaurs');
+    await tester.pumpAndSettle();
+    expect(graph.focusId, '2');
+    expect(graph.categoryGraph?['incomplete'], isTrue);
+    expect(graph.activeJobCount, 0);
+
+    final pending = graph.enqueueNeighborhood('2', title: 'Dinosaurs');
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
-    expect(graph.working, isTrue);
     expect(graph.activeJobCount, 1);
     expect(graph.trackedJobs.first.jobId, 'job-1');
     expect(find.byTooltip('Show running jobs'), findsOneWidget);
@@ -190,9 +208,11 @@ void main() {
 
   testWidgets('incomplete focus shows request FAB and does not auto-enqueue on open', (tester) async {
     var posts = 0;
+    Map<String, dynamic>? lastBody;
     final graph = GraphController(
       poster: (path, {body}) async {
         posts += 1;
+        lastBody = body is Map ? Map<String, dynamic>.from(body) : null;
         return {
           'status': 'queued',
           'job_id': 'job-req',
@@ -217,13 +237,14 @@ void main() {
     await tester.tap(find.byTooltip('Request neighbors'));
     await tester.pump();
     expect(posts, 1);
+    expect(lastBody?['expand'], isTrue);
     expect(graph.activeJobCount, 1);
     expect(find.byTooltip('Show running jobs'), findsOneWidget);
     graph.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('dwell on incomplete tile checks without changing focus or posting', (tester) async {
+  testWidgets('opening incomplete tile loads neighbors without posting expand', (tester) async {
     var posts = 0;
     final gets = <String>[];
     final graph = GraphController(
@@ -249,17 +270,13 @@ void main() {
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    // Parent tile sits above the focus, clear of the bottom drawer.
-    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Reptiles')).first);
-    await tester.pump();
-    // Animated pan finishes, motion settle samples, then short dwell.
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump(const Duration(milliseconds: 80));
-    await tester.pump(const Duration(milliseconds: 250));
+    // Same sequence as dwell / drawer open: GET neighborhood, then adopt it.
+    final payload = await graph.fetchGraph('1');
+    expect(payload?['incomplete'], isTrue);
+    await graph.openExisting('1', title: 'Reptiles', knownPayload: payload);
     await tester.pumpAndSettle();
 
     expect(posts, 0);
-    // Dwell always refocuses; Request stays visible while under budget.
     expect(graph.focusId, '1');
     expect(gets.any((path) => path.startsWith('/knowledge/graph/1')), isTrue);
     expect(find.byTooltip('Request neighbors'), findsOneWidget);

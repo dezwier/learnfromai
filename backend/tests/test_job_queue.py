@@ -17,7 +17,7 @@ def _run_queued(session):
 
 
 def test_two_users_coalesce_same_expand_job(client, auth, other_auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     job_id = first.json()["job_id"]
     focus_id = first.json()["focus_node_id"]
@@ -25,7 +25,7 @@ def test_two_users_coalesce_same_expand_job(client, auth, other_auth, session):
     second = client.post(
         "/api/v1/knowledge/focus",
         headers=other_auth,
-        json={"node_id": focus_id},
+        json={"node_id": focus_id, "expand": True},
     )
     assert second.status_code == 202
     assert second.json()["job_id"] == job_id
@@ -38,7 +38,7 @@ def test_two_users_coalesce_same_expand_job(client, auth, other_auth, session):
 
 
 def test_list_jobs_returns_watched_active_only(client, auth, other_auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     assert first.status_code == 202
     job_id = first.json()["job_id"]
 
@@ -58,7 +58,7 @@ def test_list_jobs_returns_watched_active_only(client, auth, other_auth, session
     client.post(
         "/api/v1/knowledge/focus",
         headers=other_auth,
-        json={"node_id": first.json()["focus_node_id"]},
+        json={"node_id": first.json()["focus_node_id"], "expand": True},
     )
     other2 = client.get("/api/v1/jobs?state=queued,running", headers=other_auth)
     assert len(other2.json()["jobs"]) == 1
@@ -70,10 +70,10 @@ def test_list_jobs_returns_watched_active_only(client, auth, other_auth, session
 
 
 def test_get_job_allows_watcher(client, auth, other_auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
+    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
     job_id = first.json()["job_id"]
     focus_id = first.json()["focus_node_id"]
-    client.post("/api/v1/knowledge/focus", headers=other_auth, json={"node_id": focus_id})
+    client.post("/api/v1/knowledge/focus", headers=other_auth, json={"node_id": focus_id, "expand": True})
 
     watched = client.get(f"/api/v1/jobs/{job_id}", headers=other_auth)
     assert watched.status_code == 200
