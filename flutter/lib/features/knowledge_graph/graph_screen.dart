@@ -19,7 +19,8 @@ class GraphScreen extends StatefulWidget {
   State<GraphScreen> createState() => _GraphScreenState();
 }
 
-class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin {
+class _GraphScreenState extends State<GraphScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _transform = TransformationController();
@@ -52,6 +53,7 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _panController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -63,12 +65,20 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
       _resumed = true;
-      context.read<GraphController>().resume();
+      unawaited(context.read<GraphController>().resume());
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Phone unlocked / app foregrounded — reattach to server-side jobs.
+    unawaited(context.read<GraphController>().reattachJobs());
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dwellTimer?.cancel();
     _suggestDebounce?.cancel();
     _panController

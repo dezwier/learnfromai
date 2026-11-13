@@ -181,10 +181,17 @@ class GraphController extends ChangeNotifier {
   }
 
   Future<void> resume() async {
-    if (categoryGraph != null || candidates.isNotEmpty || loading || refreshing) return;
     await loadPreferences();
-    await _focus(body: const {});
-    unawaited(refreshTrackedJobs());
+    if (categoryGraph == null && candidates.isEmpty && !loading && !refreshing) {
+      await _focus(body: const {});
+    }
+    // Always re-hook watched jobs (cold start or after the OS suspended timers).
+    await reattachJobs();
+  }
+
+  /// Pull active watched jobs from the server and restart polling.
+  Future<void> reattachJobs() async {
+    await refreshTrackedJobs();
   }
 
   Future<void> search(String topic) async {
