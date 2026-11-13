@@ -624,11 +624,6 @@ class _GraphScreenState extends State<GraphScreen>
         children: [
           Column(
             children: [
-              if (graph.categoryGraph?['incomplete'] == true && !_drawerRaised)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
-                  child: Text('Some surrounding topics are still loading. Open this topic again to continue.'),
-                ),
               if (graph.error != null && !_drawerRaised)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -689,6 +684,14 @@ class _GraphScreenState extends State<GraphScreen>
               ),
             ),
           // Floats under the drawer so a raised sheet fully covers them.
+          if (showFloats && _jobsPanelOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _jobsPanelOpen = false),
+                child: const ColoredBox(color: Color(0x00000000)),
+              ),
+            ),
           if (showFloats)
             Positioned(
               left: 16,

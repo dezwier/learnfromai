@@ -1005,7 +1005,7 @@ Color roleFill(NodeRole role, ColorScheme scheme) {
   return switch (role) {
     // Light: blue / red / warm green / yellow-orange / greys.
     NodeRole.parent => dark ? const Color(0xFF2C455C) : const Color(0xFF8AAFCF),
-    NodeRole.focus => dark ? const Color(0xFF4A4E55) : const Color(0xFFE4E6EA),
+    NodeRole.focus => dark ? const Color(0xFF7A808A) : const Color(0xFFB4B8C0),
     NodeRole.sibling => dark ? const Color(0xFF5A3038) : const Color(0xFFD98E96),
     NodeRole.child => dark ? const Color(0xFF2A453C) : const Color(0xFF97BF88),
     NodeRole.related => dark ? const Color(0xFF5A4528) : const Color(0xFFDCAD6A),
