@@ -252,9 +252,10 @@ void main() {
     // Parent tile sits above the focus, clear of the bottom drawer.
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Reptiles')).first);
     await tester.pump();
-    // Pan settles, then 1s dwell fires the completeness check.
+    // Animated pan finishes, motion settle samples, then short dwell.
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
 
     expect(posts, 0);

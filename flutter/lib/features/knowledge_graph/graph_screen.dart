@@ -45,6 +45,9 @@ class _GraphScreenState extends State<GraphScreen>
   GraphLayout? _morphTo;
   Size _viewport = Size.zero;
   Timer? _dwellTimer;
+  Timer? _motionSettleTimer;
+  /// True while a finger is actively dragging/pinching the graph.
+  var _graphGestureActive = false;
   /// Cached completeness for highlighted nodes: true = under the user's budget.
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
@@ -60,7 +63,7 @@ class _GraphScreenState extends State<GraphScreen>
     )..addListener(_onPanTick);
     _layoutMorph = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 180),
     )..addListener(_onLayoutMorphTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
@@ -80,6 +83,7 @@ class _GraphScreenState extends State<GraphScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _dwellTimer?.cancel();
+    _motionSettleTimer?.cancel();
     _suggestDebounce?.cancel();
     _panController
       ..removeListener(_onPanTick)
@@ -91,6 +95,44 @@ class _GraphScreenState extends State<GraphScreen>
     _searchFocus.dispose();
     _transform.dispose();
     super.dispose();
+  }
+
+  static bool _transformNearlyStill(Matrix4 a, Matrix4 b) {
+    final ta = a.getTranslation();
+    final tb = b.getTranslation();
+    return (ta - tb).length < 0.4 &&
+        (a.getMaxScaleOnAxis() - b.getMaxScaleOnAxis()).abs() < 0.0005;
+  }
+
+  void _cancelDwellAndSettle() {
+    _dwellTimer?.cancel();
+    _motionSettleTimer?.cancel();
+  }
+
+  /// After the finger lifts, wait until inertia dies, then start the dwell timer.
+  void _armSettleThenDwell() {
+    _motionSettleTimer?.cancel();
+    _dwellTimer?.cancel();
+    if (_graphGestureActive || _panController.isAnimating) return;
+    var previous = _transform.value.clone();
+    _motionSettleTimer = Timer.periodic(const Duration(milliseconds: 40), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_graphGestureActive || _panController.isAnimating) {
+        timer.cancel();
+        return;
+      }
+      final now = _transform.value;
+      if (_transformNearlyStill(previous, now)) {
+        timer.cancel();
+        _scheduleDwell(_highlighted?.id);
+      } else {
+        previous = now.clone();
+        _dwellTimer?.cancel();
+      }
+    });
   }
 
   void _onPanTick() {
@@ -181,7 +223,7 @@ class _GraphScreenState extends State<GraphScreen>
     }
     _transformFocusId = focusId;
     _panTargetId = null;
-    _dwellTimer?.cancel();
+    _cancelDwellAndSettle();
     _beginFocusMorph(previous: previous, next: next, focusId: focusId, viewport: viewport);
   }
 
@@ -194,7 +236,7 @@ class _GraphScreenState extends State<GraphScreen>
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
-    _dwellTimer?.cancel();
+    _cancelDwellAndSettle();
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
       (viewport.height - canvas.height) / 2,
@@ -261,11 +303,11 @@ class _GraphScreenState extends State<GraphScreen>
         _highlighted = node;
       });
     }
-    // Dwell only after the pan settles so center-highlight flicker cannot reset it.
+    // Dwell only after the animated pan finishes and the viewport is still.
     unawaited(() async {
       await _animatePanTo(node.center, _viewport);
       if (!mounted || _highlighted?.id != node.id) return;
-      _scheduleDwell(node.id);
+      _armSettleThenDwell();
     }());
   }
 
@@ -284,8 +326,8 @@ class _GraphScreenState extends State<GraphScreen>
       if (idChanged) _drawerRaised = false;
       _highlighted = node;
     });
-    // Only start dwell from free-pan when not mid animated pan-to-tile.
-    if (idChanged && pin == null) _scheduleDwell(node?.id);
+    // Free-pan dwell is armed from InteractiveViewer settle (finger up + no velocity).
+    if (idChanged) _dwellTimer?.cancel();
   }
 
   /// null = unknown, true = incomplete, false = complete.
@@ -302,7 +344,7 @@ class _GraphScreenState extends State<GraphScreen>
       _incompleteByNode[nodeId] = graph.categoryGraph?['incomplete'] == true;
       return;
     }
-    _dwellTimer = Timer(const Duration(seconds: 1), () {
+    _dwellTimer = Timer(const Duration(milliseconds: 350), () {
       unawaited(_onDwell(nodeId));
     });
   }
@@ -928,10 +970,19 @@ class _GraphScreenState extends State<GraphScreen>
             vertical: panSlack,
           ),
           onInteractionStart: (_) {
+            _graphGestureActive = true;
+            _cancelDwellAndSettle();
             if (!_panController.isAnimating) return;
             _panController.stop();
             _panAnimation = null;
             _panTargetId = null;
+          },
+          onInteractionUpdate: (_) {
+            _dwellTimer?.cancel();
+          },
+          onInteractionEnd: (_) {
+            _graphGestureActive = false;
+            _armSettleThenDwell();
           },
           child: SizedBox(
             width: layout.width,
@@ -2135,19 +2186,27 @@ class _NodeCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: scheme.onSurface,
             );
-            final titleBudget = hasDesc ? maxH * 0.4 : maxH * 0.9;
+            final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
             final titleLaid = layoutTitle(
               text: node.title,
               style: titleStyleBase,
               maxWidth: maxW,
               maxHeight: titleBudget,
               maxLines: titleMaxLines,
-              minFontSize: 12,
-              maxFontSize: (node.radius * 0.4).clamp(15.0, 26.0),
+              minFontSize: 13,
+              maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
               textScaler: scaler,
               hyphenateAtMinSize: true,
             );
             final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
+            final gap = (node.radius * 0.08).clamp(4.0, 10.0);
+            final descStyle = TextStyle(
+              fontFamily: 'tt_ramilas',
+              height: 1.25,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface.withValues(alpha: 0.72),
+              fontSize: (node.radius * 0.22).clamp(13.0, 18.0),
+            );
 
             return Center(
               child: Column(
@@ -2162,20 +2221,14 @@ class _NodeCard extends StatelessWidget {
                     style: titleStyle,
                   ),
                   if (hasDesc) ...[
-                    SizedBox(height: (node.radius * 0.08).clamp(4.0, 10.0)),
+                    SizedBox(height: gap),
                     Text(
                       description,
                       textAlign: TextAlign.center,
                       softWrap: true,
                       maxLines: 5,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: 'tt_ramillas',
-                        height: 1.25,
-                        fontWeight: FontWeight.w500,
-                        color: scheme.onSurface.withValues(alpha: 0.72),
-                        fontSize: (node.radius * 0.15).clamp(11.0, 14.0),
-                      ),
+                      style: descStyle,
                     ),
                   ],
                 ],
