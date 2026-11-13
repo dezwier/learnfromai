@@ -45,7 +45,7 @@ class _GraphScreenState extends State<GraphScreen>
   GraphLayout? _morphTo;
   Size _viewport = Size.zero;
   Timer? _dwellTimer;
-  /// Cached completeness for highlighted nodes: true = incomplete neighbors.
+  /// Cached completeness for highlighted nodes: true = under the user's budget.
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
   var _pendingFocusMorph = false;
@@ -253,24 +253,27 @@ class _GraphScreenState extends State<GraphScreen>
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description;
     if (changed) {
+      _dwellTimer?.cancel();
       setState(() {
         if (_highlighted?.id != node.id && !keepDrawerRaised) {
           _drawerRaised = false;
         }
         _highlighted = node;
       });
-      _scheduleDwell(node.id);
     }
-    unawaited(_animatePanTo(node.center, _viewport));
+    // Dwell only after the pan settles so center-highlight flicker cannot reset it.
+    unawaited(() async {
+      await _animatePanTo(node.center, _viewport);
+      if (!mounted || _highlighted?.id != node.id) return;
+      _scheduleDwell(node.id);
+    }());
   }
 
   void _onHighlightFromCenter(PlacedNode? node) {
     if (!mounted) return;
     final pin = _panTargetId;
+    // Keep the pan pin until the animation finishes — do not clear on first match.
     if (pin != null && node?.id != pin) return;
-    if (pin != null && node?.id == pin) {
-      _panTargetId = null;
-    }
     if (node?.id == _highlighted?.id &&
         node?.title == _highlighted?.title &&
         node?.description == _highlighted?.description) {
@@ -281,7 +284,8 @@ class _GraphScreenState extends State<GraphScreen>
       if (idChanged) _drawerRaised = false;
       _highlighted = node;
     });
-    if (idChanged) _scheduleDwell(node?.id);
+    // Only start dwell from free-pan when not mid animated pan-to-tile.
+    if (idChanged && pin == null) _scheduleDwell(node?.id);
   }
 
   /// null = unknown, true = incomplete, false = complete.
@@ -312,7 +316,7 @@ class _GraphScreenState extends State<GraphScreen>
     if (payload == null) return;
     final incomplete = payload['incomplete'] == true;
     setState(() => _incompleteByNode[nodeId] = incomplete);
-    if (incomplete) return;
+    // Always refocus — show whatever neighbors exist; Request only if under budget.
     await graph.openExisting(nodeId, title: _highlighted?.title, knownPayload: payload);
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
@@ -596,9 +600,9 @@ class _GraphScreenState extends State<GraphScreen>
     final canGoToHighlight = !_searchOpen &&
         !_profileOpen &&
         highlight != null &&
-        highlight.id != graph.focusId &&
-        knownIncomplete == false;
-    final showRelations = highlight != null && knownIncomplete == false;
+        highlight.id != graph.focusId;
+    // Show whatever neighbors we already have; Request covers under-budget fills.
+    final showRelations = highlight != null;
     // Hide graph chrome while the sheet is up — drawer is stacked above these floats.
     final showFloats = !_searchOpen && !_profileOpen && !_drawerRaised;
     if (_jobsPanelOpen && !graph.hasActiveJobs) {

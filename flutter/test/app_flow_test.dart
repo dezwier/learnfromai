@@ -252,11 +252,14 @@ void main() {
     // Parent tile sits above the focus, clear of the bottom drawer.
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Reptiles')).first);
     await tester.pump();
+    // Pan settles, then 1s dwell fires the completeness check.
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
     expect(posts, 0);
-    expect(graph.focusId, '2');
+    // Dwell always refocuses; Request stays visible while under budget.
+    expect(graph.focusId, '1');
     expect(gets.any((path) => path.startsWith('/knowledge/graph/1')), isTrue);
     expect(find.byTooltip('Request neighbors'), findsOneWidget);
   });
