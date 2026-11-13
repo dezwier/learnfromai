@@ -61,8 +61,10 @@ def relation_counts(session: Session, focus_id: UUID) -> dict[str, int]:
 
 
 def is_complete(session: Session, focus_id: UUID, counts: dict[str, int]) -> bool:
+    """Complete when direct neighbors meet the user's total budget."""
     have = relation_counts(session, focus_id)
-    return all(have.get(bucket, 0) >= int(counts.get(bucket, 0)) for bucket in BUCKET_RELATION)
+    total = int(counts.get("total") or sum(int(counts.get(b, 0)) for b in BUCKET_RELATION))
+    return sum(have.get(bucket, 0) for bucket in BUCKET_RELATION) >= total
 
 
 def ensure_focus_node(session: Session, *, topic: str | None = None, node_id: UUID | None = None) -> KnowledgeNode:
@@ -166,11 +168,16 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
 
         raise AppError("VALIDATION_ERROR", "Job is missing a user", 422)
     assert_user_quota(session, user_id)
+    from app.features.knowledge_graph.preferences import min_per_bucket
+
+    total = int(payload.get("total") or 16)
+    if total <= 0:
+        # Legacy jobs stored per-bucket targets.
+        total = sum(int(payload.get(bucket) or 0) for bucket in BUCKETS) or 16
     counts = {
-        "parents": int(payload.get("parents") or 2),
-        "siblings": int(payload.get("siblings") or 3),
-        "children": int(payload.get("children") or 4),
-        "acquaintances": int(payload.get("acquaintances") or 4),
+        "total": total,
+        "min_per_bucket": int(payload.get("min_per_bucket") or min_per_bucket(total)),
+        "extended": int(payload.get("extended") or 12),
     }
     focus_id = parse_uuid(payload.get("focus_id"))
     topic = str(payload.get("topic") or "").strip() or None
@@ -244,11 +251,17 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         progress_span=0.45,
     )
 
-    # Fill short buckets with a repair pass once.
-    short = {bucket: max(0, counts[bucket] - len(linked[bucket])) for bucket in BUCKETS if len(linked[bucket]) < counts[bucket]}
-    if any(short.values()):
+    # One repair pass when the total budget is still short.
+    have_total = sum(len(linked[bucket]) for bucket in BUCKETS)
+    need = max(0, counts["total"] - have_total)
+    if need > 0:
         set_progress(session, job, stage="repair", message="Filling missing related topics…", fraction=0.85)
-        repair_counts = {bucket: short.get(bucket, 0) for bucket in BUCKETS}
+        empty = [bucket for bucket in BUCKETS if not linked[bucket]]
+        repair_counts = {
+            "total": need,
+            "min_per_bucket": 1 if empty else 0,
+            "prefer_buckets": empty,
+        }
         repair, repair_usage = llm.generate_neighborhood(focus.name, repair_counts)
         renew_lease(session, job)
         record_usage(
@@ -256,12 +269,10 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         )
         repair_items = []
         for bucket in BUCKETS:
-            need = short.get(bucket, 0)
-            if need <= 0:
-                continue
-            for item in (repair.get(bucket) or [])[:need]:
+            for item in repair.get(bucket) or []:
                 if isinstance(item, dict):
                     repair_items.append((bucket, item))
+        repair_items = repair_items[:need]
         _link_resolved_batch(
             session,
             job=job,
@@ -660,13 +671,14 @@ def _persist_request(
         max_extended=int(counts.get("extended") or 12),
         counts=counts,
     )
+    # Audit columns: parents holds the total budget; siblings holds min-per-bucket.
     request = KnowledgeRequest(
         user_id=user_id,
         focus_id=focus.id,
-        parents=counts["parents"],
-        siblings=counts["siblings"],
-        children=counts["children"],
-        acquaintances=counts["acquaintances"],
+        parents=int(counts.get("total") or 16),
+        siblings=int(counts.get("min_per_bucket") or 2),
+        children=0,
+        acquaintances=0,
         job_id=job_id,
     )
     session.add(request)

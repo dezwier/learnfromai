@@ -40,10 +40,10 @@ def focus_or_enqueue(
         request = KnowledgeRequest(
             user_id=user.id,
             focus_id=focus.id,
-            parents=counts["parents"],
-            siblings=counts["siblings"],
-            children=counts["children"],
-            acquaintances=counts["acquaintances"],
+            parents=int(counts.get("total") or 16),
+            siblings=int(counts.get("min_per_bucket") or 2),
+            children=0,
+            acquaintances=0,
         )
         session.add(request)
         session.flush()
@@ -68,10 +68,10 @@ def graph_for_focus(session: Session, *, user: User, focus_id: UUID) -> dict:
     request = KnowledgeRequest(
         user_id=user.id,
         focus_id=focus.id,
-        parents=counts["parents"],
-        siblings=counts["siblings"],
-        children=counts["children"],
-        acquaintances=counts["acquaintances"],
+        parents=int(counts.get("total") or 16),
+        siblings=int(counts.get("min_per_bucket") or 2),
+        children=0,
+        acquaintances=0,
     )
     session.add(request)
     session.flush()
@@ -96,11 +96,8 @@ def _enqueue_expand(
     topic: str | None,
     counts: dict[str, int],
 ) -> GenerationJob:
-    # One shared expand per focus+counts across all users (shared graph).
-    idempotency = (
-        f"expand_neighborhood:{focus.id}:"
-        f"{counts['parents']}-{counts['siblings']}-{counts['children']}-{counts['acquaintances']}"
-    )
+    # One shared expand per focus+total budget across all users (shared graph).
+    idempotency = f"expand_neighborhood:{focus.id}:total-{counts['total']}"
     job = enqueue(
         session,
         job_type="expand_neighborhood",
@@ -111,7 +108,9 @@ def _enqueue_expand(
             "focus_id": str(focus.id),
             "topic": topic or focus.name,
             "requested_by": str(user.id),
-            **counts,
+            "total": counts["total"],
+            "min_per_bucket": counts.get("min_per_bucket", 2),
+            "extended": counts.get("extended", 12),
         },
     )
     ensure_watcher(

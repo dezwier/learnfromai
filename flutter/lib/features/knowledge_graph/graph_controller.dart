@@ -15,51 +15,47 @@ class TopicChoice {
 
 class NeighborhoodPrefs {
   const NeighborhoodPrefs({
-    this.parents = 2,
-    this.siblings = 3,
-    this.children = 4,
-    this.acquaintances = 4,
+    this.total = 16,
     this.extended = 12,
   });
 
-  final int parents;
-  final int siblings;
-  final int children;
-  final int acquaintances;
+  /// Total direct neighbors to fetch; the model chooses parents/siblings/children/related.
+  final int total;
   /// How many neighbors-of-neighbors to show around the focus (0–24).
   final int extended;
 
   factory NeighborhoodPrefs.fromJson(Map<String, dynamic>? raw) {
     if (raw == null) return const NeighborhoodPrefs();
+    final total = (raw['total'] as num?)?.toInt();
+    if (total != null) {
+      return NeighborhoodPrefs(
+        total: total.clamp(8, 32),
+        extended: (raw['extended'] as num?)?.toInt() ?? 12,
+      );
+    }
+    // Legacy per-bucket prefs → sum into a total budget.
+    final legacy = (raw['parents'] as num?)?.toInt() ?? 0;
+    final siblings = (raw['siblings'] as num?)?.toInt() ?? 0;
+    final children = (raw['children'] as num?)?.toInt() ?? 0;
+    final acquaintances = (raw['acquaintances'] as num?)?.toInt() ?? 0;
+    final summed = legacy + siblings + children + acquaintances;
     return NeighborhoodPrefs(
-      parents: (raw['parents'] as num?)?.toInt() ?? 2,
-      siblings: (raw['siblings'] as num?)?.toInt() ?? 3,
-      children: (raw['children'] as num?)?.toInt() ?? 4,
-      acquaintances: (raw['acquaintances'] as num?)?.toInt() ?? 4,
+      total: (summed > 0 ? summed : 16).clamp(8, 32),
       extended: (raw['extended'] as num?)?.toInt() ?? 12,
     );
   }
 
   Map<String, int> toJson() => {
-        'parents': parents,
-        'siblings': siblings,
-        'children': children,
-        'acquaintances': acquaintances,
+        'total': total,
         'extended': extended,
       };
 
   NeighborhoodPrefs copyWith({
-    int? parents,
-    int? siblings,
-    int? children,
-    int? acquaintances,
+    int? total,
     int? extended,
   }) {
     return NeighborhoodPrefs(
-      parents: parents ?? this.parents,
-      siblings: siblings ?? this.siblings,
-      children: children ?? this.children,
-      acquaintances: acquaintances ?? this.acquaintances,
+      total: total ?? this.total,
       extended: extended ?? this.extended,
     );
   }

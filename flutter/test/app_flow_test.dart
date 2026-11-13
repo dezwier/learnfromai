@@ -57,10 +57,7 @@ void main() {
         if (path == '/me/preferences') {
           return {
             'neighborhood': {
-              'parents': 2,
-              'siblings': 3,
-              'children': 4,
-              'acquaintances': 4,
+              'total': 16,
               'extended': 12,
             },
           };
@@ -120,10 +117,7 @@ void main() {
         if (path == '/me/preferences') {
           return {
             'neighborhood': {
-              'parents': 2,
-              'siblings': 3,
-              'children': 4,
-              'acquaintances': 4,
+              'total': 16,
               'extended': 12,
             },
           };

@@ -8,7 +8,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - There is one shared topic graph. A search merges into that universe; it does not create a private graph.
 - A node has a UUID, canonical `name`, `name_key`, and a standalone `description`. Names are not globally unique when the model says two same-titled topics are different concepts.
 - Edges are typed `parent`, `child`, `sibling`, or `acquaintance`, and are stored in both directions.
-- Each signed-in user sets how many parents (1–2), siblings (2–3), children (3–5), and acquaintances (3–5) a complete neighborhood needs, plus how many neighbors-of-neighbors (`extended`, 0–24) to show. Defaults are 2 / 3 / 4 / 4 / 12.
+- Each signed-in user sets a total neighborhood budget (`total`, 8–32, default 16) and how many neighbors-of-neighbors (`extended`, 0–24, default 12) to show. The model chooses how many parents, siblings, children, and acquaintances to return (a bit of each).
 - Focusing a topic that already has enough relations for those settings returns the graph immediately. Otherwise a Railway worker runs an `expand_neighborhood` job: generate topics, merge by `name_key` then LLM sameness, write missing bidirectional edges, and report progress.
 - Each request stores hop distances and kinds for the returned neighborhood.
 - Profile fields `username`, `full_name`, and `photo_url` live in `users.preferences.profile`. Learning XP/level on the HUD are placeholders until mastery tracking exists.

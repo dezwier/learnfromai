@@ -16,7 +16,7 @@ from app.features.knowledge_graph.identity import canonical_key_for
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NEIGHBORHOOD = "neighborhood_v3"
+PROMPT_NEIGHBORHOOD = "neighborhood_v4"
 PROMPT_SAMENESS = "sameness_v3"
 INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
@@ -45,55 +45,98 @@ def _topic(name: str, description: str) -> dict:
     return {"name": name, "description": description}
 
 
+def _distribute(total: int, min_per: int) -> dict[str, int]:
+    """Split a total across four buckets with at least min_per each when possible."""
+    total = max(0, int(total))
+    min_per = max(0, int(min_per))
+    if total == 0:
+        return {bucket: 0 for bucket in BUCKETS}
+    reserved = min(total, min_per * len(BUCKETS))
+    base = reserved // len(BUCKETS) if reserved else 0
+    sizes = {bucket: base for bucket in BUCKETS}
+    leftover = total - base * len(BUCKETS)
+    # Prefer children, then acquaintances, siblings, parents for extras.
+    order = ("children", "acquaintances", "siblings", "parents")
+    index = 0
+    while leftover > 0:
+        sizes[order[index % len(order)]] += 1
+        leftover -= 1
+        index += 1
+    return sizes
+
+
 class FakeNeighborhoodLLM:
     name = "fake"
 
     def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
         seed = topic.strip() or "Dinosaurs"
         key = canonical_key_for(seed)
+        sizes = _distribute(int(counts.get("total") or 16), int(counts.get("min_per_bucket") or 2))
+        prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
+        if prefer:
+            # Repair: bias toward underfilled buckets.
+            sizes = {bucket: 0 for bucket in BUCKETS}
+            remaining = int(counts.get("total") or 0)
+            order = [bucket for bucket in prefer if bucket in sizes] + list(BUCKETS)
+            index = 0
+            while remaining > 0 and order:
+                sizes[order[index % len(order)]] += 1
+                remaining -= 1
+                index += 1
         if "dinosaur" in key or key in {"dinosaurs", "dinosaur"}:
-            payload = {
-                "focus": _topic("Dinosaurs", "Extinct Mesozoic reptiles known from fossils worldwide."),
+            pools = {
                 "parents": [
                     _topic("Reptiles", "Cold-blooded vertebrates with scales that lay amniotic eggs."),
                     _topic("Animals", "Multicellular organisms that ingest organic matter for energy."),
-                ][: counts.get("parents", 2)],
+                    _topic("Vertebrates", "Animals with a backbone or spinal column."),
+                    _topic("Archosaurs", "Ruling reptiles that include dinosaurs, birds, and crocodilians."),
+                ],
                 "siblings": [
                     _topic("Mammals", "Warm-blooded vertebrates that nurse young with milk."),
                     _topic("Crocodilians", "Large aquatic reptiles with elongated snouts and armored skin."),
                     _topic("Birds", "Feathered vertebrates adapted for flight and nesting."),
-                ][: counts.get("siblings", 3)],
+                    _topic("Pterosaurs", "Flying reptiles of the Mesozoic with membranous wings."),
+                ],
                 "children": [
                     _topic("Theropods", "Bipedal dinosaurs that include many carnivores and bird ancestors."),
                     _topic("Sauropods", "Long-necked herbivorous dinosaurs with pillar-like limbs."),
                     _topic("Ornithischians", "Bird-hipped dinosaurs that were mostly plant eaters."),
                     _topic("Ceratopsians", "Horned plant-eating dinosaurs with frilled skulls."),
-                ][: counts.get("children", 4)],
+                    _topic("Stegosaurs", "Plated herbivorous dinosaurs with spiked tails."),
+                    _topic("Ankylosaurs", "Armored plant-eating dinosaurs with clubbed or spiked tails."),
+                ],
                 "acquaintances": [
                     _topic("Paleontology", "The scientific study of prehistoric life through fossils."),
                     _topic("Fossils", "Preserved remains or traces of ancient organisms in rock."),
                     _topic("Mesozoic", "The geologic era spanning Triassic, Jurassic, and Cretaceous periods."),
                     _topic("Continental drift", "The gradual movement of Earth's landmasses over geologic time."),
-                ][: counts.get("acquaintances", 4)],
+                    _topic("Extinction", "The end of a species or larger group of organisms."),
+                    _topic("Geology", "The study of Earth's physical structure and history."),
+                ],
+            }
+            payload = {
+                "focus": _topic("Dinosaurs", "Extinct Mesozoic reptiles known from fossils worldwide."),
+                **{bucket: pools[bucket][: sizes[bucket]] for bucket in BUCKETS},
             }
         else:
             title = seed[:1].upper() + seed[1:] if seed else "Topic"
             payload = {
                 "focus": _topic(title, f"A standalone subject covering {title.lower()}."),
-                "parents": [_topic(f"Field of {title}", f"The broader field that contains {title.lower()}.")][
-                    : counts.get("parents", 2)
+                "parents": [
+                    _topic(f"Field of {title}" if i == 1 else f"Domain of {title} {i}", f"A broader field around {title.lower()}.")
+                    for i in range(1, sizes["parents"] + 1)
                 ],
                 "siblings": [
                     _topic(f"Sibling of {title} {index}", f"A peer subject beside {title.lower()}.")
-                    for index in range(1, counts.get("siblings", 3) + 1)
+                    for index in range(1, sizes["siblings"] + 1)
                 ],
                 "children": [
                     _topic(f"Part of {title} {index}", f"A narrower subject under {title.lower()}.")
-                    for index in range(1, counts.get("children", 4) + 1)
+                    for index in range(1, sizes["children"] + 1)
                 ],
                 "acquaintances": [
                     _topic(f"Related to {title} {index}", f"A neighboring subject near {title.lower()}.")
-                    for index in range(1, counts.get("acquaintances", 4) + 1)
+                    for index in range(1, sizes["acquaintances"] + 1)
                 ],
             }
         return payload, _usage("fake")
@@ -129,12 +172,25 @@ class GeminiNeighborhoodLLM:
         self.temperature = settings.gemini_temperature
 
     def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
+        total = int(counts.get("total") or 16)
+        min_per = int(counts.get("min_per_bucket") or 2)
+        prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
+        prefer_line = ""
+        if prefer:
+            prefer_line = (
+                f" Prefer putting new topics into these underfilled roles when they fit: {', '.join(map(str, prefer))}."
+            )
         prompt = (
             "Build a learning neighborhood for one topic. Return JSON only with keys "
             "focus, parents, siblings, children, acquaintances. "
             "focus is {name, description}. Each other key is an array of {name, description}. "
-            f"Exact sizes: parents={counts.get('parents', 2)}, siblings={counts.get('siblings', 3)}, "
-            f"children={counts.get('children', 4)}, acquaintances={counts.get('acquaintances', 4)}. "
+            f"Return about {total} related topics in total across the four arrays "
+            f"(sum of array lengths ≈ {total}). "
+            f"Include at least {min_per} item(s) in each of parents, siblings, children, and acquaintances "
+            "when the total allows; otherwise at least one in each role you can justify. "
+            "You choose how many go in each bucket — a bit of everything, weighted toward what fits the topic "
+            "(e.g. more children for a broad subject, more acquaintances for a cross-cutting one)."
+            f"{prefer_line} "
             "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
             "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
             "one for Ornithischia/Ornithischians, one for Theropoda/Theropods (and other -oda/-ods pairs), "
@@ -149,7 +205,7 @@ class GeminiNeighborhoodLLM:
             "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
             "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
             "No duplicates across buckets. Seed topic: "
-            + json.dumps({"topic": topic, "counts": counts})
+            + json.dumps({"topic": topic, "total": total, "min_per_bucket": min_per})
         )
         parsed, usage = self._json(prompt, PROMPT_NEIGHBORHOOD)
         return _normalize_neighborhood(parsed, counts), usage
@@ -240,6 +296,7 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
             "description": str(focus.get("description") or "").strip() or None,
         }
     }
+    cleaned_buckets: dict[str, list[dict]] = {}
     for bucket in BUCKETS:
         rows = raw.get(bucket) if isinstance(raw.get(bucket), list) else []
         cleaned = []
@@ -250,7 +307,29 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
             if not name:
                 continue
             cleaned.append({"name": name, "description": str(row.get("description") or "").strip() or None})
-        result[bucket] = cleaned[: counts.get(bucket, len(cleaned))]
+        cleaned_buckets[bucket] = cleaned
+
+    total = int(counts.get("total") or sum(len(v) for v in cleaned_buckets.values()) or 16)
+    min_per = int(counts.get("min_per_bucket") or 0)
+    # Keep a floor per bucket, then round-robin the rest up to total.
+    kept: dict[str, list[dict]] = {bucket: [] for bucket in BUCKETS}
+    for bucket in BUCKETS:
+        floor = min(min_per, len(cleaned_buckets[bucket]))
+        kept[bucket].extend(cleaned_buckets[bucket][:floor])
+        cleaned_buckets[bucket] = cleaned_buckets[bucket][floor:]
+    used = sum(len(v) for v in kept.values())
+    while used < total:
+        progressed = False
+        for bucket in BUCKETS:
+            if used >= total:
+                break
+            if cleaned_buckets[bucket]:
+                kept[bucket].append(cleaned_buckets[bucket].pop(0))
+                used += 1
+                progressed = True
+        if not progressed:
+            break
+    result.update(kept)
     return result
 
 

@@ -21,29 +21,35 @@ def _run_queued(session):
 def test_preferences_defaults_and_clamp(client, auth, user, session):
     response = client.get("/api/v1/me/preferences", headers=auth)
     assert response.status_code == 200
-    assert response.json()["neighborhood"] == {
-        "parents": 2,
-        "siblings": 3,
-        "children": 4,
-        "acquaintances": 4,
-        "extended": 12,
-    }
+    body = response.json()["neighborhood"]
+    assert body["total"] == 16
+    assert body["extended"] == 12
+    assert body["min_per_bucket"] == 2
 
     patched = client.patch(
         "/api/v1/me/preferences",
         headers=auth,
-        json={"neighborhood": {"parents": 9, "siblings": 1, "children": 3, "acquaintances": 5, "extended": 99}},
+        json={"neighborhood": {"total": 99, "extended": 99}},
     )
     assert patched.status_code == 200
     assert patched.json()["neighborhood"] == {
-        "parents": 2,
-        "siblings": 2,
-        "children": 3,
-        "acquaintances": 5,
+        "total": 32,
         "extended": 24,
+        "min_per_bucket": 2,
     }
     session.refresh(user)
-    assert neighborhood_counts(user)["siblings"] == 2
+    assert neighborhood_counts(user)["total"] == 32
+
+
+def test_legacy_bucket_prefs_sum_to_total(client, auth, user, session):
+    user.preferences = {
+        "neighborhood": {"parents": 2, "siblings": 3, "children": 4, "acquaintances": 4, "extended": 12}
+    }
+    session.add(user)
+    session.commit()
+    counts = neighborhood_counts(user)
+    assert counts["total"] == 13
+    assert counts["extended"] == 12
 
 
 def test_dinosaurs_expand_merge_and_bidirectional_edges(client, auth, session):
@@ -92,13 +98,13 @@ def test_complete_neighborhood_skips_second_llm_job(client, auth, session):
     assert after == before
 
 
-def test_higher_child_count_reenqueues(client, auth, session):
+def test_higher_total_reenqueues(client, auth, session):
     first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs"})
     assert first.status_code == 202
     focus_id = first.json()["focus_node_id"]
     _run_queued(session)
 
-    client.patch("/api/v1/me/preferences", headers=auth, json={"neighborhood": {"children": 5}})
+    client.patch("/api/v1/me/preferences", headers=auth, json={"neighborhood": {"total": 24}})
     again = client.post("/api/v1/knowledge/focus", headers=auth, json={"node_id": focus_id})
     assert again.status_code == 202
     assert again.json()["job_id"]

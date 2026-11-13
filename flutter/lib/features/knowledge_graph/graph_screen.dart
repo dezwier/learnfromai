@@ -54,11 +54,11 @@ class _GraphScreenState extends State<GraphScreen> with TickerProviderStateMixin
     super.initState();
     _panController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 280),
     )..addListener(_onPanTick);
     _layoutMorph = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 520),
+      duration: const Duration(milliseconds: 280),
     )..addListener(_onLayoutMorphTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
@@ -1087,7 +1087,7 @@ class _HighlightDrawer extends StatefulWidget {
   });
 
   /// Collapsed content height (above the home-indicator inset).
-  static const double contentHeight = 140;
+  static const double contentHeight = 130;
 
   static double collapsedHeight(double safeBottom) => contentHeight + safeBottom;
 
