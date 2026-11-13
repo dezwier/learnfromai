@@ -277,6 +277,49 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// POST focus. If the neighborhood is complete, switch focus to [id].
+  /// If incomplete, enqueue the expand and keep the current graph.
+  /// Returns true when focus switched.
+  Future<bool> openIfCompleteOrEnqueue(String id, {String? title}) async {
+    if (focusId == id && categoryGraph != null && categoryGraph?['incomplete'] != true) {
+      return false;
+    }
+    if (jobForNode(id) != null) {
+      _ensurePoller();
+      return false;
+    }
+    try {
+      final payload = await _post('/knowledge/focus', body: {'node_id': id});
+      final jobId = payload['job_id']?.toString();
+      if (jobId != null) {
+        _trackJobFromPayload(payload, id: id, title: title);
+        return false;
+      }
+      // Neighbors are complete — change to that tile.
+      if (payload['nodes'] is List) {
+        categoryGraph = payload;
+      } else {
+        categoryGraph = await _get('/knowledge/graph/$id');
+      }
+      final openedId = focusId ?? id;
+      if (focusHistory.isEmpty || focusHistory.last != openedId) {
+        focusHistory.add(openedId);
+      }
+      suggestions = [];
+      notifyListeners();
+      return true;
+    } on ApiException catch (exc) {
+      if (exc.status == 409) {
+        candidates = _choices(exc.details);
+        notifyListeners();
+      } else {
+        error = exc.message;
+        notifyListeners();
+      }
+      return false;
+    }
+  }
+
   /// POST focus; if a job is returned, track it without awaiting completion.
   Future<void> enqueueNeighborhood(String id, {String? title}) async {
     if (jobForNode(id) != null) {
@@ -298,21 +341,7 @@ class GraphController extends ChangeNotifier {
         }
         return;
       }
-      final focusNodeId = payload['focus_node_id']?.toString() ?? id;
-      final progress = payload['progress'];
-      final message = progress is Map ? progress['message']?.toString() : null;
-      final fraction = progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0.0;
-      _upsertTracked(
-        TrackedJob(
-          jobId: jobId,
-          nodeId: focusNodeId,
-          title: title ?? _titleForNode(focusNodeId) ?? 'Topic',
-          state: 'queued',
-          progressMessage: message ?? 'Waiting for a worker…',
-          fraction: fraction,
-        ),
-      );
-      _ensurePoller();
+      _trackJobFromPayload(payload, id: id, title: title);
     } on ApiException catch (exc) {
       if (exc.status == 409) {
         candidates = _choices(exc.details);
@@ -322,6 +351,26 @@ class GraphController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  void _trackJobFromPayload(Map<String, dynamic> payload, {required String id, String? title}) {
+    final jobId = payload['job_id']?.toString();
+    if (jobId == null) return;
+    final focusNodeId = payload['focus_node_id']?.toString() ?? id;
+    final progress = payload['progress'];
+    final message = progress is Map ? progress['message']?.toString() : null;
+    final fraction = progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0.0;
+    _upsertTracked(
+      TrackedJob(
+        jobId: jobId,
+        nodeId: focusNodeId,
+        title: title ?? _titleForNode(focusNodeId) ?? 'Topic',
+        state: 'queued',
+        progressMessage: message ?? 'Waiting for a worker…',
+        fraction: fraction,
+      ),
+    );
+    _ensurePoller();
   }
 
   Future<void> choose(TopicChoice choice) async {
@@ -574,9 +623,12 @@ class GraphController extends ChangeNotifier {
             final result = job['result'];
             final resultFocus = result is Map ? result['focus_id']?.toString() : null;
             final loadId = resultFocus ?? tracked.nodeId;
-            if (focusId == tracked.nodeId || focusId == loadId) {
+            // Soft-refresh the current view so neighbor expands appear without jumping focus.
+            final refreshId =
+                (focusId == tracked.nodeId || focusId == loadId) ? loadId : focusId;
+            if (refreshId != null) {
               try {
-                categoryGraph = await _get('/knowledge/graph/$loadId');
+                categoryGraph = await _get('/knowledge/graph/$refreshId');
               } on ApiException {
                 // Keep current graph.
               }

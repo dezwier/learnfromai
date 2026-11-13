@@ -117,10 +117,12 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
 
   void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
     final graph = context.read<GraphController>();
-    // Second tap on the same tile → open it as focus (don't rely on center-highlight).
+    // Second tap: go there if neighbors are complete; otherwise enqueue without switching.
     if (_tappedTileId == node.id && node.id != graph.focusId) {
       _tappedTileId = null;
-      unawaited(_openRelatedTopic(graph, node));
+      _panTargetId = node.id;
+      unawaited(_animatePanTo(node.center, _viewport));
+      unawaited(_openIfCompleteOrEnqueue(graph, node));
       return;
     }
     _tappedTileId = node.id == graph.focusId ? null : node.id;
@@ -162,6 +164,14 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
     await graph.openExisting(node.id);
+  }
+
+  Future<void> _openIfCompleteOrEnqueue(GraphController graph, PlacedNode node) async {
+    final switched = await graph.openIfCompleteOrEnqueue(node.id, title: node.title);
+    if (!mounted || !switched) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId);
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
@@ -570,7 +580,7 @@ class _GraphScreenState extends State<GraphScreen> with SingleTickerProviderStat
                 onExpandToTopic: () {
                   final node = _highlighted;
                   if (node == null) return;
-                  unawaited(_openRelatedTopic(graph, node));
+                  unawaited(_openIfCompleteOrEnqueue(graph, node));
                 },
               ),
             ),
