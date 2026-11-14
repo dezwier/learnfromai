@@ -219,7 +219,7 @@ class GraphController extends ChangeNotifier {
 
   bool get hasActiveJobs => activeJobCount > 0;
 
-  /// True while any neighborhood expand is in flight (badge / drawer), not a nav lock.
+  /// True while any neighborhood expand is in flight (badge / topic UI), not a nav lock.
   bool get working => hasActiveJobs;
 
   String? get progressMessage {

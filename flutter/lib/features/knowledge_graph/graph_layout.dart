@@ -265,7 +265,7 @@ String relationSectionLabel(NodeRole role) {
   };
 }
 
-/// Direct neighbors of [node] for the highlight drawer (no extended / 2-hop).
+/// Direct neighbors of [node] for the topic detail screen (no extended / 2-hop).
 /// Uses layout roles when [node] is the focus, otherwise edges (inbound inverted).
 Map<NodeRole, List<PlacedNode>> relationsFor(
   PlacedNode node,

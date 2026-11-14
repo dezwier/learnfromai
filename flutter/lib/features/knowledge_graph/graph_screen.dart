@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/widgets/pulse_placeholder.dart';
 import '../../core/widgets/study_card.dart';
+import '../profile/overlay_bottom_chrome.dart';
 import '../profile/profile_hud.dart';
 import '../profile/profile_screen.dart';
 import 'graph_controller.dart';
@@ -29,7 +30,7 @@ class _GraphScreenState extends State<GraphScreen>
   late final AnimationController _layoutMorph;
   Animation<Matrix4>? _panAnimation;
   String? _transformFocusId;
-  /// While set, ignore center-highlight updates that aren't this id (avoids drawer flicker mid-pan).
+  /// While set, ignore center-highlight updates that aren't this id (avoids flicker mid-pan).
   String? _panTargetId;
   Timer? _suggestDebounce;
   Offset? _searchOutsideDown;
@@ -37,7 +38,7 @@ class _GraphScreenState extends State<GraphScreen>
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
-  var _drawerRaised = false;
+  var _topicOpen = false;
   var _jobsPanelOpen = false;
   PlacedNode? _highlighted;
   GraphLayout? _layout;
@@ -53,7 +54,7 @@ class _GraphScreenState extends State<GraphScreen>
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
   var _pendingFocusMorph = false;
-  /// Drawer relation tap in flight — keep sheet stable until the new focus lands.
+  /// Relation tap in flight — keep topic screen stable until the new focus lands.
   String? _openingRelatedId;
 
   @override
@@ -292,19 +293,24 @@ class _GraphScreenState extends State<GraphScreen>
     _panAnimation = null;
   }
 
-  void _selectNode(PlacedNode node, {bool keepDrawerRaised = false}) {
+  void _selectNode(PlacedNode node) {
+    final graph = context.read<GraphController>();
+    // Focus tile: open the topic overlay (no bottom drawer).
+    if (node.id == graph.focusId) {
+      _dwellTimer?.cancel();
+      setState(() {
+        _highlighted = node;
+        _topicOpen = true;
+      });
+      return;
+    }
     _panTargetId = node.id;
     final changed = _highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description;
     if (changed) {
       _dwellTimer?.cancel();
-      setState(() {
-        if (_highlighted?.id != node.id && !keepDrawerRaised) {
-          _drawerRaised = false;
-        }
-        _highlighted = node;
-      });
+      setState(() => _highlighted = node);
     }
     // Dwell only after the animated pan finishes and the viewport is still.
     unawaited(() async {
@@ -316,9 +322,9 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _onHighlightFromCenter(PlacedNode? node) {
     if (!mounted) return;
-    // Drawer owns the topic while raised or mid relation-open — don't thrash it
+    // Topic overlay / relation-open owns the selection — don't thrash it
     // from camera morph / recenter.
-    if (_openingRelatedId != null || _drawerRaised) return;
+    if (_openingRelatedId != null || _topicOpen) return;
     final pin = _panTargetId;
     // Keep the pan pin until the animation finishes — do not clear on first match.
     if (pin != null && node?.id != pin) return;
@@ -328,10 +334,7 @@ class _GraphScreenState extends State<GraphScreen>
       return;
     }
     final idChanged = _highlighted?.id != node?.id;
-    setState(() {
-      if (idChanged) _drawerRaised = false;
-      _highlighted = node;
-    });
+    setState(() => _highlighted = node);
     // Free-pan dwell is armed from InteractiveViewer settle (finger up + no velocity).
     if (idChanged) _dwellTimer?.cancel();
   }
@@ -460,7 +463,7 @@ class _GraphScreenState extends State<GraphScreen>
       }
     }
     if (placed != null) {
-      _selectNode(placed, keepDrawerRaised: _drawerRaised);
+      _selectNode(placed);
       return;
     }
     await graph.openExisting(job.nodeId, title: job.title);
@@ -586,8 +589,13 @@ class _GraphScreenState extends State<GraphScreen>
     if (!ok || !mounted) return;
     setState(() {
       _highlighted = null;
-      _drawerRaised = false;
+      _topicOpen = false;
     });
+  }
+
+  void _closeTopic() {
+    if (!_topicOpen) return;
+    setState(() => _topicOpen = false);
   }
 
   void _openSearch() {
@@ -644,7 +652,10 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _openProfile() {
     _dismissSearch();
-    setState(() => _profileOpen = true);
+    setState(() {
+      _topicOpen = false;
+      _profileOpen = true;
+    });
   }
 
   void _closeProfile() {
@@ -658,30 +669,27 @@ class _GraphScreenState extends State<GraphScreen>
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
-    final drawerVisible = !_profileOpen && !_searchOpen && _highlighted != null;
-    final drawerClearance =
-        drawerVisible ? _HighlightDrawer.collapsedHeight(safeBottom) + 12 : 16.0;
-    final floatBottom = drawerClearance + keyboard;
+    final floatBottom = safeBottom + 36 + keyboard;
     final highlight = _highlighted;
     final knownIncomplete =
         highlight == null ? null : _knownIncomplete(highlight.id, graph);
+    final overlayOpen = _profileOpen || _topicOpen;
     final canRequestNeighbors = !_searchOpen &&
-        !_profileOpen &&
+        !overlayOpen &&
         highlight != null &&
         knownIncomplete == true &&
         graph.jobForNode(highlight.id) == null;
     final openingRelated =
         _openingRelatedId != null && _openingRelatedId == highlight?.id;
     final canGoToHighlight = !_searchOpen &&
-        !_profileOpen &&
+        !overlayOpen &&
         highlight != null &&
         highlight.id != graph.focusId &&
         !openingRelated;
-    // Hide stale/partial relation lists while a drawer hop is in flight.
+    // Hide stale/partial relation lists while a topic hop is in flight.
     final showRelations = highlight != null && !openingRelated;
-    // Graph chrome stays mounted so it can fade with the drawer.
-    final showChrome = !_searchOpen && !_profileOpen;
-    final chromeOpaque = showChrome && !_drawerRaised;
+    final showChrome = !_searchOpen && !overlayOpen;
+    final chromeOpaque = showChrome;
     if (_jobsPanelOpen && !graph.hasActiveJobs) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_jobsPanelOpen) return;
@@ -701,7 +709,7 @@ class _GraphScreenState extends State<GraphScreen>
         children: [
           Column(
             children: [
-              if (graph.error != null && !_drawerRaised)
+              if (graph.error != null && !_topicOpen)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: StudyCard(
@@ -783,7 +791,6 @@ class _GraphScreenState extends State<GraphScreen>
                 ),
               ),
             ),
-          // Floats under the drawer; fade out while the sheet is raised.
           if (showChrome && chromeOpaque && _jobsPanelOpen)
             Positioned.fill(
               child: GestureDetector(
@@ -902,35 +909,6 @@ class _GraphScreenState extends State<GraphScreen>
                 ),
               ),
             ),
-          if (drawerVisible)
-            Positioned.fill(
-              child: _HighlightDrawer(
-                node: _highlighted!,
-                // Settled layout only — morphing display layout thrash-rebuilds relations.
-                layout: _settledLayout,
-                focusId: graph.focusId,
-                busy: graph.jobForNode(_highlighted!.id) != null,
-                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
-                relationsPending: openingRelated,
-                showRelations: showRelations,
-                canRequestNeighbors: canRequestNeighbors && !openingRelated,
-                canViewInGraph: canGoToHighlight,
-                onRaisedChanged: (raised) {
-                  if (_drawerRaised == raised) return;
-                  setState(() => _drawerRaised = raised);
-                },
-                onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
-                onViewInGraph: () => unawaited(_goToHighlighted(graph)),
-                onLearn: () {
-                  final node = _highlighted;
-                  if (node == null) return;
-                  unawaited(_openLearn(node));
-                },
-                onEdit: () => _editHighlighted(graph),
-                onDelete: () => _confirmDeleteHighlighted(graph),
-                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
-              ),
-            ),
           if (_searchOpen)
             Positioned(
               left: 0,
@@ -943,6 +921,39 @@ class _GraphScreenState extends State<GraphScreen>
                 onChanged: (value) => _onSearchChanged(graph, value),
                 onSubmit: () => _submitSearch(graph),
                 onPick: (choice) => _pickSuggestion(graph, choice),
+              ),
+            ),
+          if (_topicOpen && _highlighted != null)
+            Positioned.fill(
+              child: _TopicDetailScreen(
+                node: _highlighted!,
+                // Settled layout only — morphing display layout thrash-rebuilds relations.
+                layout: _settledLayout,
+                focusId: graph.focusId,
+                busy: graph.jobForNode(_highlighted!.id) != null,
+                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
+                relationsPending: openingRelated,
+                showRelations: showRelations,
+                canRequestNeighbors:
+                    knownIncomplete == true &&
+                    graph.jobForNode(_highlighted!.id) == null &&
+                    !openingRelated,
+                canViewInGraph:
+                    _highlighted!.id != graph.focusId && !openingRelated,
+                onClose: _closeTopic,
+                onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
+                onViewInGraph: () {
+                  _closeTopic();
+                  unawaited(_goToHighlighted(graph));
+                },
+                onLearn: () {
+                  final node = _highlighted;
+                  if (node == null) return;
+                  unawaited(_openLearn(node));
+                },
+                onEdit: () => _editHighlighted(graph),
+                onDelete: () => _confirmDeleteHighlighted(graph),
+                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
               ),
             ),
           if (_profileOpen)
@@ -1216,14 +1227,14 @@ class _JobsPanel extends StatelessWidget {
   }
 }
 
-class _HighlightDrawer extends StatefulWidget {
-  const _HighlightDrawer({
-    super.key,
+/// Fullscreen topic overlay — same chrome pattern as [ProfileScreen].
+class _TopicDetailScreen extends StatelessWidget {
+  const _TopicDetailScreen({
     required this.node,
     required this.canViewInGraph,
     required this.canRequestNeighbors,
     required this.showRelations,
-    required this.onRaisedChanged,
+    required this.onClose,
     required this.onRequestNeighbors,
     required this.onViewInGraph,
     required this.onLearn,
@@ -1237,11 +1248,6 @@ class _HighlightDrawer extends StatefulWidget {
     this.relationsPending = false,
   });
 
-  /// Collapsed content height (above the home-indicator inset).
-  static const double contentHeight = 130;
-
-  static double collapsedHeight(double safeBottom) => contentHeight + safeBottom;
-
   final PlacedNode node;
   final GraphLayout? layout;
   final String? focusId;
@@ -1251,7 +1257,7 @@ class _HighlightDrawer extends StatefulWidget {
   final bool showRelations;
   final bool canRequestNeighbors;
   final bool canViewInGraph;
-  final ValueChanged<bool> onRaisedChanged;
+  final VoidCallback onClose;
   final VoidCallback onRequestNeighbors;
   final VoidCallback onViewInGraph;
   final VoidCallback onLearn;
@@ -1260,371 +1266,129 @@ class _HighlightDrawer extends StatefulWidget {
   final ValueChanged<PlacedNode> onOpenRelated;
 
   @override
-  State<_HighlightDrawer> createState() => _HighlightDrawerState();
-}
-
-class _HighlightDrawerState extends State<_HighlightDrawer>
-    with TickerProviderStateMixin {
-  /// 0 = collapsed, 1 = fully expanded (90% of screen).
-  late final AnimationController _extent;
-  late final AnimationController _bodyFling;
-  final _bodyScroll = ScrollController();
-  var _reportedRaised = false;
-  var _dragMovedDrawer = false;
-
-  bool get _expanded => _extent.value > 0.5;
-  bool get _fullyOpen => _extent.value > 0.98;
-
-  @override
-  void initState() {
-    super.initState();
-    _extent = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 280),
-      value: 0,
-    )..addListener(_onExtentTick);
-    _bodyFling = AnimationController.unbounded(vsync: this)
-      ..addListener(_onBodyFlingTick);
-  }
-
-  @override
-  void didUpdateWidget(covariant _HighlightDrawer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.node.id == widget.node.id) return;
-    _stopBodyBallistic();
-    if (_bodyScroll.hasClients) {
-      _bodyScroll.jumpTo(0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _extent.removeListener(_onExtentTick);
-    _extent.dispose();
-    _bodyFling.removeListener(_onBodyFlingTick);
-    _bodyFling.dispose();
-    _bodyScroll.dispose();
-    super.dispose();
-  }
-
-  void _onBodyFlingTick() {
-    if (!_bodyScroll.hasClients) return;
-    final position = _bodyScroll.position;
-    final next = _bodyFling.value.clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    if (next != position.pixels) {
-      position.jumpTo(next);
-    }
-    final velocity = _bodyFling.velocity;
-    if ((velocity > 0 && next >= position.maxScrollExtent) ||
-        (velocity < 0 && next <= position.minScrollExtent)) {
-      _bodyFling.stop();
-    }
-  }
-
-  void _onExtentTick() {
-    if (!mounted) return;
-    setState(() {});
-    final raised = _extent.value > 0.08;
-    if (raised == _reportedRaised) return;
-    _reportedRaised = raised;
-    widget.onRaisedChanged(raised);
-  }
-
-  double _collapsedPx(BuildContext context) {
-    return _HighlightDrawer.collapsedHeight(MediaQuery.paddingOf(context).bottom);
-  }
-
-  double _expandedPx(BuildContext context) {
-    return MediaQuery.sizeOf(context).height * 0.90;
-  }
-
-  double _heightFor(BuildContext context, double t) {
-    final collapsed = _collapsedPx(context);
-    final expanded = _expandedPx(context);
-    return collapsed + (expanded - collapsed) * t.clamp(0.0, 1.0);
-  }
-
-  void _applyDragDy(double dy) {
-    final range = _expandedPx(context) - _collapsedPx(context);
-    if (range <= 0) return;
-    _extent.value = (_extent.value - dy / range).clamp(0.0, 1.0);
-  }
-
-  void _scrollBodyBy(double dy) {
-    if (!_bodyScroll.hasClients) return;
-    final position = _bodyScroll.position;
-    position.jumpTo((position.pixels - dy).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    ));
-  }
-
-  void _stopBodyBallistic() {
-    if (_bodyFling.isAnimating) _bodyFling.stop();
-  }
-
-  void _flingBody(double primaryVelocity) {
-    if (!_bodyScroll.hasClients) return;
-    // Match Scrollable: negate drag velocity so finger-up continues downward.
-    // Boost + lower friction so a normal flick coasts farther.
-    final velocity = -primaryVelocity * 2.2;
-    if (velocity.abs() < 80) return;
-    final position = _bodyScroll.position;
-    _bodyFling.animateWith(
-      ClampingScrollSimulation(
-        position: position.pixels,
-        velocity: velocity,
-        friction: 0.008,
-      ),
-    );
-  }
-
-  void _onDragStart(DragStartDetails details) {
-    _dragMovedDrawer = false;
-    _stopBodyBallistic();
-  }
-
-  void _onDragUpdate(DragUpdateDetails details) {
-    final dy = details.delta.dy;
-    if (dy > 0) {
-      // Finger down: scroll list toward top first; only collapse drawer at offset 0.
-      if (_fullyOpen && _bodyScroll.hasClients && _bodyScroll.offset > 0) {
-        _scrollBodyBy(dy);
-        return;
-      }
-      _dragMovedDrawer = true;
-      _applyDragDy(dy);
-      return;
-    }
-    // Finger up: scroll content when fully open, otherwise expand the drawer.
-    if (_fullyOpen && _bodyScroll.hasClients) {
-      final max = _bodyScroll.position.maxScrollExtent;
-      if (_bodyScroll.offset < max) {
-        _scrollBodyBy(dy);
-        return;
-      }
-    }
-    _dragMovedDrawer = true;
-    _applyDragDy(dy);
-  }
-
-  void _snap({double velocity = 0}) {
-    final opening = velocity < -400 || (velocity <= 400 && _extent.value >= 0.35);
-    _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
-  }
-
-  void _onDragEnd(DragEndDetails details) {
-    final velocity = details.primaryVelocity ?? 0;
-    // List-only drags keep the sheet open and continue with inertial scroll.
-    if (!_dragMovedDrawer) {
-      _dragMovedDrawer = false;
-      _flingBody(velocity);
-      return;
-    }
-    _dragMovedDrawer = false;
-    _snap(velocity: velocity);
-  }
-
-  void _toggle() {
-    if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
-      _bodyScroll.jumpTo(0);
-    }
-    final opening = !_expanded;
-    _extent.animateTo(opening ? 1 : 0, curve: Curves.easeOutCubic);
-  }
-
-  Future<void> _collapseThen(VoidCallback action) async {
-    if (_bodyScroll.hasClients && _bodyScroll.offset > 0) {
-      _bodyScroll.jumpTo(0);
-    }
-    if (_extent.value > 0) {
-      await _extent.animateTo(0, curve: Curves.easeOutCubic);
-    }
-    if (!mounted) return;
-    action();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    final height = _heightFor(context, _extent.value);
-    final desc = (widget.node.description ?? '').trim();
-    final expanded = _expanded;
-    final scrim = (_extent.value * 0.48).clamp(0.0, 0.48);
+    final desc = (node.description ?? '').trim();
+    final bottomClearance = OverlayBottomChrome.height(context) + 24;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            ignoring: scrim < 0.02,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _extent.animateTo(0, curve: Curves.easeOutCubic),
-              child: ColoredBox(color: Colors.black.withValues(alpha: scrim)),
-            ),
-          ),
-        ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Material(
-            elevation: 10,
-            shadowColor: Colors.black.withValues(alpha: 0.28),
-            color: scheme.surface.withValues(alpha: 0.97),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              height: height,
-              width: double.infinity,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onVerticalDragStart: _onDragStart,
-                onVerticalDragUpdate: _onDragUpdate,
-                onVerticalDragEnd: _onDragEnd,
-                child: Column(
-                  children: [
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onVerticalDragStart: _onDragStart,
-                      onVerticalDragUpdate: _onDragUpdate,
-                      onVerticalDragEnd: _onDragEnd,
-                      onTap: _toggle,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-                        child: Center(
-                          child: Container(
-                            width: 36,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: scheme.onSurface.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
+    return Material(
+      color: scheme.surface,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: ListView(
+              padding: studyPagePadding.copyWith(bottom: bottomClearance),
+              children: [
+                Text(
+                  node.title,
+                  style: TextStyle(
+                    fontFamily: 'tt_ramilas',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 28,
+                    height: 1.15,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (desc.isNotEmpty)
+                  Text(
+                    desc,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.78),
+                          height: 1.4,
                         ),
+                  )
+                else
+                  Text(
+                    'No description yet.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.45),
+                          fontStyle: FontStyle.italic,
+                        ),
+                  ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    if (canRequestNeighbors) ...[
+                      _TopicIconButton(
+                        tooltip: 'Request neighbors',
+                        icon: Icons.auto_awesome,
+                        filled: true,
+                        onPressed: onRequestNeighbors,
                       ),
+                      const SizedBox(width: 8),
+                    ] else if (canViewInGraph) ...[
+                      _TopicIconButton(
+                        tooltip: 'View in graph',
+                        icon: Icons.arrow_forward,
+                        filled: true,
+                        onPressed: onViewInGraph,
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    _TopicIconButton(
+                      tooltip: 'Learn',
+                      icon: Icons.menu_book_outlined,
+                      filled: !canRequestNeighbors && !canViewInGraph,
+                      onPressed: onLearn,
                     ),
-                    Expanded(
-                      child: ListView(
-                        controller: _bodyScroll,
-                        // Drag is owned by the parent GestureDetector so swipe-down
-                        // always moves the drawer; we jump the offset manually on swipe-up.
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + bottom),
-                        children: [
-                          Text(
-                            widget.node.title,
-                            style: TextStyle(
-                              fontFamily: 'tt_ramilas',
-                              fontWeight: FontWeight.w700,
-                              fontSize: expanded ? 28 : 22,
-                              height: 1.15,
-                              color: scheme.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (desc.isNotEmpty)
-                            Text(
-                              desc,
-                              maxLines: expanded ? null : 3,
-                              overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: scheme.onSurface.withValues(alpha: 0.78),
-                                    height: 1.4,
-                                  ),
-                            )
-                          else
-                            Text(
-                              'No description yet.',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: scheme.onSurface.withValues(alpha: 0.45),
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                            ),
-                          if (expanded) ...[
-                            const SizedBox(height: 18),
-                            Row(
-                              children: [
-                                if (widget.canRequestNeighbors) ...[
-                                  _DrawerIconButton(
-                                    tooltip: 'Request neighbors',
-                                    icon: Icons.auto_awesome,
-                                    filled: true,
-                                    onPressed: widget.onRequestNeighbors,
-                                  ),
-                                  const SizedBox(width: 8),
-                                ] else if (widget.canViewInGraph) ...[
-                                  _DrawerIconButton(
-                                    tooltip: 'View in graph',
-                                    icon: Icons.arrow_forward,
-                                    filled: true,
-                                    onPressed: () => _collapseThen(widget.onViewInGraph),
-                                  ),
-                                  const SizedBox(width: 8),
-                                ],
-                                _DrawerIconButton(
-                                  tooltip: 'Learn',
-                                  icon: Icons.menu_book_outlined,
-                                  filled: !widget.canRequestNeighbors && !widget.canViewInGraph,
-                                  onPressed: widget.onLearn,
-                                ),
-                                const SizedBox(width: 8),
-                                _DrawerIconButton(
-                                  tooltip: 'Edit',
-                                  icon: Icons.edit_outlined,
-                                  onPressed: widget.onEdit,
-                                ),
-                                const SizedBox(width: 8),
-                                _DrawerIconButton(
-                                  tooltip: 'Delete',
-                                  icon: Icons.delete_outline,
-                                  foreground: scheme.error,
-                                  onPressed: widget.onDelete,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 18),
-                            if (widget.busy) ...[
-                              _DrawerProgressCard(
-                                message: widget.progressMessage ?? 'Loading related topics…',
-                              ),
-                              if (widget.showRelations || widget.relationsPending)
-                                const SizedBox(height: 12),
-                            ],
-                            if (widget.relationsPending)
-                              const SizedBox(
-                                height: 168,
-                                child: PulsePlaceholder(
-                                  borderRadius: BorderRadius.all(Radius.circular(16)),
-                                ),
-                              )
-                            else if (widget.showRelations && widget.layout != null)
-                              _RelationsCard(
-                                node: widget.node,
-                                layout: widget.layout!,
-                                focusId: widget.focusId,
-                                onOpen: widget.onOpenRelated,
-                              ),
-                          ],
-                        ],
-                      ),
+                    const SizedBox(width: 8),
+                    _TopicIconButton(
+                      tooltip: 'Edit',
+                      icon: Icons.edit_outlined,
+                      onPressed: onEdit,
+                    ),
+                    const SizedBox(width: 8),
+                    _TopicIconButton(
+                      tooltip: 'Delete',
+                      icon: Icons.delete_outline,
+                      foreground: scheme.error,
+                      onPressed: onDelete,
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 20),
+                if (busy) ...[
+                  _TopicProgressCard(
+                    message: progressMessage ?? 'Loading related topics…',
+                  ),
+                  if (showRelations || relationsPending) const SizedBox(height: 12),
+                ],
+                if (relationsPending)
+                  const SizedBox(
+                    height: 168,
+                    child: PulsePlaceholder(
+                      borderRadius: BorderRadius.all(Radius.circular(16)),
+                    ),
+                  )
+                else if (showRelations && layout != null)
+                  _RelationsCard(
+                    node: node,
+                    layout: layout!,
+                    focusId: focusId,
+                    onOpen: onOpenRelated,
+                  ),
+              ],
             ),
           ),
-        ),
-      ],
+          OverlayBottomChrome(
+            child: OverlayChromeButton(
+              onPressed: onClose,
+              icon: Icons.close_rounded,
+              label: 'Close',
+              tooltip: 'Close',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _DrawerProgressCard extends StatelessWidget {
-  const _DrawerProgressCard({required this.message});
+class _TopicProgressCard extends StatelessWidget {
+  const _TopicProgressCard({required this.message});
 
   final String message;
 
@@ -1860,8 +1624,8 @@ String _topicInitial(String title) {
   return String.fromCharCode(trimmed.runes.first).toUpperCase();
 }
 
-class _DrawerIconButton extends StatelessWidget {
-  const _DrawerIconButton({
+class _TopicIconButton extends StatelessWidget {
+  const _TopicIconButton({
     required this.tooltip,
     required this.icon,
     required this.onPressed,

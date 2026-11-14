@@ -85,6 +85,12 @@ void main() {
     expect(find.byTooltip('Search'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
     expect(find.text('0 / 100 XP'), findsOneWidget);
+
+    // Focus tile opens a fullscreen topic overlay (no bottom drawer).
+    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.byTooltip('Learn'), findsOneWidget);
   });
 
   testWidgets('profile hud opens overlay with settings and logout', (tester) async {
@@ -384,15 +390,9 @@ void main() {
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    // Expand drawer (handle tap), then open Learn.
-    await tester.tap(find.text('Dinosaurs').last);
+    // Tap focus tile → topic overlay, then Learn.
+    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    final learn = find.byTooltip('Learn');
-    if (learn.evaluate().isEmpty) {
-      // Drawer may still be collapsed — drag the sheet up.
-      await tester.drag(find.text('Dinosaurs').last, const Offset(0, -400));
-      await tester.pumpAndSettle();
-    }
     expect(find.byTooltip('Learn'), findsWidgets);
     await tester.tap(find.byTooltip('Learn').first);
     await tester.pump();
