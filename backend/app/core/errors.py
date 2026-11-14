@@ -51,7 +51,8 @@ def migration_pending(migration_id: str | None = None) -> AppError:
 
 
 def rate_limited(message: str = "Generation quota exceeded") -> AppError:
-    return AppError("RATE_LIMITED", message, 429)
+    # Terminal: do not burn worker retries once the daily token budget is gone.
+    return AppError("RATE_LIMITED", message, 429, {"terminal": True})
 
 
 def generation_unavailable(message: str = "The model is unavailable", *, terminal: bool = False) -> AppError:

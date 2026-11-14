@@ -37,7 +37,7 @@ class GenerationJob(SQLModel, table=True):
     result: dict | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
     progress: dict = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     attempts: int = 0
-    max_attempts: int = 5
+    max_attempts: int = 3
     lease_until: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     lease_token: UUID | None = None
     idempotency_key: str | None = None

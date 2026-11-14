@@ -56,10 +56,12 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     llm = get_content_llm()
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     set_progress(session, job, stage="generate", message="Writing learn · example · check…", fraction=0.35)
+    assert_user_quota(session, user_id)
     bits, usage = llm.generate_bits(node.name, node.description, neighbor_titles)
     renew_lease(session, job)
     record_usage(session, user_id=user_id, job_id=job.id, task="content", provider=llm.name, usage=usage)
     session.commit()
+    assert_user_quota(session, user_id)
 
     set_progress(session, job, stage="persist", message="Saving learning bits…", fraction=0.85)
     bit_ids = _upsert_bits(

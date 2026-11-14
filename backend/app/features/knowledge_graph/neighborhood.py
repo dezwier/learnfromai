@@ -215,10 +215,12 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     # Keep the lease alive across Gemini attempt timeouts (each can take ~60s).
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     set_progress(session, job, stage="generate", message="Asking the model for related topics…", fraction=0.15)
+    assert_user_quota(session, user_id)
     neighborhood, usage = llm.generate_neighborhood(focus.name if not topic else topic, counts)
     renew_lease(session, job)
     record_usage(session, user_id=user_id, job_id=job.id, task="neighborhood", provider=llm.name, usage=usage)
     session.commit()
+    assert_user_quota(session, user_id)
 
     focus_spec = neighborhood.get("focus") if isinstance(neighborhood.get("focus"), dict) else {}
     if focus_spec.get("name") or focus_spec.get("description"):
@@ -248,44 +250,9 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
         seen_names=seen_names,
         seen_titles=seen_titles,
         progress_start=0.35,
-        progress_span=0.45,
+        progress_span=0.55,
     )
-
-    # One repair pass when the total budget is still short.
-    have_total = sum(len(linked[bucket]) for bucket in BUCKETS)
-    need = max(0, counts["total"] - have_total)
-    if need > 0:
-        set_progress(session, job, stage="repair", message="Filling missing related topics…", fraction=0.85)
-        empty = [bucket for bucket in BUCKETS if not linked[bucket]]
-        repair_counts = {
-            "total": need,
-            "min_per_bucket": 1 if empty else 0,
-            "prefer_buckets": empty,
-        }
-        repair, repair_usage = llm.generate_neighborhood(focus.name, repair_counts)
-        renew_lease(session, job)
-        record_usage(
-            session, user_id=user_id, job_id=job.id, task="neighborhood_repair", provider=llm.name, usage=repair_usage
-        )
-        repair_items = []
-        for bucket in BUCKETS:
-            for item in repair.get(bucket) or []:
-                if isinstance(item, dict):
-                    repair_items.append((bucket, item))
-        repair_items = repair_items[:need]
-        _link_resolved_batch(
-            session,
-            job=job,
-            llm=llm,
-            user_id=user_id,
-            focus=focus,
-            bucket_items=repair_items,
-            linked=linked,
-            seen_names=seen_names,
-            seen_titles=seen_titles,
-            progress_start=0.85,
-            progress_span=0.08,
-        )
+    # No repair generate pass — a short neighborhood is fine; user can Request again later.
 
     set_progress(session, job, stage="persist", message="Saving neighborhood…", fraction=0.95)
     request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
@@ -509,6 +476,7 @@ def _match_topics_batch(
     """One cheap LLM sameness call for all unresolved titles. Returns key -> id|None."""
     if not pending:
         return {}
+    assert_user_quota(session, user_id)
     candidates = [
         {
             "key": str(item["key"]),
@@ -520,6 +488,8 @@ def _match_topics_batch(
     ]
     matched, usage = llm.match_topics(candidates)
     record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
+    session.flush()
+    assert_user_quota(session, user_id)
     raw = matched.get("matches") if isinstance(matched, dict) else {}
     if not isinstance(raw, dict):
         raw = {}

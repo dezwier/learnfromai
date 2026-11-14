@@ -242,14 +242,14 @@ class GeminiNeighborhoodLLM:
             "generationConfig": {
                 "temperature": self.temperature,
                 "responseMimeType": "application/json",
-                "maxOutputTokens": 8192,
+                "maxOutputTokens": 3072,
             },
         }
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
         heartbeat = getattr(self, "heartbeat", None)
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             if callable(heartbeat):
                 heartbeat()
             try:
@@ -271,7 +271,7 @@ class GeminiNeighborhoodLLM:
                 return parsed, usage
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                body["generationConfig"]["maxOutputTokens"] = min(16384, 8192 * (2 ** (attempt - 1)))
+                body["generationConfig"]["maxOutputTokens"] = min(4096, 3072 + 1024 * attempt)
                 logger.info(
                     "gemini neighborhood retry %s: %s (%s)",
                     attempt,

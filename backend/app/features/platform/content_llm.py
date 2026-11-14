@@ -121,14 +121,14 @@ class GeminiContentLLM:
             "generationConfig": {
                 "temperature": self.temperature,
                 "responseMimeType": "application/json",
-                "maxOutputTokens": 4096,
+                "maxOutputTokens": 2048,
             },
         }
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
         heartbeat = getattr(self, "heartbeat", None)
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             if callable(heartbeat):
                 heartbeat()
             try:
@@ -150,7 +150,7 @@ class GeminiContentLLM:
                 return parsed, usage
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                body["generationConfig"]["maxOutputTokens"] = min(8192, 4096 * (2 ** (attempt - 1)))
+                body["generationConfig"]["maxOutputTokens"] = min(3072, 2048 + 512 * attempt)
                 logger.info(
                     "gemini content retry %s: %s (%s)",
                     attempt,

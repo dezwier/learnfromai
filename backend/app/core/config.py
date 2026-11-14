@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     job_worker_concurrency: int = 2
     # Long enough for Gemini timeouts + consolidate/merge; progress also renews the lease.
     job_lease_seconds: int = 600
-    job_max_attempts: int = 5
+    job_max_attempts: int = 3
     job_idle_seconds: float = 1.0
     llm_provider: str = "gemini"
     access_token_expire_minutes: int = 60 * 24 * 7
