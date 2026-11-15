@@ -17,7 +17,7 @@ from app.features.platform.gemini_usage import reserve_usd_for_call, usage_from_
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NEIGHBORHOOD = "neighborhood_v4"
+PROMPT_NEIGHBORHOOD = "neighborhood_v5"
 PROMPT_SAMENESS = "sameness_v3"
 
 BUCKETS = ("parents", "siblings", "children", "acquaintances")
@@ -72,10 +72,11 @@ class FakeNeighborhoodLLM:
     def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
         seed = topic.strip() or "Dinosaurs"
         key = canonical_key_for(seed)
+        exclude = _exclude_keys(counts)
         sizes = _distribute(int(counts.get("total") or 16), int(counts.get("min_per_bucket") or 2))
         prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
         if prefer:
-            # Repair: bias toward underfilled buckets.
+            # Fill: bias toward underfilled buckets.
             sizes = {bucket: 0 for bucket in BUCKETS}
             remaining = int(counts.get("total") or 0)
             order = [bucket for bucket in prefer if bucket in sizes] + list(BUCKETS)
@@ -117,7 +118,10 @@ class FakeNeighborhoodLLM:
             }
             payload = {
                 "focus": _topic("Dinosaurs", "Extinct Mesozoic reptiles known from fossils worldwide."),
-                **{bucket: pools[bucket][: sizes[bucket]] for bucket in BUCKETS},
+                **{
+                    bucket: _without_excluded(pools[bucket], exclude)[: sizes[bucket]]
+                    for bucket in BUCKETS
+                },
             }
         else:
             title = seed[:1].upper() + seed[1:] if seed else "Topic"
@@ -140,7 +144,9 @@ class FakeNeighborhoodLLM:
                     for index in range(1, sizes["acquaintances"] + 1)
                 ],
             }
-        return payload, _usage("fake")
+            for bucket in BUCKETS:
+                payload[bucket] = _without_excluded(payload[bucket], exclude)[: sizes[bucket]]
+        return _normalize_neighborhood(payload, counts), _usage("fake")
 
     def match_topics(self, candidates: list[dict]) -> tuple[dict, dict]:
         from app.features.knowledge_graph.identity import same_topic
@@ -179,10 +185,22 @@ class GeminiNeighborhoodLLM:
         total = int(counts.get("total") or 16)
         min_per = int(counts.get("min_per_bucket") or 2)
         prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
+        exclude_titles = [
+            str(title).strip()
+            for title in (counts.get("exclude_titles") or [])
+            if str(title).strip()
+        ]
         prefer_line = ""
         if prefer:
             prefer_line = (
                 f" Prefer putting new topics into these underfilled roles when they fit: {', '.join(map(str, prefer))}."
+            )
+        exclude_line = ""
+        if exclude_titles:
+            exclude_line = (
+                " Do not repeat any of these existing neighbor titles (or near-variants of them): "
+                + ", ".join(exclude_titles)
+                + "."
             )
         prompt = (
             "Build a learning neighborhood for one topic. Return JSON only with keys "
@@ -194,7 +212,7 @@ class GeminiNeighborhoodLLM:
             "when the total allows; otherwise at least one in each role you can justify. "
             "You choose how many go in each bucket — a bit of everything, weighted toward what fits the topic "
             "(e.g. more children for a broad subject, more acquaintances for a cross-cutting one)."
-            f"{prefer_line} "
+            f"{prefer_line}{exclude_line} "
             "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
             "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
             "one for Ornithischia/Ornithischians, one for Theropoda/Theropods (and other -oda/-ods pairs), "
@@ -209,7 +227,14 @@ class GeminiNeighborhoodLLM:
             "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
             "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
             "No duplicates across buckets. Seed topic: "
-            + json.dumps({"topic": topic, "total": total, "min_per_bucket": min_per})
+            + json.dumps(
+                {
+                    "topic": topic,
+                    "total": total,
+                    "min_per_bucket": min_per,
+                    "exclude_titles": exclude_titles,
+                }
+            )
         )
         parsed, usage = self._json(prompt, PROMPT_NEIGHBORHOOD)
         return _normalize_neighborhood(parsed, counts), usage
@@ -314,6 +339,19 @@ def get_neighborhood_llm() -> NeighborhoodLLM:
     return GeminiNeighborhoodLLM()
 
 
+def _exclude_keys(counts: dict) -> set[str]:
+    raw = counts.get("exclude_titles") if isinstance(counts, dict) else None
+    if not isinstance(raw, list):
+        return set()
+    return {canonical_key_for(str(title)) for title in raw if str(title).strip()}
+
+
+def _without_excluded(rows: list[dict], exclude: set[str]) -> list[dict]:
+    if not exclude:
+        return rows
+    return [row for row in rows if canonical_key_for(str(row.get("name") or "")) not in exclude]
+
+
 def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
     focus = raw.get("focus") if isinstance(raw.get("focus"), dict) else {}
     result = {
@@ -322,6 +360,7 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
             "description": str(focus.get("description") or "").strip() or None,
         }
     }
+    exclude = _exclude_keys(counts)
     cleaned_buckets: dict[str, list[dict]] = {}
     for bucket in BUCKETS:
         rows = raw.get(bucket) if isinstance(raw.get(bucket), list) else []
@@ -330,13 +369,16 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
             if not isinstance(row, dict):
                 continue
             name = str(row.get("name") or "").strip()
-            if not name:
+            if not name or canonical_key_for(name) in exclude:
                 continue
             cleaned.append({"name": name, "description": str(row.get("description") or "").strip() or None})
         cleaned_buckets[bucket] = cleaned
 
     total = int(counts.get("total") or sum(len(v) for v in cleaned_buckets.values()) or 16)
     min_per = int(counts.get("min_per_bucket") or 0)
+    # When filling a deficit, do not force a per-bucket floor above what need allows.
+    if exclude or total < min_per * len(BUCKETS):
+        min_per = min(min_per, max(0, total // len(BUCKETS)))
     # Keep a floor per bucket, then round-robin the rest up to total.
     kept: dict[str, list[dict]] = {bucket: [] for bucket in BUCKETS}
     for bucket in BUCKETS:

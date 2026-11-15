@@ -44,7 +44,14 @@ def focus_or_enqueue(
     if not expand:
         return _graph_payload(session, user=user, focus=focus, counts=counts), 200
 
-    job = _enqueue_expand(session, user=user, focus=focus, topic=topic, counts=counts)
+    job = _enqueue_expand(
+        session,
+        user=user,
+        focus=focus,
+        topic=topic,
+        counts=counts,
+        from_existing_focus=node_id is not None,
+    )
     return {
         "status": "queued",
         "job_id": str(job.id),
@@ -94,6 +101,7 @@ def _enqueue_expand(
     focus,
     topic: str | None,
     counts: dict[str, int],
+    from_existing_focus: bool = False,
 ) -> GenerationJob:
     # One shared expand per focus+total budget across all users (shared graph).
     idempotency = f"expand_neighborhood:{focus.id}:total-{counts['total']}"
@@ -110,6 +118,8 @@ def _enqueue_expand(
             "total": counts["total"],
             "min_per_bucket": counts.get("min_per_bucket", 2),
             "extended": counts.get("extended", 12),
+            # Known tile expand skips focus retrieve/sameness; new topic does not.
+            "from_existing_focus": from_existing_focus,
         },
     )
     ensure_watcher(

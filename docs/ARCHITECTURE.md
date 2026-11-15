@@ -17,6 +17,35 @@ flowchart LR
 
 The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction.
 
+## Expand orchestrator
+
+One `expand_neighborhood` job. Shared boxes: **retrieve** (deterministic), **Sameness LLM** (`sameness_v3`), **Neighborhood LLM** (`neighborhood_v5`), **Under budget**, **Write**, **Done**.
+
+```mermaid
+flowchart TD
+  existing[Existing focus]
+  under[Under budget]
+  retrieve[retrieve]
+  sameness[Sameness LLM]
+  neighborhood[Neighborhood LLM]
+  write[Write]
+  done[Done]
+
+  existing -->|yes| under
+  existing -->|no| retrieve
+  retrieve -->|ambiguous| sameness
+  retrieve -->|clear reuse| under
+  retrieve -->|clear new| neighborhood
+  retrieve -->|clear neighbor| write
+  sameness -->|reuse| under
+  sameness -->|new| neighborhood
+  sameness -->|neighbor| write
+  under -->|need more| neighborhood
+  under -->|complete| done
+  neighborhood -->|each result| retrieve
+  write --> done
+```
+
 ## Modules
 
 - `accounts` — Firebase exchange and users

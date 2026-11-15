@@ -300,8 +300,10 @@ def test_expand_batches_sameness_into_one_match_topics_call(session, user):
         name = "fake"
         calls = 0
         last_candidates = None
+        last_counts = None
 
         def generate_neighborhood(self, topic, counts):
+            BatchSpy.last_counts = counts
             return {
                 "focus": {"name": "Dinosaurs", "description": "Extinct reptiles."},
                 "parents": [
@@ -357,10 +359,10 @@ def test_expand_batches_sameness_into_one_match_topics_call(session, user):
         payload={
             "focus_id": str(focus.id),
             "topic": "dinosaurs",
-            "parents": 2,
-            "siblings": 0,
-            "children": 1,
-            "acquaintances": 1,
+            "from_existing_focus": True,
+            "total": 4,
+            "min_per_bucket": 1,
+            "extended": 12,
         },
     )
     session.add(job)
@@ -379,6 +381,9 @@ def test_expand_batches_sameness_into_one_match_topics_call(session, user):
     assert BatchSpy.calls == 1
     assert BatchSpy.last_candidates is not None
     assert len(BatchSpy.last_candidates) >= 1
+    assert BatchSpy.last_counts is not None
+    assert BatchSpy.last_counts.get("total") == 4
+    assert BatchSpy.last_counts.get("exclude_titles") == []
     for item in BatchSpy.last_candidates:
         assert "name" in item
         assert "description" in item
@@ -386,6 +391,159 @@ def test_expand_batches_sameness_into_one_match_topics_call(session, user):
         assert len(item["existing"]) <= 16
         for row in item["existing"]:
             assert set(row) >= {"id", "name", "description"}
+
+
+def test_existing_focus_skips_focus_sameness_and_fills_deficit(session, user):
+    """Scenario 3: known tile → under-budget → neighborhood with need/excludes; no focus sameness."""
+    from app.features.knowledge_graph.neighborhood import expand_neighborhood
+    from app.features.platform.models import GenerationJob
+
+    class Spy:
+        name = "fake"
+        match_calls = 0
+        generate_counts = None
+
+        def generate_neighborhood(self, topic, counts):
+            Spy.generate_counts = counts
+            need = int(counts.get("total") or 0)
+            return {
+                "focus": {"name": "Dinosaurs", "description": "Extinct reptiles."},
+                "parents": [{"name": "Reptiles", "description": "Scaled vertebrates."}][:need],
+                "siblings": [],
+                "children": [{"name": "Theropods", "description": "Bipedal dinosaurs."}]
+                if need > 1
+                else [],
+                "acquaintances": [],
+            }, {"model": "fake", "input_tokens": 1, "output_tokens": 1, "estimated_cost_usd": 0}
+
+        def match_topics(self, candidates):
+            Spy.match_calls += 1
+            return {"matches": {str(item.get("key")): None for item in candidates}}, {
+                "model": "fake",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "estimated_cost_usd": 0,
+            }
+
+    focus = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles.")
+    parent = KnowledgeNode(name="Animals", name_key="animals", description="Living organisms.")
+    session.add_all([focus, parent])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=focus.id, relation="parent", to_id=parent.id),
+            KnowledgeEdge(from_id=parent.id, relation="child", to_id=focus.id),
+        ]
+    )
+    session.commit()
+
+    job = GenerationJob(
+        type="expand_neighborhood",
+        state="running",
+        user_id=user.id,
+        payload={
+            "focus_id": str(focus.id),
+            "topic": "Dinosaurs",
+            "from_existing_focus": True,
+            "total": 3,
+            "min_per_bucket": 1,
+            "extended": 12,
+        },
+    )
+    session.add(job)
+    session.commit()
+
+    import app.features.knowledge_graph.neighborhood as neighborhood_mod
+
+    original = neighborhood_mod.get_neighborhood_llm
+    neighborhood_mod.get_neighborhood_llm = lambda: Spy()
+    try:
+        Spy.match_calls = 0
+        result = expand_neighborhood(session, job)
+    finally:
+        neighborhood_mod.get_neighborhood_llm = original
+
+    assert result["skipped"] is False
+    assert Spy.generate_counts is not None
+    assert Spy.generate_counts["total"] == 2
+    assert "Animals" in Spy.generate_counts.get("exclude_titles", [])
+    # No ambiguous neighbor titles → no sameness call; focus path skipped.
+    assert Spy.match_calls == 0
+
+
+def test_new_topic_reuse_complete_skips_neighborhood(session, user):
+    """Scenario 4: new request → retrieve/sameness → exists → budget met → Done."""
+    from app.features.knowledge_graph.neighborhood import expand_neighborhood
+    from app.features.platform.models import GenerationJob
+
+    class Spy:
+        name = "fake"
+        generate_calls = 0
+        match_calls = 0
+
+        def generate_neighborhood(self, topic, counts):
+            Spy.generate_calls += 1
+            return {"focus": {"name": topic}, "parents": [], "siblings": [], "children": [], "acquaintances": []}, {
+                "model": "fake",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "estimated_cost_usd": 0,
+            }
+
+        def match_topics(self, candidates):
+            Spy.match_calls += 1
+            return {"matches": {str(item.get("key")): None for item in candidates}}, {
+                "model": "fake",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "estimated_cost_usd": 0,
+            }
+
+    keeper = KnowledgeNode(name="Dinosaurs", name_key="dinosaurs", description="Extinct reptiles.")
+    provisional = KnowledgeNode(name="Dinosauria", name_key="dinosauria", description=None)
+    filler = KnowledgeNode(name="Reptiles", name_key="reptiles", description="Scaled vertebrates.")
+    session.add_all([keeper, provisional, filler])
+    session.commit()
+    # Keeper already meets a tiny budget.
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=keeper.id, relation="parent", to_id=filler.id),
+            KnowledgeEdge(from_id=filler.id, relation="child", to_id=keeper.id),
+        ]
+    )
+    session.commit()
+
+    job = GenerationJob(
+        type="expand_neighborhood",
+        state="running",
+        user_id=user.id,
+        payload={
+            "focus_id": str(provisional.id),
+            "topic": "Dinosauria",
+            "from_existing_focus": False,
+            "total": 1,
+            "min_per_bucket": 1,
+            "extended": 12,
+        },
+    )
+    session.add(job)
+    session.commit()
+
+    import app.features.knowledge_graph.neighborhood as neighborhood_mod
+
+    original = neighborhood_mod.get_neighborhood_llm
+    neighborhood_mod.get_neighborhood_llm = lambda: Spy()
+    try:
+        Spy.generate_calls = 0
+        Spy.match_calls = 0
+        result = expand_neighborhood(session, job)
+    finally:
+        neighborhood_mod.get_neighborhood_llm = original
+
+    assert result["skipped"] is True
+    assert result["focus_id"] == str(keeper.id)
+    assert Spy.generate_calls == 0
+    assert session.get(KnowledgeNode, provisional.id) is None
 
 
 def test_near_duplicate_titles_map_together(session, user):
