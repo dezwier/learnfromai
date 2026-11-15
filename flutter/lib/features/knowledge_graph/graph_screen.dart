@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/widgets/pulse_placeholder.dart';
 import '../../core/widgets/study_card.dart';
-import '../profile/overlay_bottom_chrome.dart';
+import '../profile/overlay_panel_chrome.dart';
 import '../profile/profile_hud.dart';
 import '../profile/profile_screen.dart';
 import 'graph_controller.dart';
@@ -1269,119 +1269,106 @@ class _TopicDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final desc = (node.description ?? '').trim();
-    final bottomClearance = OverlayBottomChrome.height(context) + 24;
+    final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: false);
 
-    return Material(
-      color: scheme.surface,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          SafeArea(
-            bottom: false,
-            child: ListView(
-              padding: studyPagePadding.copyWith(bottom: bottomClearance),
+    return OverlayPanel(
+      onDismiss: onClose,
+      child: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: studyPagePadding.copyWith(bottom: bottomClearance),
+          children: [
+            Text(
+              node.title,
+              style: TextStyle(
+                fontFamily: 'tt_ramilas',
+                fontWeight: FontWeight.w700,
+                fontSize: 28,
+                height: 1.15,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (desc.isNotEmpty)
+              Text(
+                desc,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.78),
+                      height: 1.4,
+                    ),
+              )
+            else
+              Text(
+                'No description yet.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.45),
+                      fontStyle: FontStyle.italic,
+                    ),
+              ),
+            const SizedBox(height: 20),
+            Row(
               children: [
-                Text(
-                  node.title,
-                  style: TextStyle(
-                    fontFamily: 'tt_ramilas',
-                    fontWeight: FontWeight.w700,
-                    fontSize: 28,
-                    height: 1.15,
-                    color: scheme.onSurface,
+                if (canRequestNeighbors) ...[
+                  _TopicIconButton(
+                    tooltip: 'Request neighbors',
+                    icon: Icons.auto_awesome,
+                    filled: true,
+                    onPressed: onRequestNeighbors,
                   ),
-                ),
-                const SizedBox(height: 12),
-                if (desc.isNotEmpty)
-                  Text(
-                    desc,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.78),
-                          height: 1.4,
-                        ),
-                  )
-                else
-                  Text(
-                    'No description yet.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.45),
-                          fontStyle: FontStyle.italic,
-                        ),
+                  const SizedBox(width: 8),
+                ] else if (canViewInGraph) ...[
+                  _TopicIconButton(
+                    tooltip: 'View in graph',
+                    icon: Icons.arrow_forward,
+                    filled: true,
+                    onPressed: onViewInGraph,
                   ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    if (canRequestNeighbors) ...[
-                      _TopicIconButton(
-                        tooltip: 'Request neighbors',
-                        icon: Icons.auto_awesome,
-                        filled: true,
-                        onPressed: onRequestNeighbors,
-                      ),
-                      const SizedBox(width: 8),
-                    ] else if (canViewInGraph) ...[
-                      _TopicIconButton(
-                        tooltip: 'View in graph',
-                        icon: Icons.arrow_forward,
-                        filled: true,
-                        onPressed: onViewInGraph,
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    _TopicIconButton(
-                      tooltip: 'Learn',
-                      icon: Icons.menu_book_outlined,
-                      filled: !canRequestNeighbors && !canViewInGraph,
-                      onPressed: onLearn,
-                    ),
-                    const SizedBox(width: 8),
-                    _TopicIconButton(
-                      tooltip: 'Edit',
-                      icon: Icons.edit_outlined,
-                      onPressed: onEdit,
-                    ),
-                    const SizedBox(width: 8),
-                    _TopicIconButton(
-                      tooltip: 'Delete',
-                      icon: Icons.delete_outline,
-                      foreground: scheme.error,
-                      onPressed: onDelete,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                if (busy) ...[
-                  _TopicProgressCard(
-                    message: progressMessage ?? 'Loading related topics…',
-                  ),
-                  if (showRelations || relationsPending) const SizedBox(height: 12),
+                  const SizedBox(width: 8),
                 ],
-                if (relationsPending)
-                  const SizedBox(
-                    height: 168,
-                    child: PulsePlaceholder(
-                      borderRadius: BorderRadius.all(Radius.circular(16)),
-                    ),
-                  )
-                else if (showRelations && layout != null)
-                  _RelationsCard(
-                    node: node,
-                    layout: layout!,
-                    focusId: focusId,
-                    onOpen: onOpenRelated,
-                  ),
+                _TopicIconButton(
+                  tooltip: 'Learn',
+                  icon: Icons.menu_book_outlined,
+                  filled: !canRequestNeighbors && !canViewInGraph,
+                  onPressed: onLearn,
+                ),
+                const SizedBox(width: 8),
+                _TopicIconButton(
+                  tooltip: 'Edit',
+                  icon: Icons.edit_outlined,
+                  onPressed: onEdit,
+                ),
+                const SizedBox(width: 8),
+                _TopicIconButton(
+                  tooltip: 'Delete',
+                  icon: Icons.delete_outline,
+                  foreground: scheme.error,
+                  onPressed: onDelete,
+                ),
               ],
             ),
-          ),
-          OverlayBottomChrome(
-            child: OverlayChromeButton(
-              onPressed: onClose,
-              icon: Icons.close_rounded,
-              label: 'Close',
-              tooltip: 'Close',
-            ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            if (busy) ...[
+              _TopicProgressCard(
+                message: progressMessage ?? 'Loading related topics…',
+              ),
+              if (showRelations || relationsPending) const SizedBox(height: 12),
+            ],
+            if (relationsPending)
+              const SizedBox(
+                height: 168,
+                child: PulsePlaceholder(
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
+                ),
+              )
+            else if (showRelations && layout != null)
+              _RelationsCard(
+                node: node,
+                layout: layout!,
+                focusId: focusId,
+                onOpen: onOpenRelated,
+              ),
+          ],
+        ),
       ),
     );
   }

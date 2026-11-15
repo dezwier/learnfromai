@@ -4,19 +4,28 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/widgets/pulse_placeholder.dart';
+import '../profile/overlay_panel_chrome.dart';
 import 'graph_controller.dart';
+
+const _lessonKinds = ['learn', 'example', 'check'];
+const _lessonLabels = ['Learn', 'Example', 'Check'];
 
 Future<void> showLearnSheet(
   BuildContext context, {
   required String nodeId,
   required String title,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    useSafeArea: true,
-    builder: (context) => LearnSheet(nodeId: nodeId, title: title),
+  return Navigator.of(context).push<void>(
+    PageRouteBuilder<void>(
+      opaque: false,
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return LearnSheet(nodeId: nodeId, title: title);
+      },
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(opacity: curved, child: child);
+      },
+    ),
   );
 }
 
@@ -38,6 +47,7 @@ class _LearnSheetState extends State<LearnSheet> {
   var _listening = false;
   var _selectedChoice = -1;
   var _revealed = false;
+  var _step = 0;
   GraphController? _graph;
 
   @override
@@ -138,6 +148,40 @@ class _LearnSheetState extends State<LearnSheet> {
     });
   }
 
+  void _dismiss() {
+    Navigator.of(context).pop();
+  }
+
+  void _goBack() {
+    if (_step <= 0) return;
+    setState(() {
+      _step -= 1;
+      if (_step < _lessonKinds.length - 1) {
+        _selectedChoice = -1;
+        _revealed = false;
+      }
+    });
+  }
+
+  void _goContinue() {
+    if (_step >= _lessonKinds.length - 1) {
+      _dismiss();
+      return;
+    }
+    setState(() => _step += 1);
+  }
+
+  bool _stepReady({
+    required bool generating,
+    required String kind,
+  }) {
+    if (_error != null) return true;
+    if (_loading) return false;
+    if (_content?.bit(kind) != null) return true;
+    if (generating) return false;
+    return true;
+  }
+
   @override
   void dispose() {
     _stopListening();
@@ -149,94 +193,133 @@ class _LearnSheetState extends State<LearnSheet> {
     final graph = context.watch<GraphController>();
     final scheme = Theme.of(context).colorScheme;
     final job = graph.jobForNode(widget.nodeId);
-    final generating = job != null || (_content?.incomplete == true && _content?.bits.isEmpty == true);
-    final height = MediaQuery.sizeOf(context).height * 0.88;
+    final generating =
+        job != null || (_content?.incomplete == true && _content?.bits.isEmpty == true);
+    final kind = _lessonKinds[_step];
+    final label = _lessonLabels[_step];
+    final ready = _stepReady(generating: generating, kind: kind);
+    final onCheck = kind == 'check';
+    final continueEnabled = ready && (!onCheck || _revealed || _content?.bit('check') == null);
+    final continueLabel = _step >= _lessonKinds.length - 1 ? 'Done' : 'Continue';
+    final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: true);
 
-    return SizedBox(
-      height: height,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Learn',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.55),
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.4,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.title,
-                  style: const TextStyle(
-                    fontFamily: 'tt_ramilas',
-                    fontWeight: FontWeight.w700,
-                    fontSize: 26,
-                    height: 1.15,
-                  ),
-                ),
-                if (job?.progressMessage != null) ...[
-                  const SizedBox(height: 8),
+    return OverlayPanel(
+      onDismiss: _dismiss,
+      bottom: OverlayLessonFooter(
+        onBack: _step > 0 ? _goBack : null,
+        onContinue: _goContinue,
+        continueLabel: continueLabel,
+        continueEnabled: continueEnabled,
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    job!.progressMessage!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.6),
+                    label,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.55),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.4,
                         ),
                   ),
-                ],
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-              children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(color: scheme.error, height: 1.35),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.title,
+                    style: const TextStyle(
+                      fontFamily: 'tt_ramilas',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                      height: 1.15,
                     ),
                   ),
-                _BitSection(
-                  label: 'Learn',
-                  loading: _loading || (generating && _content?.bit('learn') == null),
-                  child: _MarkdownBit(bit: _content?.bit('learn')),
-                ),
-                const SizedBox(height: 14),
-                _BitSection(
-                  label: 'Example',
-                  loading: _loading || (generating && _content?.bit('example') == null),
-                  child: _MarkdownBit(bit: _content?.bit('example')),
-                ),
-                const SizedBox(height: 14),
-                _BitSection(
-                  label: 'Check',
-                  loading: _loading || (generating && _content?.bit('check') == null),
-                  child: _CheckBit(
-                    bit: _content?.bit('check'),
-                    selected: _selectedChoice,
-                    revealed: _revealed,
-                    onSelect: (index) {
-                      if (_revealed) return;
-                      setState(() {
-                        _selectedChoice = index;
-                        _revealed = true;
-                      });
-                    },
+                  if (job?.progressMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      job!.progressMessage!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.6),
+                          ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _StepDots(step: _step, total: _lessonKinds.length),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, bottomClearance),
+                children: [
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: scheme.error, height: 1.35),
+                      ),
+                    ),
+                  _BitSection(
+                    label: label,
+                    loading: !ready && _error == null,
+                    child: onCheck
+                        ? _CheckBit(
+                            bit: _content?.bit('check'),
+                            selected: _selectedChoice,
+                            revealed: _revealed,
+                            onSelect: (index) {
+                              if (_revealed) return;
+                              setState(() {
+                                _selectedChoice = index;
+                                _revealed = true;
+                              });
+                            },
+                          )
+                        : _MarkdownBit(bit: _content?.bit(kind)),
                   ),
-                ),
-              ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StepDots extends StatelessWidget {
+  const _StepDots({required this.step, required this.total});
+
+  final int step;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        for (var i = 0; i < total; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            width: i == step ? 22 : 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: i == step
+                  ? scheme.primary
+                  : scheme.onSurface.withValues(alpha: i < step ? 0.35 : 0.16),
+              borderRadius: BorderRadius.circular(99),
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 }

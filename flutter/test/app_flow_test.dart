@@ -390,7 +390,7 @@ void main() {
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    // Tap focus tile → topic overlay, then Learn.
+    // Tap focus tile → topic overlay, then Learn lesson cycle.
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Learn'), findsWidgets);
@@ -399,12 +399,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('Learn'), findsWidgets);
     expect(find.byType(PulsePlaceholder), findsWidgets);
+    expect(find.byTooltip('Close'), findsWidgets);
 
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
+    expect(find.textContaining('Which statement best fits'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Example'), findsWidgets);
+    expect(find.textContaining('Dinosaurs in practice'), findsWidgets);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check'), findsWidgets);
     expect(find.textContaining('Which statement best fits'), findsWidgets);
+    expect(find.widgetWithText(FilledButton, 'Done'), findsOneWidget);
   });
 
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
