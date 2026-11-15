@@ -115,6 +115,29 @@ void main() {
     expect(find.text('Neighborhood size'), findsOneWidget);
   });
 
+  testWidgets('closing profile then opening focus shows topic not profile', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Ada'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsNothing);
+
+    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Learn'), findsOneWidget);
+    expect(find.text('Settings'), findsNothing);
+    expect(find.text('Progress'), findsNothing);
+  });
+
   testWidgets('job queue tracks expands without blocking navigation', (tester) async {
     var polls = 0;
     late final GraphController graph;

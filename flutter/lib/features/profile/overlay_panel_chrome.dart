@@ -111,20 +111,22 @@ class _OverlayPanelState extends State<OverlayPanel>
     _dismissing = true;
     setState(() => _dragging = false);
     _controller.value = _dragPx;
-    final simulation = SpringSimulation(
-      const SpringDescription(mass: 1, stiffness: 140, damping: 20),
-      _dragPx,
+    final remaining = (_width - _dragPx).clamp(0.0, _width);
+    final speed = math.max(velocity.abs(), 1200.0);
+    final ms = (remaining / speed * 1000).clamp(140.0, 280.0).round();
+    // Tween dismiss (not spring) so onDismiss always fires promptly.
+    await _controller.animateTo(
       _width,
-      math.max(velocity, 900) / 1000,
+      duration: Duration(milliseconds: ms),
+      curve: Curves.easeOutCubic,
     );
-    await _controller.animateWith(simulation);
     if (!mounted) return;
     setState(() => _dragPx = _width);
     widget.onDismiss();
   }
 
   void _closePressed() {
-    unawaited(_animateDismiss(velocity: 1400));
+    unawaited(_animateDismiss(velocity: 1600));
   }
 
   @override
@@ -137,6 +139,10 @@ class _OverlayPanelState extends State<OverlayPanel>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // Absorb hits so the graph/HUD under a sliding panel can't be tapped.
+        const Positioned.fill(
+          child: ColoredBox(color: Color(0x00000000)),
+        ),
         if (progress > 0)
           Positioned.fill(
             child: IgnorePointer(

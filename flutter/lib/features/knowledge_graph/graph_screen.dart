@@ -301,6 +301,7 @@ class _GraphScreenState extends State<GraphScreen>
       setState(() {
         _highlighted = node;
         _topicOpen = true;
+        _profileOpen = false;
       });
       return;
     }
@@ -923,6 +924,10 @@ class _GraphScreenState extends State<GraphScreen>
                 onPick: (choice) => _pickSuggestion(graph, choice),
               ),
             ),
+          if (_profileOpen)
+            Positioned.fill(
+              child: ProfileScreen(onClose: _closeProfile),
+            ),
           if (_topicOpen && _highlighted != null)
             Positioned.fill(
               child: _TopicDetailScreen(
@@ -955,10 +960,6 @@ class _GraphScreenState extends State<GraphScreen>
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
               ),
-            ),
-          if (_profileOpen)
-            Positioned.fill(
-              child: ProfileScreen(onClose: _closeProfile),
             ),
         ],
       ),
