@@ -7,8 +7,9 @@ import '../../core/widgets/pulse_placeholder.dart';
 import '../profile/overlay_panel_chrome.dart';
 import 'graph_controller.dart';
 
-const _lessonKinds = ['learn', 'example', 'check'];
-const _lessonLabels = ['Learn', 'Example', 'Check'];
+const _lessonKinds = ['learn', 'example', 'check1', 'check2', 'check3'];
+const _lessonLabels = ['Learn', 'Example', 'Check 1', 'Check 2', 'Check 3'];
+const _checkKinds = {'check1', 'check2', 'check3'};
 
 Future<void> showLearnSheet(
   BuildContext context, {
@@ -156,10 +157,8 @@ class _LearnSheetState extends State<LearnSheet> {
     if (_step <= 0) return;
     setState(() {
       _step -= 1;
-      if (_step < _lessonKinds.length - 1) {
-        _selectedChoice = -1;
-        _revealed = false;
-      }
+      _selectedChoice = -1;
+      _revealed = false;
     });
   }
 
@@ -168,7 +167,11 @@ class _LearnSheetState extends State<LearnSheet> {
       _dismiss();
       return;
     }
-    setState(() => _step += 1);
+    setState(() {
+      _step += 1;
+      _selectedChoice = -1;
+      _revealed = false;
+    });
   }
 
   bool _stepReady({
@@ -198,8 +201,9 @@ class _LearnSheetState extends State<LearnSheet> {
     final kind = _lessonKinds[_step];
     final label = _lessonLabels[_step];
     final ready = _stepReady(generating: generating, kind: kind);
-    final onCheck = kind == 'check';
-    final continueEnabled = ready && (!onCheck || _revealed || _content?.bit('check') == null);
+    final onCheck = _checkKinds.contains(kind);
+    final continueEnabled =
+        ready && (!onCheck || _revealed || _content?.bit(kind) == null);
     final continueLabel = _step >= _lessonKinds.length - 1 ? 'Done' : 'Continue';
     final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: true);
 
@@ -270,7 +274,7 @@ class _LearnSheetState extends State<LearnSheet> {
                     loading: !ready && _error == null,
                     child: onCheck
                         ? _CheckBit(
-                            bit: _content?.bit('check'),
+                            bit: _content?.bit(kind),
                             selected: _selectedChoice,
                             revealed: _revealed,
                             onSelect: (index) {

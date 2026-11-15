@@ -1,4 +1,4 @@
-"""LLM contracts for shared tile content (learn / example / check)."""
+"""LLM contracts for shared tile content (learn / example / checks)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.errors import AppError, generation_unavailable
-from app.features.content.models import CONTENT_KINDS
+from app.features.content.models import CHECK_KINDS, CONTENT_KINDS
 from app.features.platform.llm_usage_pricing import (
     reserve_usd_for_call,
     usage_from_gemini_metadata,
@@ -25,7 +25,7 @@ from app.features.platform.neighborhood_llm import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_CONTENT = "content_bits_v1"
+PROMPT_CONTENT = "content_bits_v2"
 
 
 class ContentLLM(Protocol):
@@ -36,26 +36,61 @@ class ContentLLM(Protocol):
         name: str,
         description: str | None,
         neighbor_titles: list[str],
+        *,
+        kinds: list[str] | None = None,
+        existing_checks: dict[str, dict] | None = None,
     ) -> tuple[dict, dict]: ...
 
 
-def build_content_prompt(name: str, description: str | None, neighbor_titles: list[str]) -> str:
-    return (
-        "Create short learning content for one topic. Return JSON only with keys "
-        "learn, example, check. "
-        "learn and example are objects {title, markdown} with concise Markdown "
-        "(a few short paragraphs max). "
-        "check is {question, choices, answer_index, explanation} where choices is an array "
-        "of exactly 4 short strings, answer_index is 0..3, and explanation is one short sentence. "
-        "Do not invent prerequisites. Keep language clear and standalone.\n"
-        + json.dumps(
+def build_content_prompt(
+    name: str,
+    description: str | None,
+    neighbor_titles: list[str],
+    *,
+    kinds: list[str] | None = None,
+    existing_checks: dict[str, dict] | None = None,
+) -> str:
+    required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
+    if not required:
+        required = list(CONTENT_KINDS)
+    checks_needed = [k for k in required if k in CHECK_KINDS]
+    text_needed = [k for k in required if k in ("learn", "example")]
+    parts = [
+        "Create short learning content for one topic. Return JSON only with these keys: "
+        + ", ".join(required)
+        + ". "
+    ]
+    if text_needed:
+        parts.append(
+            "learn and example are objects {title, markdown} with concise Markdown "
+            "(a few short paragraphs max). "
+        )
+    if checks_needed:
+        parts.append(
+            "Each of "
+            + ", ".join(checks_needed)
+            + " is {question, choices, answer_index, explanation} where choices is an array "
+            "of exactly 4 short strings, answer_index is 0..3, and explanation is one short sentence. "
+            "The three checks must ask different questions (not paraphrases) that probe the same topic. "
+        )
+        if existing_checks:
+            parts.append(
+                "Existing checks to avoid duplicating: "
+                + json.dumps(existing_checks)
+                + ". "
+            )
+    parts.append("Do not invent prerequisites. Keep language clear and standalone.\n")
+    parts.append(
+        json.dumps(
             {
                 "topic": name,
                 "description": description or "",
                 "neighbors": neighbor_titles[:12],
+                "required_keys": required,
             }
         )
     )
+    return "".join(parts)
 
 
 class FakeContentLLM:
@@ -66,40 +101,76 @@ class FakeContentLLM:
         name: str,
         description: str | None,
         neighbor_titles: list[str],
+        *,
+        kinds: list[str] | None = None,
+        existing_checks: dict[str, dict] | None = None,
     ) -> tuple[dict, dict]:
         topic = (name or "Topic").strip() or "Topic"
         desc = (description or "").strip()
         neighbors = ", ".join(neighbor_titles[:4]) if neighbor_titles else "related ideas"
-        payload = {
-            "learn": {
+        required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
+        payload: dict = {}
+        if "learn" in required:
+            payload["learn"] = {
                 "title": f"What is {topic}?",
                 "markdown": (
                     f"**{topic}** is a topic you can learn in short steps. "
                     f"{desc or f'It sits near {neighbors}.'} "
                     "Focus on the core idea before details."
                 ),
-            },
-            "example": {
+            }
+        if "example" in required:
+            payload["example"] = {
                 "title": f"{topic} in practice",
                 "markdown": (
                     f"Imagine explaining **{topic}** to a curious friend in two sentences: "
                     f"start with the plain meaning"
                     f"{f' ({desc})' if desc else ''}, then name one concrete situation where it shows up."
                 ),
-            },
-            "check": {
-                "question": f"Which statement best fits {topic}?",
-                "choices": [
+            }
+        check_templates = {
+            "check1": (
+                f"Which statement best fits {topic}?",
+                [
                     f"{topic} is a learning topic with a clear core idea.",
                     f"{topic} is unrelated to anything nearby.",
                     f"{topic} has no practical uses.",
                     f"{topic} only exists as a random label.",
                 ],
-                "answer_index": 0,
-                "explanation": f"The first choice matches how we introduce {topic}.",
-            },
+                f"The first choice matches how we introduce {topic}.",
+            ),
+            "check2": (
+                f"What is a useful next step when learning {topic}?",
+                [
+                    f"Start from the core idea of {topic}, then add one concrete example.",
+                    f"Ignore {topic} and memorize unrelated trivia.",
+                    f"Assume {topic} has no connection to nearby ideas.",
+                    f"Skip explanations and only collect buzzwords about {topic}.",
+                ],
+                f"Building from the core idea with an example is the useful next step for {topic}.",
+            ),
+            "check3": (
+                f"Which claim about {topic} is weakest?",
+                [
+                    f"{topic} can be explained in plain language without jargon.",
+                    f"{topic} is only a random string of letters with no meaning.",
+                    f"{topic} often sits near related ideas in a knowledge map.",
+                    f"{topic} can be checked with a short multiple-choice question.",
+                ],
+                f"Calling {topic} meaningless is the weakest claim.",
+            ),
         }
-        return normalize_bits(payload), _usage("fake", 20, 40)
+        for kind in CHECK_KINDS:
+            if kind not in required:
+                continue
+            question, choices, explanation = check_templates[kind]
+            payload[kind] = {
+                "question": question,
+                "choices": choices,
+                "answer_index": 0 if kind != "check3" else 1,
+                "explanation": explanation,
+            }
+        return normalize_bits(payload, required_kinds=required), _usage("fake", 20, 80)
 
 
 class GeminiContentLLM:
@@ -119,9 +190,21 @@ class GeminiContentLLM:
         name: str,
         description: str | None,
         neighbor_titles: list[str],
+        *,
+        kinds: list[str] | None = None,
+        existing_checks: dict[str, dict] | None = None,
     ) -> tuple[dict, dict]:
-        parsed, usage = self._json(build_content_prompt(name, description, neighbor_titles))
-        return normalize_bits(parsed), usage
+        required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
+        parsed, usage = self._json(
+            build_content_prompt(
+                name,
+                description,
+                neighbor_titles,
+                kinds=required,
+                existing_checks=existing_checks,
+            )
+        )
+        return normalize_bits(parsed, required_kinds=required), usage
 
     def _bill(self, meta: dict | None) -> dict:
         usage = usage_from_gemini_metadata(self.model, meta)
@@ -134,7 +217,7 @@ class GeminiContentLLM:
         if not self.api_key:
             raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured", terminal=True)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        max_out = 2048
+        max_out = 3072
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -178,7 +261,7 @@ class GeminiContentLLM:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                max_out = min(3072, 2048 + 512 * attempt)
+                max_out = min(4096, 3072 + 512 * attempt)
                 body["generationConfig"]["maxOutputTokens"] = max_out
                 logger.info(
                     "gemini content retry %s: %s (%s)",
@@ -206,9 +289,21 @@ class OpenAIContentLLM:
         name: str,
         description: str | None,
         neighbor_titles: list[str],
+        *,
+        kinds: list[str] | None = None,
+        existing_checks: dict[str, dict] | None = None,
     ) -> tuple[dict, dict]:
-        parsed, usage = self._json(build_content_prompt(name, description, neighbor_titles))
-        return normalize_bits(parsed), usage
+        required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
+        parsed, usage = self._json(
+            build_content_prompt(
+                name,
+                description,
+                neighbor_titles,
+                kinds=required,
+                existing_checks=existing_checks,
+            )
+        )
+        return normalize_bits(parsed, required_kinds=required), usage
 
     def _bill(self, usage_payload: dict | None) -> dict:
         usage = usage_from_openai_usage(self.model, usage_payload)
@@ -221,7 +316,7 @@ class OpenAIContentLLM:
         if not self.api_key:
             raise generation_unavailable("OPENAI_API_KEY is not configured", terminal=True)
         url = "https://api.openai.com/v1/chat/completions"
-        max_out = 2048
+        max_out = 3072
         body = {
             "model": self.model,
             "temperature": self.temperature,
@@ -273,7 +368,7 @@ class OpenAIContentLLM:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                max_out = min(3072, 2048 + 512 * attempt)
+                max_out = min(4096, 3072 + 512 * attempt)
                 body["max_tokens"] = max_out
                 logger.info(
                     "openai content retry %s: %s (%s)",
@@ -293,41 +388,54 @@ def get_content_llm(provider: str | None = None) -> ContentLLM:
     return GeminiContentLLM()
 
 
-def normalize_bits(raw: dict) -> dict:
-    """Validate and normalize learn / example / check bodies."""
+def _normalize_check(raw: object, *, kind: str) -> dict:
+    check = raw if isinstance(raw, dict) else {}
+    question = str(check.get("question") or "").strip()
+    choices_raw = check.get("choices") if isinstance(check.get("choices"), list) else []
+    choices = [str(item).strip() for item in choices_raw if str(item).strip()]
+    if len(choices) < 4:
+        raise ValueError(f"{kind} must include 4 choices")
+    choices = choices[:4]
+    try:
+        answer_index = int(check.get("answer_index"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{kind} answer_index must be an integer") from exc
+    if answer_index < 0 or answer_index > 3:
+        raise ValueError(f"{kind} answer_index must be 0..3")
+    explanation = str(check.get("explanation") or "").strip() or None
+    if not question:
+        raise ValueError(f"{kind} is missing question")
+    return {
+        "question": question,
+        "choices": choices,
+        "answer_index": answer_index,
+        "explanation": explanation,
+    }
+
+
+def normalize_bits(raw: dict, *, required_kinds: list[str] | None = None) -> dict:
+    """Validate and normalize requested learn / example / check bodies."""
     if not isinstance(raw, dict):
         raise ValueError("Content JSON root must be an object")
+    required = [k for k in (required_kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
     out: dict[str, dict] = {}
     for kind in ("learn", "example"):
+        if kind not in required:
+            continue
         row = raw.get(kind) if isinstance(raw.get(kind), dict) else {}
         title = str(row.get("title") or "").strip() or None
         markdown = str(row.get("markdown") or row.get("text") or "").strip()
         if not markdown:
             raise ValueError(f"Content bit {kind!r} is missing markdown")
         out[kind] = {"title": title, "markdown": markdown}
-    check = raw.get("check") if isinstance(raw.get("check"), dict) else {}
-    question = str(check.get("question") or "").strip()
-    choices_raw = check.get("choices") if isinstance(check.get("choices"), list) else []
-    choices = [str(item).strip() for item in choices_raw if str(item).strip()]
-    if len(choices) < 4:
-        raise ValueError("Check must include 4 choices")
-    choices = choices[:4]
-    try:
-        answer_index = int(check.get("answer_index"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Check answer_index must be an integer") from exc
-    if answer_index < 0 or answer_index > 3:
-        raise ValueError("Check answer_index must be 0..3")
-    explanation = str(check.get("explanation") or "").strip() or None
-    if not question:
-        raise ValueError("Check is missing question")
-    out["check"] = {
-        "question": question,
-        "choices": choices,
-        "answer_index": answer_index,
-        "explanation": explanation,
-    }
-    for kind in CONTENT_KINDS:
+    # Accept legacy "check" as check1 when generating check1.
+    if "check1" in required and "check1" not in raw and isinstance(raw.get("check"), dict):
+        raw = {**raw, "check1": raw["check"]}
+    for kind in CHECK_KINDS:
+        if kind not in required:
+            continue
+        out[kind] = _normalize_check(raw.get(kind), kind=kind)
+    for kind in required:
         if kind not in out:
             raise ValueError(f"Missing content bit {kind!r}")
     return out

@@ -10,10 +10,15 @@ from app.core.errors import AppError
 from app.features.content.models import (
     CONTENT_KINDS,
     DEFAULT_BAND,
+    LEGACY_CHECK_KIND,
     RECIPE_VERSION,
     KnowledgeBit,
 )
-from app.features.content.service import is_content_complete
+from app.features.content.service import (
+    existing_check_bodies,
+    is_content_complete,
+    missing_content_kinds,
+)
 from app.features.knowledge_graph.neighborhood import set_progress
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.platform.content_llm import get_content_llm
@@ -47,7 +52,8 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
 
-    if is_content_complete(session, node.id, band=band, recipe_version=recipe_version):
+    missing = missing_content_kinds(session, node.id, band=band, recipe_version=recipe_version)
+    if not missing:
         set_progress(session, job, stage="done", message="Content already ready", fraction=1.0)
         session.commit()
         return {"node_id": str(node.id), "skipped": True, "bit_ids": []}
@@ -60,9 +66,24 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     llm = get_content_llm(preferred_llm_provider(user))
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="content")
-    set_progress(session, job, stage="generate", message="Writing learn · example · check…", fraction=0.35)
+    only_checks = all(kind.startswith("check") for kind in missing)
+    message = (
+        "Writing extra checks…"
+        if only_checks
+        else "Writing learn · example · checks…"
+    )
+    set_progress(session, job, stage="generate", message=message, fraction=0.35)
     assert_user_quota(session, user_id)
-    bits, usage = llm.generate_bits(node.name, node.description, neighbor_titles)
+    existing_checks = existing_check_bodies(
+        session, node.id, band=band, recipe_version=recipe_version
+    )
+    bits, usage = llm.generate_bits(
+        node.name,
+        node.description,
+        neighbor_titles,
+        kinds=missing,
+        existing_checks=existing_checks or None,
+    )
     renew_lease(session, job)
     maybe_record_usage(session, llm, user_id=user_id, job_id=job.id, task="content", usage=usage)
     session.commit()
@@ -78,7 +99,12 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     )
     set_progress(session, job, stage="done", message="Learning bits ready", fraction=1.0)
     session.commit()
-    return {"node_id": str(node.id), "skipped": False, "bit_ids": bit_ids}
+    return {
+        "node_id": str(node.id),
+        "skipped": False,
+        "bit_ids": bit_ids,
+        "complete": is_content_complete(session, node.id, band=band, recipe_version=recipe_version),
+    }
 
 
 def _neighbor_titles(session: Session, node_id: UUID) -> list[str]:
@@ -107,9 +133,8 @@ def _upsert_bits(
 ) -> list[str]:
     positions = {kind: index for index, kind in enumerate(CONTENT_KINDS)}
     ids: list[str] = []
-    for kind in CONTENT_KINDS:
-        body = bits.get(kind)
-        if not isinstance(body, dict):
+    for kind, body in bits.items():
+        if kind not in CONTENT_KINDS or not isinstance(body, dict):
             continue
         existing = session.exec(
             select(KnowledgeBit).where(
@@ -119,6 +144,18 @@ def _upsert_bits(
                 KnowledgeBit.recipe_version == recipe_version,
             )
         ).first()
+        # Prefer overwriting a legacy "check" row when writing check1.
+        if existing is None and kind == "check1":
+            existing = session.exec(
+                select(KnowledgeBit).where(
+                    KnowledgeBit.node_id == node_id,
+                    KnowledgeBit.kind == LEGACY_CHECK_KIND,
+                    KnowledgeBit.band == band,
+                    KnowledgeBit.recipe_version == recipe_version,
+                )
+            ).first()
+            if existing is not None:
+                existing.kind = "check1"
         if existing is None:
             row = KnowledgeBit(
                 node_id=node_id,

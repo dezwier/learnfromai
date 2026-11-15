@@ -336,7 +336,7 @@ void main() {
           'status': 'queued',
           'job_id': 'job-content',
           'focus_node_id': '2',
-          'progress': {'message': 'Writing learn · example · check…'},
+          'progress': {'message': 'Writing learn · example · checks…'},
         };
       },
       loader: (path) async {
@@ -435,7 +435,7 @@ void main() {
             'status': 'queued',
             'job_id': 'job-content',
             'focus_node_id': '2',
-            'progress': {'message': 'Writing learn · example · check…'},
+            'progress': {'message': 'Writing learn · example · checks…'},
           };
         }
         return {};
@@ -500,8 +500,23 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Check'), findsWidgets);
+    expect(find.text('Check 1'), findsWidgets);
     expect(find.textContaining('Which statement best fits'), findsWidgets);
+    expect(find.widgetWithText(FilledButton, 'Continue'), findsOneWidget);
+
+    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check 2'), findsWidgets);
+    expect(find.textContaining('useful next step'), findsWidgets);
+
+    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check 3'), findsWidgets);
+    expect(find.textContaining('claim about Dinosaurs is weakest'), findsWidgets);
     expect(find.widgetWithText(FilledButton, 'Done'), findsOneWidget);
   });
 
@@ -656,6 +671,25 @@ Map<String, dynamic> _compactIncomplete() {
 }
 
 Map<String, dynamic> _contentReady() {
+  Map<String, dynamic> check(String id, String kind, int position, String question) {
+    return {
+      'id': id,
+      'kind': kind,
+      'position': position,
+      'body': {
+        'question': question,
+        'choices': [
+          'Dinosaurs are a learning topic with a clear core idea.',
+          'Dinosaurs are unrelated to anything nearby.',
+          'Dinosaurs have no practical uses.',
+          'Dinosaurs only exist as a random label.',
+        ],
+        'answer_index': 0,
+        'explanation': 'The first choice matches the introduction.',
+      },
+    };
+  }
+
   return {
     'node_id': '2',
     'incomplete': false,
@@ -674,22 +708,9 @@ Map<String, dynamic> _contentReady() {
         'position': 1,
         'body': {'title': 'Dinosaurs in practice', 'markdown': 'Explain fossils to a friend.'},
       },
-      {
-        'id': 'b3',
-        'kind': 'check',
-        'position': 2,
-        'body': {
-          'question': 'Which statement best fits Dinosaurs?',
-          'choices': [
-            'Dinosaurs are a learning topic with a clear core idea.',
-            'Dinosaurs are unrelated to anything nearby.',
-            'Dinosaurs have no practical uses.',
-            'Dinosaurs only exist as a random label.',
-          ],
-          'answer_index': 0,
-          'explanation': 'The first choice matches the introduction.',
-        },
-      },
+      check('b3', 'check1', 2, 'Which statement best fits Dinosaurs?'),
+      check('b4', 'check2', 3, 'What is a useful next step when learning Dinosaurs?'),
+      check('b5', 'check3', 4, 'Which claim about Dinosaurs is weakest?'),
     ],
   };
 }

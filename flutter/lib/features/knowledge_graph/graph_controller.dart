@@ -126,6 +126,12 @@ class TopicContent {
     for (final bit in bits) {
       if (bit.kind == kind) return bit;
     }
+    // Legacy API rows used kind "check" for the first question.
+    if (kind == 'check1') {
+      for (final bit in bits) {
+        if (bit.kind == 'check') return bit;
+      }
+    }
     return null;
   }
 
@@ -387,7 +393,7 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  /// GET shared learn / example / check bits (never enqueues).
+  /// GET shared learn / example / check1–3 bits (never enqueues).
   Future<TopicContent?> fetchContent(String nodeId) async {
     try {
       final raw = await _get('/knowledge/nodes/$nodeId/content');
