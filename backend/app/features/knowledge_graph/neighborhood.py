@@ -873,6 +873,9 @@ def build_subgraph(
                 "title": node.name,
                 "description": node.description,
                 "image_url": node.image_url,
+                "image_thumb_url": (
+                    f"/knowledge/nodes/{node.id}/image/file?variant=thumb" if node.image_url else None
+                ),
                 "depth": depths.get(node_id, 0),
                 "distance": distances.get(node_id, 0 if node_id == focus.id else 2 if kinds.get(node_id) == "extended" else 1),
                 "kind": kinds.get(node_id, "related"),

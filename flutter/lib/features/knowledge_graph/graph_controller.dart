@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -220,6 +221,9 @@ class GraphController extends ChangeNotifier {
   /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
   String? lastCompletedNodeId;
   String? lastCompletedJobType;
+  /// Auth-fetched image bytes keyed by API image path (full or thumb).
+  final Map<String, Uint8List> imageBytesByUrl = {};
+  final Set<String> _imageLoadsInFlight = {};
   int _suggestToken = 0;
   Timer? _jobPoller;
   var _polling = false;
@@ -446,12 +450,19 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  /// Authenticated PNG bytes for a topic image path from the graph payload.
+  /// Authenticated image bytes for a topic image path from the graph payload.
   Future<List<int>?> fetchImageBytes(String imageUrl) async {
     final path = _apiPathFromImageUrl(imageUrl);
     if (path == null) return null;
+    final cached = imageBytesByUrl[path] ?? imageBytesByUrl[imageUrl];
+    if (cached != null) return cached;
     try {
-      return await _getBytes(path);
+      final bytes = await _getBytes(path);
+      final stored = Uint8List.fromList(bytes);
+      imageBytesByUrl[path] = stored;
+      imageBytesByUrl[imageUrl] = stored;
+      notifyListeners();
+      return stored;
     } on ApiException catch (exc) {
       error = exc.message;
       notifyListeners();
@@ -459,7 +470,39 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  void patchNodeImageUrl(String nodeId, String? imageUrl) {
+  Uint8List? cachedImageBytes(String? imageUrl) {
+    if (imageUrl == null || imageUrl.trim().isEmpty) return null;
+    final path = _apiPathFromImageUrl(imageUrl) ?? imageUrl;
+    return imageBytesByUrl[path] ?? imageBytesByUrl[imageUrl];
+  }
+
+  /// Fire-and-forget load for graph thumbs; notifies when bytes arrive.
+  void ensureImageCached(String? imageUrl) {
+    if (imageUrl == null || imageUrl.trim().isEmpty) return;
+    if (cachedImageBytes(imageUrl) != null) return;
+    final path = _apiPathFromImageUrl(imageUrl) ?? imageUrl;
+    if (!_imageLoadsInFlight.add(path)) return;
+    unawaited(() async {
+      try {
+        await fetchImageBytes(imageUrl);
+      } finally {
+        _imageLoadsInFlight.remove(path);
+      }
+    }());
+  }
+
+  void preloadGraphImages() {
+    final nodes = categoryGraph?['nodes'];
+    if (nodes is! List) return;
+    for (final raw in nodes) {
+      if (raw is! Map) continue;
+      final thumb = raw['image_thumb_url']?.toString();
+      final full = raw['image_url']?.toString();
+      ensureImageCached((thumb != null && thumb.isNotEmpty) ? thumb : full);
+    }
+  }
+
+  void patchNodeImageUrl(String nodeId, String? imageUrl, {String? imageThumbUrl}) {
     final graph = categoryGraph;
     if (graph == null) return;
     final nodes = graph['nodes'];
@@ -470,6 +513,10 @@ class GraphController extends ChangeNotifier {
       if (raw is Map && raw['id']?.toString() == nodeId) {
         final copy = Map<String, dynamic>.from(raw);
         copy['image_url'] = imageUrl;
+        copy['image_thumb_url'] = imageThumbUrl ??
+            (imageUrl == null
+                ? null
+                : '/knowledge/nodes/$nodeId/image/file?variant=thumb');
         next.add(copy);
         changed = true;
       } else {
@@ -478,18 +525,30 @@ class GraphController extends ChangeNotifier {
     }
     if (!changed) return;
     categoryGraph = {...graph, 'nodes': next};
+    if (imageUrl != null) {
+      imageBytesByUrl.removeWhere((key, _) => key.contains(nodeId));
+      ensureImageCached(imageThumbUrl ?? '/knowledge/nodes/$nodeId/image/file?variant=thumb');
+      ensureImageCached(imageUrl);
+    }
     notifyListeners();
   }
 
   static String? _apiPathFromImageUrl(String imageUrl) {
     final trimmed = imageUrl.trim();
     if (trimmed.isEmpty) return null;
-    if (trimmed.startsWith('/api/v1/')) return trimmed.substring('/api/v1'.length);
+    if (trimmed.startsWith('/api/v1/')) {
+      return trimmed.substring('/api/v1'.length);
+    }
     if (trimmed.startsWith('/knowledge/')) return trimmed;
     final uri = Uri.tryParse(trimmed);
-    if (uri != null && uri.path.contains('/api/v1/')) {
+    if (uri == null) return null;
+    if (uri.path.contains('/api/v1/')) {
       final idx = uri.path.indexOf('/api/v1/');
-      return uri.path.substring(idx + '/api/v1'.length);
+      final path = uri.path.substring(idx + '/api/v1'.length);
+      return uri.hasQuery ? '$path?${uri.query}' : path;
+    }
+    if (uri.path.startsWith('/knowledge/')) {
+      return uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
     }
     return null;
   }
@@ -835,13 +894,17 @@ class GraphController extends ChangeNotifier {
             lastCompletedJobType = tracked.type;
             if (tracked.type == 'generate_image') {
               final imageUrl = result is Map ? result['image_url']?.toString() : null;
+              final thumbUrl = result is Map ? result['image_thumb_url']?.toString() : null;
               if (imageUrl != null && imageUrl.isNotEmpty) {
-                patchNodeImageUrl(loadId, imageUrl);
+                patchNodeImageUrl(loadId, imageUrl, imageThumbUrl: thumbUrl);
               } else {
                 try {
                   final meta = await _get('/knowledge/nodes/$loadId/image');
                   final url = meta['image_url']?.toString();
-                  if (url != null && url.isNotEmpty) patchNodeImageUrl(loadId, url);
+                  final thumb = meta['image_thumb_url']?.toString();
+                  if (url != null && url.isNotEmpty) {
+                    patchNodeImageUrl(loadId, url, imageThumbUrl: thumb);
+                  }
                 } on ApiException {
                   // Keep current graph.
                 }

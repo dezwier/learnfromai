@@ -266,12 +266,17 @@ def post_knowledge_node_content(
 @router.get("/knowledge/nodes/{node_id}/image/file")
 def get_knowledge_node_image_file(
     node_id: UUID,
+    variant: str = "full",
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     _ = user
-    png = image_bytes_for_node(session, node_id)
-    return RawResponse(content=png, media_type="image/png")
+    choice = (variant or "full").strip().lower()
+    if choice not in {"full", "thumb"}:
+        raise AppError("VALIDATION_ERROR", "variant must be full or thumb", 422)
+    payload, media_type = image_bytes_for_node(session, node_id, variant=choice)
+    session.commit()
+    return RawResponse(content=payload, media_type=media_type)
 
 
 @router.get("/knowledge/nodes/{node_id}/image")

@@ -403,10 +403,17 @@ class _GraphScreenState extends State<GraphScreen>
     // Image jobs patch image_url on the graph; mirror onto the open topic tile.
     if (jobType == 'expand_content' || jobType == 'generate_image') {
       if (jobType == 'generate_image' && mounted) {
-        final url = _imageUrlFromGraph(graph, id);
+        final urls = _imageUrlsFromGraph(graph, id);
         final current = _highlighted;
-        if (current != null && current.id == id && url != current.imageUrl) {
-          setState(() => _highlighted = current.copyWith(imageUrl: url));
+        if (current != null &&
+            current.id == id &&
+            (urls.$1 != current.imageUrl || urls.$2 != current.imageThumbUrl)) {
+          setState(
+            () => _highlighted = current.copyWith(
+              imageUrl: urls.$1,
+              imageThumbUrl: urls.$2,
+            ),
+          );
         } else if (mounted) {
           setState(() {});
         }
@@ -497,6 +504,7 @@ class _GraphScreenState extends State<GraphScreen>
           n.title == current.title &&
           n.description == current.description &&
           n.imageUrl == current.imageUrl &&
+          n.imageThumbUrl == current.imageThumbUrl &&
           n.role == current.role) {
         return;
       }
@@ -569,6 +577,7 @@ class _GraphScreenState extends State<GraphScreen>
         isFlower: node.isFlower,
         description: description,
         imageUrl: node.imageUrl,
+        imageThumbUrl: node.imageThumbUrl,
         viaRole: node.viaRole,
       );
     });
@@ -688,6 +697,7 @@ class _GraphScreenState extends State<GraphScreen>
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
+    graph.preloadGraphImages();
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
@@ -997,16 +1007,20 @@ class _GraphScreenState extends State<GraphScreen>
     return nodes is List && nodes.isNotEmpty;
   }
 
-  String? _imageUrlFromGraph(GraphController graph, String nodeId) {
+  (String?, String?) _imageUrlsFromGraph(GraphController graph, String nodeId) {
     final nodes = graph.categoryGraph?['nodes'];
-    if (nodes is! List) return null;
+    if (nodes is! List) return (null, null);
     for (final raw in nodes) {
       if (raw is Map && raw['id']?.toString() == nodeId) {
         final url = raw['image_url']?.toString().trim();
-        return (url == null || url.isEmpty) ? null : url;
+        final thumb = raw['image_thumb_url']?.toString().trim();
+        return (
+          (url == null || url.isEmpty) ? null : url,
+          (thumb == null || thumb.isEmpty) ? null : thumb,
+        );
       }
     }
-    return null;
+    return (null, null);
   }
 
   Widget _body(BuildContext context, GraphController graph) {
@@ -1080,7 +1094,8 @@ class _GraphScreenState extends State<GraphScreen>
             if (n.role != highlighted.role ||
                 n.title != highlighted.title ||
                 n.description != highlighted.description ||
-                n.imageUrl != highlighted.imageUrl) {
+                n.imageUrl != highlighted.imageUrl ||
+                n.imageThumbUrl != highlighted.imageThumbUrl) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
                 _syncHighlightedFromLayout(matchId);
@@ -1129,6 +1144,7 @@ class _GraphScreenState extends State<GraphScreen>
               viewport: viewport,
               onSelect: _selectNode,
               onHighlight: _onHighlightFromCenter,
+              imageBytesFor: graph.cachedImageBytes,
             ),
           ),
         );
@@ -1152,6 +1168,7 @@ class _GraphScreenState extends State<GraphScreen>
             kind: raw['kind']?.toString() ?? 'focus',
             description: raw['description']?.toString(),
             imageUrl: raw['image_url']?.toString(),
+            imageThumbUrl: raw['image_thumb_url']?.toString(),
           ),
     ];
     final edges = [
@@ -1917,6 +1934,7 @@ class _GraphView extends StatefulWidget {
     required this.viewport,
     required this.onSelect,
     required this.onHighlight,
+    required this.imageBytesFor,
     this.morphing = false,
   });
 
@@ -1929,6 +1947,7 @@ class _GraphView extends StatefulWidget {
   final Size viewport;
   final ValueChanged<PlacedNode> onSelect;
   final ValueChanged<PlacedNode?> onHighlight;
+  final Uint8List? Function(String? imageUrl) imageBytesFor;
 
   @override
   State<_GraphView> createState() => _GraphViewState();
@@ -2016,6 +2035,11 @@ class _GraphViewState extends State<_GraphView> {
                       centerHighlight:
                           !widget.morphing && node.id == (widget.highlightId ?? _centerId),
                       onTap: () => widget.onSelect(node),
+                      imageBytes: widget.imageBytesFor(
+                        (node.imageThumbUrl?.trim().isNotEmpty == true)
+                            ? node.imageThumbUrl
+                            : node.imageUrl,
+                      ),
                     ),
                   ),
                 ),
@@ -2093,6 +2117,7 @@ class _NodeCard extends StatelessWidget {
     required this.pending,
     required this.centerHighlight,
     required this.onTap,
+    this.imageBytes,
   });
 
   final PlacedNode node;
@@ -2100,6 +2125,7 @@ class _NodeCard extends StatelessWidget {
   final bool pending;
   final bool centerHighlight;
   final VoidCallback onTap;
+  final Uint8List? imageBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -2124,12 +2150,14 @@ class _NodeCard extends StatelessWidget {
           fill: fill,
           dark: dark,
           spotlight: spotlight,
+          imageBytes: imageBytes,
         );
         final bloom = _flowerCard(
           scheme: scheme,
           fill: base,
           dark: dark,
           spotlight: spotlight,
+          imageBytes: imageBytes,
         );
         final child = flower <= 0.02
             ? hex
@@ -2164,80 +2192,94 @@ class _NodeCard extends StatelessWidget {
     required Color fill,
     required bool dark,
     required double spotlight,
+    Uint8List? imageBytes,
   }) {
     final description = (node.description ?? '').trim();
+    final hasImage = imageBytes != null;
+    final titleColor = hasImage ? Colors.white : scheme.onSurface;
+    final descColor = hasImage
+        ? Colors.white.withValues(alpha: 0.88)
+        : scheme.onSurface.withValues(alpha: 0.72);
     return CustomPaint(
       painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: node.radius * 0.62,
-          vertical: node.radius * 0.58,
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final scaler = MediaQuery.textScalerOf(context);
-            final maxW = constraints.maxWidth;
-            final maxH = constraints.maxHeight;
-            if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (hasImage) _hexImageFill(imageBytes!, flower: true),
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: node.radius * 0.62,
+              vertical: node.radius * 0.58,
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final scaler = MediaQuery.textScalerOf(context);
+                final maxW = constraints.maxWidth;
+                final maxH = constraints.maxHeight;
+                if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
 
-            final hasDesc = description.isNotEmpty;
-            const titleMaxLines = 3;
-            final titleStyleBase = TextStyle(
-              fontFamily: 'tt_ramilas',
-              height: 1.1,
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
-            );
-            final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
-            final titleLaid = layoutTitle(
-              text: node.title,
-              style: titleStyleBase,
-              maxWidth: maxW,
-              maxHeight: titleBudget,
-              maxLines: titleMaxLines,
-              minFontSize: 13,
-              maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
-              textScaler: scaler,
-              hyphenateAtMinSize: true,
-            );
-            final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
-            final gap = (node.radius * 0.08).clamp(4.0, 10.0);
-            final descStyle = TextStyle(
-              fontFamily: 'tt_ramilas',
-              height: 1.25,
-              fontWeight: FontWeight.w500,
-              color: scheme.onSurface.withValues(alpha: 0.72),
-              fontSize: (node.radius * 0.22).clamp(13.0, 18.0),
-            );
+                final hasDesc = description.isNotEmpty;
+                const titleMaxLines = 3;
+                final titleStyleBase = TextStyle(
+                  fontFamily: 'tt_ramilas',
+                  height: 1.1,
+                  fontWeight: FontWeight.w700,
+                  color: titleColor,
+                  shadows: hasImage ? _imageTitleShadows : null,
+                );
+                final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
+                final titleLaid = layoutTitle(
+                  text: node.title,
+                  style: titleStyleBase,
+                  maxWidth: maxW,
+                  maxHeight: titleBudget,
+                  maxLines: titleMaxLines,
+                  minFontSize: 13,
+                  maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
+                  textScaler: scaler,
+                  hyphenateAtMinSize: true,
+                );
+                final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
+                final gap = (node.radius * 0.08).clamp(4.0, 10.0);
+                final descStyle = TextStyle(
+                  fontFamily: 'tt_ramilas',
+                  height: 1.25,
+                  fontWeight: FontWeight.w500,
+                  color: descColor,
+                  fontSize: (node.radius * 0.22).clamp(13.0, 18.0),
+                  shadows: hasImage ? _imageBodyShadows : null,
+                );
 
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    titleLaid.text,
-                    textAlign: TextAlign.center,
-                    softWrap: true,
-                    maxLines: titleMaxLines,
-                    overflow: TextOverflow.ellipsis,
-                    style: titleStyle,
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        titleLaid.text,
+                        textAlign: TextAlign.center,
+                        softWrap: true,
+                        maxLines: titleMaxLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: titleStyle,
+                      ),
+                      if (hasDesc) ...[
+                        SizedBox(height: gap),
+                        Text(
+                          description,
+                          textAlign: TextAlign.center,
+                          softWrap: true,
+                          maxLines: 5,
+                          overflow: TextOverflow.ellipsis,
+                          style: descStyle,
+                        ),
+                      ],
+                    ],
                   ),
-                  if (hasDesc) ...[
-                    SizedBox(height: gap),
-                    Text(
-                      description,
-                      textAlign: TextAlign.center,
-                      softWrap: true,
-                      maxLines: 5,
-                      overflow: TextOverflow.ellipsis,
-                      style: descStyle,
-                    ),
-                  ],
-                ],
-              ),
-            );
-          },
-        ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2247,33 +2289,83 @@ class _NodeCard extends StatelessWidget {
     required Color fill,
     required bool dark,
     required double spotlight,
+    Uint8List? imageBytes,
   }) {
+    final hasImage = imageBytes != null;
     return CustomPaint(
       painter: _HexTilePainter(color: fill, dark: dark, spotlight: spotlight),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: node.radius * 0.34,
-          vertical: node.radius * 0.24,
-        ),
-        child: Center(
-          child: _FittingLabel(
-            text: node.title,
-            maxLines: 4,
-            minFontSize: 10,
-            maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
-            hyphenateWords: true,
-            style: TextStyle(
-              fontFamily: 'tt_ramilas',
-              height: 1.15,
-              fontWeight: FontWeight.w500,
-              color: scheme.onSurface.withValues(alpha: 0.9),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (hasImage) _hexImageFill(imageBytes!, flower: false),
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: node.radius * 0.34,
+              vertical: node.radius * 0.24,
+            ),
+            child: Center(
+              child: _FittingLabel(
+                text: node.title,
+                maxLines: 4,
+                minFontSize: 10,
+                maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
+                hyphenateWords: true,
+                style: TextStyle(
+                  fontFamily: 'tt_ramilas',
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                  color: hasImage ? Colors.white : scheme.onSurface.withValues(alpha: 0.9),
+                  shadows: hasImage ? _imageTitleShadows : null,
+                ),
+              ),
             ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _hexImageFill(Uint8List bytes, {required bool flower}) {
+    return ClipPath(
+      clipper: flower ? const _FlowerTapClipper() : const _HexTapClipper(),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+          ),
+          // Soft top veil + stronger bottom so titles stay readable on any photo.
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x33000000),
+                  Color(0x14000000),
+                  Color(0x99000000),
+                ],
+                stops: [0.0, 0.42, 1.0],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
+
+const _imageTitleShadows = <Shadow>[
+  Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1)),
+  Shadow(color: Color(0x99000000), blurRadius: 2, offset: Offset(0, 0.5)),
+];
+
+const _imageBodyShadows = <Shadow>[
+  Shadow(color: Color(0xB3000000), blurRadius: 6, offset: Offset(0, 1)),
+];
 
 /// Scales font to the tile. Titles keep whole words until min size, then hyphenate.
 class _FittingLabel extends StatelessWidget {

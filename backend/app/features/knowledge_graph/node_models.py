@@ -20,6 +20,7 @@ class KnowledgeNode(SQLModel, table=True):
     description: str | None = None
     image_url: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     image_bytes: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
+    image_thumb_bytes: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 

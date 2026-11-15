@@ -61,10 +61,19 @@ def test_image_generate_persists_png_and_usage(client, auth, session):
     assert file_resp.headers["content-type"].startswith("image/png")
     assert file_resp.content[:8] == b"\x89PNG\r\n\x1a\n"
 
+    thumb_resp = client.get(
+        f"/api/v1/knowledge/nodes/{node.id}/image/file?variant=thumb",
+        headers=auth,
+    )
+    assert thumb_resp.status_code == 200
+    assert thumb_resp.headers["content-type"].startswith("image/jpeg")
+    assert thumb_resp.content[:2] == b"\xff\xd8"
+
     graph = client.get(f"/api/v1/knowledge/graph/{node.id}", headers=auth)
     assert graph.status_code == 200
     focus = next(n for n in graph.json()["nodes"] if n["id"] == str(node.id))
     assert focus["image_url"] == f"/knowledge/nodes/{node.id}/image/file"
+    assert focus["image_thumb_url"] == f"/knowledge/nodes/{node.id}/image/file?variant=thumb"
 
     usage = session.exec(select(LlmUsage).where(LlmUsage.task == "image")).all()
     assert len(usage) == 1

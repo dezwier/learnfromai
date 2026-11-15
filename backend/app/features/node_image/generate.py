@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app.core.errors import AppError
 from app.features.knowledge_graph.neighborhood import set_progress
 from app.features.knowledge_graph.node_models import KnowledgeNode
-from app.features.node_image.service import image_path_for
+from app.features.node_image.service import store_generated_image
 from app.features.platform.image_llm import get_image_llm
 from app.features.platform.jobs import renew_lease
 from app.features.platform.llm import assert_user_quota, bind_usage_sink, maybe_record_usage
@@ -56,13 +56,13 @@ def generate_image(session: Session, job: GenerationJob) -> dict:
     node = session.get(KnowledgeNode, node_id)
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
-    node.image_bytes = png
-    node.image_url = image_path_for(node.id)
+    store_generated_image(node, png)
     session.add(node)
     set_progress(session, job, stage="done", message="Topic image ready", fraction=1.0)
     session.commit()
     return {
         "node_id": str(node.id),
         "image_url": node.image_url,
+        "image_thumb_url": f"/knowledge/nodes/{node.id}/image/file?variant=thumb",
         "skipped": False,
     }

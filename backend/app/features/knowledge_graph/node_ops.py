@@ -44,6 +44,9 @@ def update_knowledge_node(
         "title": row.name,
         "description": row.description,
         "image_url": row.image_url,
+        "image_thumb_url": (
+            f"/knowledge/nodes/{row.id}/image/file?variant=thumb" if row.image_url else None
+        ),
     }
 
 

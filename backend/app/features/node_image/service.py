@@ -9,12 +9,19 @@ from sqlmodel import Session
 from app.core.errors import not_found
 from app.features.accounts.models import User
 from app.features.knowledge_graph.node_models import KnowledgeNode
+from app.features.node_image.resize import prepare_node_images
 from app.features.platform.jobs import enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 
 
-def image_path_for(node_id: UUID) -> str:
+def image_path_for(node_id: UUID, *, variant: str = "full") -> str:
+    if variant == "thumb":
+        return f"/knowledge/nodes/{node_id}/image/file?variant=thumb"
     return f"/knowledge/nodes/{node_id}/image/file"
+
+
+def thumb_path_for(node_id: UUID) -> str:
+    return image_path_for(node_id, variant="thumb")
 
 
 def has_image(node: KnowledgeNode) -> bool:
@@ -29,15 +36,37 @@ def image_for_node(session: Session, node_id: UUID) -> dict:
     return {
         "node_id": str(node_id),
         "image_url": node.image_url if not incomplete else None,
+        "image_thumb_url": thumb_path_for(node_id) if not incomplete else None,
         "incomplete": incomplete,
     }
 
 
-def image_bytes_for_node(session: Session, node_id: UUID) -> bytes:
+def image_bytes_for_node(
+    session: Session,
+    node_id: UUID,
+    *,
+    variant: str = "full",
+) -> tuple[bytes, str]:
+    """Return (bytes, media_type). Persists a missing thumb derived from full when needed."""
     node = session.get(KnowledgeNode, node_id)
     if node is None or not node.image_bytes:
         raise not_found("Topic image not found")
-    return bytes(node.image_bytes)
+    if variant == "thumb":
+        if not node.image_thumb_bytes:
+            _, thumb = prepare_node_images(bytes(node.image_bytes))
+            node.image_thumb_bytes = thumb
+            session.add(node)
+            session.flush()
+        return bytes(node.image_thumb_bytes), "image/jpeg"
+    return bytes(node.image_bytes), "image/png"
+
+
+def store_generated_image(node: KnowledgeNode, raw: bytes) -> None:
+    full, thumb = prepare_node_images(raw)
+    node.image_bytes = full
+    node.image_thumb_bytes = thumb
+    node.image_url = image_path_for(node.id)
+    # Thumb URL is always derived; keep image_url as the canonical full path.
 
 
 def enqueue_image_generate(

@@ -13,7 +13,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - Expand uses two reusable LLM prompts plus deterministic retrieve: `neighborhood_v5` (invent related topics for the deficit, excluding existing neighbor titles) and `sameness_v3` (batched same-concept? → id or null). Learn bits use `content_bits_v1` separately.
 - Scenarios: (1) new topic → retrieve → sameness → exists → under budget → neighborhood → retrieve/sameness per result → write; (2) new → retrieve → sameness → not exists → neighborhood → …; (3) existing focus → under budget → neighborhood → …; (4) new → retrieve → sameness → exists → budget met → Done; (5) existing focus → budget met → Done. Existing-tile expand skips focus sameness.
 - Each topic can have shared learning bits (`learn`, `example`, `check`) generated on demand via an `expand_content` job. Opening Learn loads existing bits; if incomplete, the client may request expand. Bits are cached on the node for all users.
-- Each topic can have one shared iconic image generated on demand via a `generate_image` job (Gemini Imagen or OpenAI Images from the user’s AI provider setting). The topic screen shows the image above the title and offers Generate / Regenerate.
+- Each topic can have one shared iconic image generated on demand via a `generate_image` job (Gemini or OpenAI Images from the user’s AI provider setting). One generation produces a full (~1024) asset for the topic screen and a 512px JPEG thumb for hex tiles. The topic screen shows the square image above the title and offers Generate / Regenerate; hex tiles fill with the thumb plus a scrim for title readability.
 - Each request stores hop distances and kinds for the returned neighborhood.
 - Profile fields `username`, `full_name`, and `photo_url` live in `users.preferences.profile`. Learning XP/level on the HUD are placeholders until mastery tracking exists.
 
@@ -30,7 +30,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `POST /api/v1/knowledge/nodes/{node_id}/content` `{expand?: bool}` → content (200); with `expand: true` and incomplete → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes/{node_id}/image` → `{image_url, incomplete}`
 - `POST /api/v1/knowledge/nodes/{node_id}/image` `{generate?, regenerate?}` → metadata (200) or `{job_id}` (202)
-- `GET /api/v1/knowledge/nodes/{node_id}/image/file` → PNG bytes (auth)
+- `GET /api/v1/knowledge/nodes/{node_id}/image/file?variant=full|thumb` → PNG (full) or JPEG (thumb) bytes (auth)
 - `GET /api/v1/knowledge/graph` resume latest neighborhood only (no expand)
 - `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
 - `GET /api/v1/jobs/{job_id}`
