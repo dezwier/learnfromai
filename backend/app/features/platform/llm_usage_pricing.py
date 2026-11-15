@@ -104,10 +104,12 @@ def reserve_usd_for_call(model: str, max_output_tokens: int) -> float:
 
 # Flat per-image USD estimates (~€0.05 target).
 _IMAGE_COST_USD: dict[str, float] = {
-    "imagen-4.0-generate-001": 0.04,
-    "imagen-4.0-fast-generate-001": 0.02,
-    "imagen-3.0-generate-002": 0.03,
-    "gpt-image-1": 0.07,
+    "gemini-3.1-flash-lite-image": 0.034,
+    "gemini-3.1-flash-image": 0.067,
+    "gemini-2.5-flash-image": 0.039,
+    "gpt-image-2.5-flare": 0.04,
+    "gpt-image-2.5-sunburst": 0.07,
+    "gpt-image-1.5": 0.05,
     "gpt-image-1-mini": 0.036,
     "dall-e-3": 0.04,
     "fake-image": 0.0,
@@ -116,13 +118,13 @@ _IMAGE_COST_USD: dict[str, float] = {
 
 def image_cost_usd(model: str, *, quality: str | None = None) -> float:
     key = (model or "").strip().lower().removeprefix("models/")
-    if key.startswith("gpt-image-1") and not key.startswith("gpt-image-1-mini"):
-        q = (quality or "medium").strip().lower()
+    if key.startswith("gpt-image-2.5-flare") or key.startswith("gpt-image-2.5-sunburst"):
+        q = (quality or "low").strip().lower()
         if q == "low":
-            return 0.02
+            return 0.04 if "flare" in key else 0.05
         if q == "high":
-            return 0.19
-        return 0.07
+            return 0.12 if "flare" in key else 0.16
+        return 0.07 if "flare" in key else 0.10
     if key in _IMAGE_COST_USD:
         return _IMAGE_COST_USD[key]
     for prefix, cost in _IMAGE_COST_USD.items():

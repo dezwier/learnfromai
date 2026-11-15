@@ -1,4 +1,4 @@
-"""LLM contracts for shared topic images (Gemini Imagen / OpenAI Images)."""
+"""LLM contracts for shared topic images (Gemini / OpenAI Images)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
-from app.core.errors import generation_unavailable
+from app.core.errors import AppError, generation_unavailable
 from app.features.platform.llm_usage_pricing import (
     image_cost_usd,
     reserve_usd_for_image,
@@ -59,6 +59,8 @@ class FakeImageLLM:
 
 
 class GeminiImageLLM:
+    """Native Gemini image models (Imagen predict API is shut down)."""
+
     name = "gemini"
 
     def __init__(self) -> None:
@@ -73,12 +75,12 @@ class GeminiImageLLM:
         if not self.api_key:
             raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured", terminal=True)
         prompt = build_topic_image_prompt(name, description)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:predict"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         body = {
-            "instances": [{"prompt": prompt}],
-            "parameters": {
-                "sampleCount": 1,
-                "aspectRatio": "1:1",
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"aspectRatio": "1:1", "imageSize": "1K"},
             },
         }
         logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -99,14 +101,20 @@ class GeminiImageLLM:
                     "Gemini rate or spend limit (429). Stopping to avoid burn.",
                     terminal=True,
                 )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                detail = _http_error_detail(response)
+                terminal = response.status_code in {400, 401, 403, 404}
+                raise generation_unavailable(
+                    f"Gemini image generation failed ({response.status_code}): {detail}",
+                    terminal=terminal,
+                )
             payload = response.json()
-        except generation_unavailable:
+        except AppError:
             raise
         except httpx.HTTPError as exc:
             raise generation_unavailable("Gemini image generation failed") from exc
 
-        png = _extract_gemini_image(payload)
+        png = _extract_gemini_native_image(payload)
         usage = usage_from_image_cost(self.model, image_cost_usd(self.model))
         sink = getattr(self, "on_usage", None)
         if callable(sink):
@@ -132,6 +140,7 @@ class OpenAIImageLLM:
             raise generation_unavailable("OPENAI_API_KEY is not configured", terminal=True)
         prompt = build_topic_image_prompt(name, description)
         url = "https://api.openai.com/v1/images/generations"
+        # GPT image models always return b64_json; do not send response_format.
         body = {
             "model": self.model,
             "prompt": prompt,
@@ -164,9 +173,15 @@ class OpenAIImageLLM:
                     "OpenAI rate or spend limit (429). Stopping to avoid burn.",
                     terminal=True,
                 )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                detail = _http_error_detail(response)
+                terminal = response.status_code in {400, 401, 403, 404}
+                raise generation_unavailable(
+                    f"OpenAI image generation failed ({response.status_code}): {detail}",
+                    terminal=terminal,
+                )
             payload = response.json()
-        except generation_unavailable:
+        except AppError:
             raise
         except httpx.HTTPError as exc:
             raise generation_unavailable("OpenAI image generation failed") from exc
@@ -191,18 +206,46 @@ def get_image_llm(provider: str | None = None) -> ImageLLM:
     return GeminiImageLLM()
 
 
-def _extract_gemini_image(payload: dict) -> bytes:
-    predictions = payload.get("predictions") if isinstance(payload, dict) else None
-    if not isinstance(predictions, list) or not predictions:
-        raise generation_unavailable("Gemini returned no image predictions")
-    first = predictions[0] if isinstance(predictions[0], dict) else {}
-    b64 = first.get("bytesBase64Encoded") or first.get("image") or ""
-    if not b64:
-        raise generation_unavailable("Gemini image payload missing bytes")
+def _http_error_detail(response: httpx.Response) -> str:
     try:
-        return base64.b64decode(b64)
-    except Exception as exc:
-        raise generation_unavailable("Gemini image bytes were invalid") from exc
+        payload = response.json()
+    except Exception:
+        text = (response.text or "").strip()
+        return text[:240] or response.reason_phrase
+    if isinstance(payload, dict):
+        err = payload.get("error")
+        if isinstance(err, dict):
+            message = err.get("message") or err.get("code")
+            if message:
+                return str(message)[:240]
+        message = payload.get("message")
+        if message:
+            return str(message)[:240]
+    return str(payload)[:240]
+
+
+def _extract_gemini_native_image(payload: dict) -> bytes:
+    candidates = payload.get("candidates") if isinstance(payload, dict) else None
+    if not isinstance(candidates, list) or not candidates:
+        raise generation_unavailable("Gemini returned no image candidates")
+    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list):
+        raise generation_unavailable("Gemini image payload missing parts")
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        inline = part.get("inlineData") or part.get("inline_data")
+        if not isinstance(inline, dict):
+            continue
+        b64 = inline.get("data") or ""
+        if not b64:
+            continue
+        try:
+            return base64.b64decode(b64)
+        except Exception as exc:
+            raise generation_unavailable("Gemini image bytes were invalid") from exc
+    raise generation_unavailable("Gemini image payload missing inline image data")
 
 
 def _extract_openai_image(payload: dict) -> bytes:

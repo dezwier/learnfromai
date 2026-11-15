@@ -9,7 +9,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
-from app.core.errors import generation_unavailable
+from app.core.errors import AppError, generation_unavailable
 from app.features.content.models import CONTENT_KINDS
 from app.features.platform.llm_usage_pricing import (
     reserve_usd_for_call,
@@ -174,7 +174,7 @@ class GeminiContentLLM:
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", PROMPT_CONTENT)
                 return parsed, usage
-            except generation_unavailable:
+            except AppError:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
@@ -269,7 +269,7 @@ class OpenAIContentLLM:
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", PROMPT_CONTENT)
                 return parsed, usage
-            except generation_unavailable:
+            except AppError:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc

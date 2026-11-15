@@ -16,12 +16,14 @@ class Settings(BaseSettings):
     google_gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_temperature: float = 0.0
-    gemini_image_model: str = "imagen-4.0-generate-001"
+    # Native Gemini image model (~$0.034 / 1K square). Imagen predict API is shut down.
+    gemini_image_model: str = "gemini-3.1-flash-lite-image"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.0
-    openai_image_model: str = "gpt-image-1"
-    openai_image_quality: str = "medium"
+    # gpt-image-1 was shut down Oct 2026; flare + low ≈ near €0.05 target.
+    openai_image_model: str = "gpt-image-2.5-flare"
+    openai_image_quality: str = "low"
     openai_image_size: str = "1024x1024"
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""

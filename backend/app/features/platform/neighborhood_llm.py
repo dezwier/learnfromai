@@ -11,7 +11,7 @@ from uuid import UUID
 import httpx
 
 from app.core.config import get_settings
-from app.core.errors import generation_unavailable
+from app.core.errors import AppError, generation_unavailable
 from app.features.knowledge_graph.identity import canonical_key_for
 from app.features.platform.llm_usage_pricing import (
     reserve_usd_for_call,
@@ -333,7 +333,7 @@ class GeminiNeighborhoodLLM:
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", prompt_version)
                 return parsed, last_usage
-            except generation_unavailable:
+            except AppError:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
@@ -427,7 +427,7 @@ class OpenAINeighborhoodLLM:
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", prompt_version)
                 return parsed, usage
-            except generation_unavailable:
+            except AppError:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc

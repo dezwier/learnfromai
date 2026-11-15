@@ -1503,7 +1503,7 @@ class _TopicHeroImageState extends State<_TopicHeroImage> {
     const radius = BorderRadius.all(Radius.circular(16));
     final showPlaceholder = widget.loading || _loadingBytes || _bytes == null;
     return AspectRatio(
-      aspectRatio: 16 / 10,
+      aspectRatio: 1,
       child: ClipRRect(
         borderRadius: radius,
         child: showPlaceholder
