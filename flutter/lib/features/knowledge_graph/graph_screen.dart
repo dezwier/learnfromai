@@ -2207,12 +2207,24 @@ class _NodeCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
+          if (hasImage) _hexImageFill(imageBytes!, flower: true),
           if (hasImage)
-            _hexImageFill(
-              imageBytes!,
-              flower: true,
-              fill: fill,
-              spotlight: spotlight,
+            ClipPath(
+              clipper: const _FlowerTapClipper(),
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x00000000),
+                      Color(0x14000000),
+                      Color(0x8A000000),
+                    ],
+                    stops: [0.35, 0.58, 1.0],
+                  ),
+                ),
+              ),
             ),
           Padding(
             padding: EdgeInsets.symmetric(
@@ -2305,13 +2317,7 @@ class _NodeCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasImage)
-            _hexImageFill(
-              imageBytes!,
-              flower: false,
-              fill: fill,
-              spotlight: spotlight,
-            ),
+          if (hasImage) _hexImageFill(imageBytes!, flower: false),
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.34,
@@ -2339,61 +2345,31 @@ class _NodeCard extends StatelessWidget {
     );
   }
 
-  Widget _hexImageFill(
-    Uint8List bytes, {
-    required bool flower,
-    required Color fill,
-    required double spotlight,
-  }) {
-    final lift = spotlight.clamp(0.0, 1.0);
-    // SoftLight keeps photo detail while washing in the role fill; spotlight
-    // lifts toward a brighter tint so the highlight still reads on image tiles.
-    final wash = Color.lerp(fill, Colors.white, 0.18 * lift)!;
+  static const _hexImageOpacity = 0.4;
+
+  Widget _hexImageFill(Uint8List bytes, {required bool flower}) {
     return ClipPath(
       clipper: flower ? const _FlowerTapClipper() : const _HexTapClipper(),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.memory(
-            bytes,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            filterQuality: FilterQuality.medium,
-            color: wash.withValues(alpha: 0.52 + 0.22 * lift),
-            colorBlendMode: BlendMode.softLight,
-          ),
-          // Extra multiply wash so tile hue stays obvious on bright photos.
-          ColoredBox(
-            color: fill.withValues(alpha: 0.22 + 0.12 * lift),
-          ),
-          // Soft top veil + stronger bottom so titles stay readable on any photo.
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x28000000),
-                  Color(0x10000000),
-                  Color(0x8A000000),
-                ],
-                stops: [0.0, 0.42, 1.0],
-              ),
-            ),
-          ),
-        ],
+      child: Opacity(
+        opacity: _hexImageOpacity,
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+        ),
       ),
     );
   }
 }
 
 const _imageTitleShadows = <Shadow>[
-  Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1)),
-  Shadow(color: Color(0x99000000), blurRadius: 2, offset: Offset(0, 0.5)),
+  Shadow(color: Color(0xB3000000), blurRadius: 7, offset: Offset(0, 1)),
+  Shadow(color: Color(0x80000000), blurRadius: 2, offset: Offset(0, 0.5)),
 ];
 
 const _imageBodyShadows = <Shadow>[
-  Shadow(color: Color(0xB3000000), blurRadius: 6, offset: Offset(0, 1)),
+  Shadow(color: Color(0x99000000), blurRadius: 5, offset: Offset(0, 1)),
 ];
 
 /// Scales font to the tile. Titles keep whole words until min size, then hyphenate.
