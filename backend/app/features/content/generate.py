@@ -18,7 +18,7 @@ from app.features.knowledge_graph.neighborhood import set_progress
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.platform.content_llm import get_content_llm
 from app.features.platform.jobs import renew_lease
-from app.features.platform.llm import assert_user_quota, record_usage
+from app.features.platform.llm import assert_user_quota, bind_usage_sink, maybe_record_usage
 from app.features.platform.models import GenerationJob, GenerationJobWatcher
 from app.features.platform.neighborhood_llm import parse_uuid
 
@@ -55,11 +55,12 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     neighbor_titles = _neighbor_titles(session, node.id)
     llm = get_content_llm()
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
+    bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="content")
     set_progress(session, job, stage="generate", message="Writing learn · example · check…", fraction=0.35)
     assert_user_quota(session, user_id)
     bits, usage = llm.generate_bits(node.name, node.description, neighbor_titles)
     renew_lease(session, job)
-    record_usage(session, user_id=user_id, job_id=job.id, task="content", provider=llm.name, usage=usage)
+    maybe_record_usage(session, llm, user_id=user_id, job_id=job.id, task="content", usage=usage)
     session.commit()
     assert_user_quota(session, user_id)
 

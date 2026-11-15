@@ -5,6 +5,8 @@ os.environ["SECRET_KEY"] = "test-secret-key-adaptive-mastery-32b"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["LLM_PROVIDER"] = "fake"
 os.environ["LLM_DAILY_TOKENS_USER_LIMIT"] = "1000000"
+os.environ["LLM_DAILY_SPEND_EUR_LIMIT"] = "3"
+os.environ["LLM_USD_PER_EUR"] = "1.0"
 os.environ["SENTRY_DSN"] = ""
 
 import pytest

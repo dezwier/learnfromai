@@ -14,11 +14,15 @@ class Settings(BaseSettings):
     firebase_service_account_json: str = ""
     firebase_auth_emulator_host: str = ""
     google_gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash-lite"
     gemini_temperature: float = 0.0
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""
     llm_daily_tokens_user_limit: int = 200_000
+    # Hard global daily cap from Gemini usageMetadata × published rates (≈€3 ≈ $3).
+    llm_daily_spend_eur_limit: float = 3.0
+    # USD per EUR for the cap (1.0 ≈ treat €1 as $1; raise to stop earlier).
+    llm_usd_per_eur: float = 1.0
     graph_expansion_max_nodes: int = 80
     job_worker_concurrency: int = 2
     # Long enough for Gemini timeouts + consolidate/merge; progress also renews the lease.

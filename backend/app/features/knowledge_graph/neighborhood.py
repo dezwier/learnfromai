@@ -16,7 +16,7 @@ from app.features.knowledge_graph.node_models import (
     KnowledgeRequestNode,
 )
 from app.features.platform.jobs import renew_lease
-from app.features.platform.llm import assert_user_quota, record_usage
+from app.features.platform.llm import assert_user_quota, bind_usage_sink, maybe_record_usage
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import BUCKETS, get_neighborhood_llm, parse_uuid
 
@@ -214,11 +214,14 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     llm = get_neighborhood_llm()
     # Keep the lease alive across Gemini attempt timeouts (each can take ~60s).
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
+    bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="neighborhood")
     set_progress(session, job, stage="generate", message="Asking the model for related topics…", fraction=0.15)
     assert_user_quota(session, user_id)
     neighborhood, usage = llm.generate_neighborhood(focus.name if not topic else topic, counts)
     renew_lease(session, job)
-    record_usage(session, user_id=user_id, job_id=job.id, task="neighborhood", provider=llm.name, usage=usage)
+    maybe_record_usage(
+        session, llm, user_id=user_id, job_id=job.id, task="neighborhood", usage=usage
+    )
     session.commit()
     assert_user_quota(session, user_id)
 
@@ -477,6 +480,7 @@ def _match_topics_batch(
     if not pending:
         return {}
     assert_user_quota(session, user_id)
+    setattr(llm, "usage_task", "sameness")
     candidates = [
         {
             "key": str(item["key"]),
@@ -487,7 +491,9 @@ def _match_topics_batch(
         for item in pending
     ]
     matched, usage = llm.match_topics(candidates)
-    record_usage(session, user_id=user_id, job_id=job_id, task="sameness", provider=llm.name, usage=usage)
+    maybe_record_usage(
+        session, llm, user_id=user_id, job_id=job_id, task="sameness", usage=usage
+    )
     session.flush()
     assert_user_quota(session, user_id)
     raw = matched.get("matches") if isinstance(matched, dict) else {}

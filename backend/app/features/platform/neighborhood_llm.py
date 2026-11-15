@@ -13,13 +13,12 @@ import httpx
 from app.core.config import get_settings
 from app.core.errors import generation_unavailable
 from app.features.knowledge_graph.identity import canonical_key_for
+from app.features.platform.gemini_usage import reserve_usd_for_call, usage_from_gemini_metadata
 
 logger = logging.getLogger(__name__)
 
 PROMPT_NEIGHBORHOOD = "neighborhood_v4"
 PROMPT_SAMENESS = "sameness_v3"
-INPUT_USD_PER_TOKEN = 0.10 / 1_000_000
-OUTPUT_USD_PER_TOKEN = 0.40 / 1_000_000
 
 BUCKETS = ("parents", "siblings", "children", "acquaintances")
 
@@ -33,12 +32,14 @@ class NeighborhoodLLM(Protocol):
 
 
 def _usage(model: str, input_tokens: int = 12, output_tokens: int = 24) -> dict:
-    return {
-        "model": model,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "estimated_cost_usd": input_tokens * INPUT_USD_PER_TOKEN + output_tokens * OUTPUT_USD_PER_TOKEN,
-    }
+    return usage_from_gemini_metadata(
+        model,
+        {
+            "promptTokenCount": input_tokens,
+            "candidatesTokenCount": output_tokens,
+            "thoughtsTokenCount": 0,
+        },
+    )
 
 
 def _topic(name: str, description: str) -> dict:
@@ -170,6 +171,9 @@ class GeminiNeighborhoodLLM:
         self.api_key = settings.google_gemini_api_key
         self.model = settings.gemini_model
         self.temperature = settings.gemini_temperature
+        self.on_usage = None
+        self.before_call = None
+        self.heartbeat = None
 
     def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
         total = int(counts.get("total") or 16)
@@ -233,45 +237,67 @@ class GeminiNeighborhoodLLM:
         cleaned = {str(key): (str(value) if value not in (None, "", "null") else None) for key, value in matches.items()}
         return {"matches": cleaned}, usage
 
+    def _bill(self, meta: dict | None) -> dict:
+        usage = usage_from_gemini_metadata(self.model, meta)
+        sink = getattr(self, "on_usage", None)
+        if callable(sink):
+            sink(usage)
+        return usage
+
     def _json(self, prompt: str, prompt_version: str) -> tuple[dict, dict]:
         if not self.api_key:
             raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured", terminal=True)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        max_out = 3072
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": self.temperature,
                 "responseMimeType": "application/json",
-                "maxOutputTokens": 3072,
+                "maxOutputTokens": max_out,
+                # Disable paid thinking tokens when the model supports it.
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         }
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
+        last_usage: dict | None = None
         heartbeat = getattr(self, "heartbeat", None)
+        before = getattr(self, "before_call", None)
         for attempt in range(1, 3):
             if callable(heartbeat):
                 heartbeat()
+            if callable(before):
+                before(reserve_usd_for_call(self.model, max_out))
             try:
                 with httpx.Client(timeout=90) as client:
                     response = client.post(url, json=body, headers={"x-goog-api-key": self.api_key})
                 if response.status_code == 402:
                     raise generation_unavailable("The model account has no credits left", terminal=True)
+                if response.status_code == 429:
+                    raise generation_unavailable(
+                        "Gemini rate or spend limit (429). Stopping to avoid burn.",
+                        terminal=True,
+                    )
+                if response.status_code == 400 and "thinkingConfig" in body["generationConfig"]:
+                    # Older model aliases may reject thinkingConfig; drop and retry once.
+                    body["generationConfig"].pop("thinkingConfig", None)
+                    continue
                 response.raise_for_status()
                 payload = response.json()
+                # Bill from Gemini's usageMetadata even when JSON parse fails.
+                last_usage = self._bill(payload.get("usageMetadata"))
                 parsed = _parse_gemini_payload(payload)
                 parsed.setdefault("schema_version", 1)
                 parsed.setdefault("prompt_version", prompt_version)
-                meta = payload.get("usageMetadata") or {}
-                usage = _usage(
-                    self.model,
-                    int(meta.get("promptTokenCount") or 0),
-                    int(meta.get("candidatesTokenCount") or 0),
-                )
-                return parsed, usage
+                return parsed, last_usage
+            except generation_unavailable:
+                raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                body["generationConfig"]["maxOutputTokens"] = min(4096, 3072 + 1024 * attempt)
+                max_out = min(4096, 3072 + 1024 * attempt)
+                body["generationConfig"]["maxOutputTokens"] = max_out
                 logger.info(
                     "gemini neighborhood retry %s: %s (%s)",
                     attempt,
