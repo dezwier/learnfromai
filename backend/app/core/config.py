@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     firebase_service_account_json: str = ""
     firebase_auth_emulator_host: str = ""
     google_gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_temperature: float = 0.0
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""

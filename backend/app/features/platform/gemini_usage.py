@@ -15,8 +15,9 @@ _RATES_USD_PER_M: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-3-flash-preview": (0.50, 3.00),
+    # Google AI Studio paid rates (output includes thinking).
     "gemini-3.5-flash-lite": (0.30, 2.50),
-    "gemini-flash-lite-latest": (0.10, 0.40),
+    "gemini-flash-lite-latest": (0.30, 2.50),
     "gemini-flash-latest": (0.30, 2.50),
 }
 _DEFAULT_RATES = (1.00, 5.00)
