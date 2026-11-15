@@ -46,7 +46,15 @@ LLM_PROVIDER=fake .venv/bin/python -m app.workers
 LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
 ```
 
-`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. Tests use `LLM_PROVIDER=fake`. A running worker asks Gemini, using `GOOGLE_GEMINI_API_KEY`.
+`make backend-test`, `make worker`, `make migrate`, and `make seed` wrap the same commands. Seed creates the empty shared graph when it is missing. The worker applies extend requests. Tests use `LLM_PROVIDER=fake`.
+
+A real worker calls Gemini and/or OpenAI depending on each user's **Settings → App → AI provider** switch (default Gemini). Configure both keys on the worker so either side of the switch works:
+
+- `GOOGLE_GEMINI_API_KEY` (+ optional `GEMINI_MODEL`)
+- `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-4o-mini`)
+- `LLM_PROVIDER=gemini` as the server default when a user has not chosen
+
+See [LLM provider setup](#llm-provider-setup) below.
 
 ## Flutter
 
@@ -77,7 +85,7 @@ Backend tests use database `adaptive_mastery_test` on local Postgres. `tests/tes
 
 The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, worker, and web service. It does not share a project or variables with the other apps.
 
-The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. The worker uses Gemini. A new `SECRET_KEY` was generated for this project.
+The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. The worker uses Gemini and/or OpenAI based on user preference. A new `SECRET_KEY` was generated for this project.
 
 ```bash
 make deploy-api
@@ -86,3 +94,19 @@ railway ssh --service api -- python -m scripts.seed
 ```
 
 `railway up` is run from `backend` with `--path-as-root`, so the image build matches `backend/Dockerfile`. The API start command is `sh -c "uvicorn app.main:app --host 0.0.0.0 --port $PORT"` because Railway does not expand `$PORT` otherwise.
+
+## LLM provider setup
+
+What the code already does: App settings switch (Gemini / ChatGPT), preference API, OpenAI + Gemini adapters (`gpt-4o-mini` by default), shared prompts, and spend capping for both.
+
+What you need to do:
+
+1. Create an OpenAI API key at https://platform.openai.com/api-keys and add billing/credits.
+2. On the Railway **worker** (and API if you keep envs in sync), set:
+   - `OPENAI_API_KEY=sk-...`
+   - `OPENAI_MODEL=gpt-4o-mini` (optional; this is the default)
+   - Keep `GOOGLE_GEMINI_API_KEY` so Gemini still works
+   - Optional: `LLM_PROVIDER=gemini` as the default for users who never flipped the switch
+3. Redeploy the worker after env vars change (`make deploy-worker`). Redeploy API/web if this branch is not live yet.
+4. In the app: **Settings → App → AI provider → ChatGPT**, expand a neighborhood, then flip back to Gemini to confirm both paths.
+5. Daily spend still hits `LLM_DAILY_SPEND_EUR_LIMIT` from recorded USD for either provider.

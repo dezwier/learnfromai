@@ -1,15 +1,19 @@
-"""Per-user neighborhood size settings."""
+"""Per-user neighborhood size and LLM provider settings."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from app.features.accounts.models import User
+from app.features.platform.neighborhood_llm import normalize_llm_provider
 
 DEFAULTS = {
     "total": 16,
     "extended": 12,
 }
+
+DEFAULT_LLM_PROVIDER = "gemini"
+ALLOWED_LLM_PROVIDERS = frozenset({"gemini", "openai"})
 
 CLAMPS = {
     "total": (8, 32),
@@ -52,6 +56,39 @@ def merge_neighborhood_prefs(preferences: dict | None, updates: dict[str, Any]) 
         if key in updates and updates[key] is not None:
             block[key] = _clamp(key, updates[key])
     current["neighborhood"] = block
+    return current
+
+
+def preferred_llm_provider(user: User | None = None, raw: dict | None = None) -> str | None:
+    """Raw stored preference for jobs (None → factory uses env default)."""
+    prefs = raw if raw is not None else ((user.preferences if user is not None else None) or {})
+    if not isinstance(prefs, dict):
+        return None
+    normalized = normalize_llm_provider(prefs.get("llm_provider"))
+    if normalized in ALLOWED_LLM_PROVIDERS:
+        return normalized
+    return None
+
+
+def llm_provider_for(user: User | None = None, raw: dict | None = None) -> str:
+    """Preference for API/UI (defaults to gemini when unset)."""
+    return preferred_llm_provider(user, raw) or DEFAULT_LLM_PROVIDER
+
+
+def merge_llm_provider_pref(preferences: dict | None, value: object | None) -> dict:
+    current = dict(preferences or {})
+    if value is None:
+        return current
+    normalized = normalize_llm_provider(value)
+    if normalized not in ALLOWED_LLM_PROVIDERS:
+        from app.core.errors import AppError
+
+        raise AppError(
+            "VALIDATION_ERROR",
+            "llm_provider must be gemini or openai",
+            422,
+        )
+    current["llm_provider"] = normalized
     return current
 
 

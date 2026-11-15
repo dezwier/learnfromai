@@ -13,7 +13,12 @@ import httpx
 from app.core.config import get_settings
 from app.core.errors import generation_unavailable
 from app.features.knowledge_graph.identity import canonical_key_for
-from app.features.platform.gemini_usage import reserve_usd_for_call, usage_from_gemini_metadata
+from app.features.platform.llm_usage_pricing import (
+    reserve_usd_for_call,
+    usage_from_gemini_metadata,
+    usage_from_openai_usage,
+    usage_from_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +37,11 @@ class NeighborhoodLLM(Protocol):
 
 
 def _usage(model: str, input_tokens: int = 12, output_tokens: int = 24) -> dict:
-    return usage_from_gemini_metadata(
+    return usage_from_tokens(
         model,
-        {
-            "promptTokenCount": input_tokens,
-            "candidatesTokenCount": output_tokens,
-            "thoughtsTokenCount": 0,
-        },
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        source="synthetic",
     )
 
 
@@ -64,6 +67,92 @@ def _distribute(total: int, min_per: int) -> dict[str, int]:
         leftover -= 1
         index += 1
     return sizes
+
+
+def build_neighborhood_prompt(topic: str, counts: dict) -> str:
+    total = int(counts.get("total") or 16)
+    min_per = int(counts.get("min_per_bucket") or 2)
+    prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
+    exclude_titles = [
+        str(title).strip()
+        for title in (counts.get("exclude_titles") or [])
+        if str(title).strip()
+    ]
+    prefer_line = ""
+    if prefer:
+        prefer_line = (
+            f" Prefer putting new topics into these underfilled roles when they fit: {', '.join(map(str, prefer))}."
+        )
+    exclude_line = ""
+    if exclude_titles:
+        exclude_line = (
+            " Do not repeat any of these existing neighbor titles (or near-variants of them): "
+            + ", ".join(exclude_titles)
+            + "."
+        )
+    return (
+        "Build a learning neighborhood for one topic. Return JSON only with keys "
+        "focus, parents, siblings, children, acquaintances. "
+        "focus is {name, description}. Each other key is an array of {name, description}. "
+        f"Return about {total} related topics in total across the four arrays "
+        f"(sum of array lengths ≈ {total}). "
+        f"Include at least {min_per} item(s) in each of parents, siblings, children, and acquaintances "
+        "when the total allows; otherwise at least one in each role you can justify. "
+        "You choose how many go in each bucket — a bit of everything, weighted toward what fits the topic "
+        "(e.g. more children for a broad subject, more acquaintances for a cross-cutting one)."
+        f"{prefer_line}{exclude_line} "
+        "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
+        "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
+        "one for Ornithischia/Ornithischians, one for Theropoda/Theropods (and other -oda/-ods pairs), "
+        "one for a work and the same title with a medium qualifier "
+        "(The Last Dance, not also The Last Dance Documentary). "
+        "Never emit singular and plural, vernacular and scientific taxon labels, British/American spelling "
+        "pairs (Paleontology/Palaeontology, Archaeology/Archeology), or title-vs-title+Documentary/"
+        "Film/Series/Album/Podcast/Show as separate topics in this response. Prefer the simpler/"
+        "American spelling when both exist. "
+        "Descriptions are one short sentence that stands alone and must not refer to the seed topic by name "
+        "or as 'this topic'. Keep names short. "
+        "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
+        "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
+        "No duplicates across buckets. Seed topic: "
+        + json.dumps(
+            {
+                "topic": topic,
+                "total": total,
+                "min_per_bucket": min_per,
+                "exclude_titles": exclude_titles,
+            }
+        )
+    )
+
+
+def build_sameness_prompt(candidates: list[dict]) -> str:
+    return (
+        "Decide which existing topics are the same concept as each candidate. Return JSON "
+        '{"matches": {"<key>": "<uuid-or-null>"}}. '
+        "Match aggressively when wording differs but the real-world subject is the same. "
+        "Always treat these as the same concept: singular↔plural (Dinosaur/Dinosaurs), "
+        "common↔scientific taxon labels (Dinosaurs/Dinosauria, Ornithischia/Ornithischians, "
+        "Theropoda/Theropods, Sauropoda/Sauropods), "
+        "British↔American spelling (Paleontology/Palaeontology, Archaeology/Archeology), "
+        "and a work title ↔ the same title plus a medium qualifier "
+        "(The Last Dance / The Last Dance Documentary; also Film, Series, Album, Podcast, Show). "
+        "Pick the best existing id when several are close. "
+        "Return null only when they are clearly different subjects "
+        "(Bass the fish vs Bass the musical range).\n"
+        + json.dumps({"candidates": candidates})
+    )
+
+
+def _normalize_sameness(parsed: dict) -> dict:
+    matches = parsed.get("matches") if isinstance(parsed, dict) else {}
+    if not isinstance(matches, dict):
+        matches = {}
+    cleaned = {
+        str(key): (str(value) if value not in (None, "", "null") else None)
+        for key, value in matches.items()
+    }
+    return {"matches": cleaned}
 
 
 class FakeNeighborhoodLLM:
@@ -182,85 +271,12 @@ class GeminiNeighborhoodLLM:
         self.heartbeat = None
 
     def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
-        total = int(counts.get("total") or 16)
-        min_per = int(counts.get("min_per_bucket") or 2)
-        prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
-        exclude_titles = [
-            str(title).strip()
-            for title in (counts.get("exclude_titles") or [])
-            if str(title).strip()
-        ]
-        prefer_line = ""
-        if prefer:
-            prefer_line = (
-                f" Prefer putting new topics into these underfilled roles when they fit: {', '.join(map(str, prefer))}."
-            )
-        exclude_line = ""
-        if exclude_titles:
-            exclude_line = (
-                " Do not repeat any of these existing neighbor titles (or near-variants of them): "
-                + ", ".join(exclude_titles)
-                + "."
-            )
-        prompt = (
-            "Build a learning neighborhood for one topic. Return JSON only with keys "
-            "focus, parents, siblings, children, acquaintances. "
-            "focus is {name, description}. Each other key is an array of {name, description}. "
-            f"Return about {total} related topics in total across the four arrays "
-            f"(sum of array lengths ≈ {total}). "
-            f"Include at least {min_per} item(s) in each of parents, siblings, children, and acquaintances "
-            "when the total allows; otherwise at least one in each role you can justify. "
-            "You choose how many go in each bucket — a bit of everything, weighted toward what fits the topic "
-            "(e.g. more children for a broad subject, more acquaintances for a cross-cutting one)."
-            f"{prefer_line}{exclude_line} "
-            "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
-            "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
-            "one for Ornithischia/Ornithischians, one for Theropoda/Theropods (and other -oda/-ods pairs), "
-            "one for a work and the same title with a medium qualifier "
-            "(The Last Dance, not also The Last Dance Documentary). "
-            "Never emit singular and plural, vernacular and scientific taxon labels, British/American spelling "
-            "pairs (Paleontology/Palaeontology, Archaeology/Archeology), or title-vs-title+Documentary/"
-            "Film/Series/Album/Podcast/Show as separate topics in this response. Prefer the simpler/"
-            "American spelling when both exist. "
-            "Descriptions are one short sentence that stands alone and must not refer to the seed topic by name "
-            "or as 'this topic'. Keep names short. "
-            "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
-            "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
-            "No duplicates across buckets. Seed topic: "
-            + json.dumps(
-                {
-                    "topic": topic,
-                    "total": total,
-                    "min_per_bucket": min_per,
-                    "exclude_titles": exclude_titles,
-                }
-            )
-        )
-        parsed, usage = self._json(prompt, PROMPT_NEIGHBORHOOD)
+        parsed, usage = self._json(build_neighborhood_prompt(topic, counts), PROMPT_NEIGHBORHOOD)
         return _normalize_neighborhood(parsed, counts), usage
 
     def match_topics(self, candidates: list[dict]) -> tuple[dict, dict]:
-        prompt = (
-            "Decide which existing topics are the same concept as each candidate. Return JSON "
-            '{"matches": {"<key>": "<uuid-or-null>"}}. '
-            "Match aggressively when wording differs but the real-world subject is the same. "
-            "Always treat these as the same concept: singular↔plural (Dinosaur/Dinosaurs), "
-            "common↔scientific taxon labels (Dinosaurs/Dinosauria, Ornithischia/Ornithischians, "
-            "Theropoda/Theropods, Sauropoda/Sauropods), "
-            "British↔American spelling (Paleontology/Palaeontology, Archaeology/Archeology), "
-            "and a work title ↔ the same title plus a medium qualifier "
-            "(The Last Dance / The Last Dance Documentary; also Film, Series, Album, Podcast, Show). "
-            "Pick the best existing id when several are close. "
-            "Return null only when they are clearly different subjects "
-            "(Bass the fish vs Bass the musical range).\n"
-            + json.dumps({"candidates": candidates})
-        )
-        parsed, usage = self._json(prompt, PROMPT_SAMENESS)
-        matches = parsed.get("matches") if isinstance(parsed, dict) else {}
-        if not isinstance(matches, dict):
-            matches = {}
-        cleaned = {str(key): (str(value) if value not in (None, "", "null") else None) for key, value in matches.items()}
-        return {"matches": cleaned}, usage
+        parsed, usage = self._json(build_sameness_prompt(candidates), PROMPT_SAMENESS)
+        return _normalize_sameness(parsed), usage
 
     def _bill(self, meta: dict | None) -> dict:
         usage = usage_from_gemini_metadata(self.model, meta)
@@ -332,10 +348,134 @@ class GeminiNeighborhoodLLM:
         raise generation_unavailable("Gemini did not return valid JSON") from last_error
 
 
-def get_neighborhood_llm() -> NeighborhoodLLM:
+class OpenAINeighborhoodLLM:
+    name = "openai"
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        self.api_key = settings.openai_api_key
+        self.model = settings.openai_model
+        self.temperature = settings.openai_temperature
+        self.on_usage = None
+        self.before_call = None
+        self.heartbeat = None
+
+    def generate_neighborhood(self, topic: str, counts: dict[str, int]) -> tuple[dict, dict]:
+        parsed, usage = self._json(build_neighborhood_prompt(topic, counts), PROMPT_NEIGHBORHOOD)
+        return _normalize_neighborhood(parsed, counts), usage
+
+    def match_topics(self, candidates: list[dict]) -> tuple[dict, dict]:
+        parsed, usage = self._json(build_sameness_prompt(candidates), PROMPT_SAMENESS)
+        return _normalize_sameness(parsed), usage
+
+    def _bill(self, usage_payload: dict | None) -> dict:
+        usage = usage_from_openai_usage(self.model, usage_payload)
+        sink = getattr(self, "on_usage", None)
+        if callable(sink):
+            sink(usage)
+        return usage
+
+    def _json(self, prompt: str, prompt_version: str) -> tuple[dict, dict]:
+        if not self.api_key:
+            raise generation_unavailable("OPENAI_API_KEY is not configured", terminal=True)
+        url = "https://api.openai.com/v1/chat/completions"
+        max_out = 3072
+        body = {
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": max_out,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You return valid JSON objects only. No markdown fences.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        }
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        last_error: Exception | None = None
+        heartbeat = getattr(self, "heartbeat", None)
+        before = getattr(self, "before_call", None)
+        for attempt in range(1, 3):
+            if callable(heartbeat):
+                heartbeat()
+            if callable(before):
+                before(reserve_usd_for_call(self.model, max_out))
+            try:
+                with httpx.Client(timeout=90) as client:
+                    response = client.post(
+                        url,
+                        json=body,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                if response.status_code == 402:
+                    raise generation_unavailable("The model account has no credits left", terminal=True)
+                if response.status_code == 429:
+                    raise generation_unavailable(
+                        "OpenAI rate or spend limit (429). Stopping to avoid burn.",
+                        terminal=True,
+                    )
+                response.raise_for_status()
+                payload = response.json()
+                usage = self._bill(payload.get("usage"))
+                parsed = _parse_openai_payload(payload)
+                parsed.setdefault("schema_version", 1)
+                parsed.setdefault("prompt_version", prompt_version)
+                return parsed, usage
+            except generation_unavailable:
+                raise
+            except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
+                last_error = exc
+                max_out = min(4096, 3072 + 1024 * attempt)
+                body["max_tokens"] = max_out
+                logger.info(
+                    "openai neighborhood retry %s: %s (%s)",
+                    attempt,
+                    type(exc).__name__,
+                    str(exc)[:160],
+                )
+        raise generation_unavailable("OpenAI did not return valid JSON") from last_error
+
+
+def normalize_llm_provider(value: object | None) -> str | None:
+    """Map UI/env aliases to gemini | openai | fake, or None if unset/invalid."""
+    if value is None:
+        return None
+    choice = str(value).strip().lower()
+    if not choice:
+        return None
+    if choice in {"openai", "gpt", "chatgpt"}:
+        return "openai"
+    if choice in {"gemini", "google"}:
+        return "gemini"
+    if choice == "fake":
+        return "fake"
+    return None
+
+
+def resolve_llm_provider(preferred: object | None = None) -> str:
+    """Resolve provider: explicit preference → env default → gemini."""
     settings = get_settings()
-    if settings.environment == "test" or settings.llm_provider == "fake":
+    if settings.environment == "test":
+        return "fake"
+    for candidate in (preferred, settings.llm_provider, "gemini"):
+        normalized = normalize_llm_provider(candidate)
+        if normalized:
+            return normalized
+    return "gemini"
+
+
+def get_neighborhood_llm(provider: str | None = None) -> NeighborhoodLLM:
+    choice = resolve_llm_provider(provider)
+    if choice == "fake":
         return FakeNeighborhoodLLM()
+    if choice == "openai":
+        return OpenAINeighborhoodLLM()
     return GeminiNeighborhoodLLM()
 
 
@@ -421,7 +561,7 @@ def _loads_json_object(text: str) -> dict:
             raise
         parsed = json.loads(stripped[start : end + 1])
     if not isinstance(parsed, dict):
-        raise ValueError("Gemini JSON root must be an object")
+        raise ValueError("LLM JSON root must be an object")
     return parsed
 
 
@@ -444,6 +584,25 @@ def _parse_gemini_payload(payload: dict) -> dict:
     except json.JSONDecodeError as exc:
         preview = re.sub(r"\s+", " ", text)[:180]
         raise ValueError(f"Invalid JSON from Gemini: {exc.msg}; preview={preview!r}") from exc
+
+
+def _parse_openai_payload(payload: dict) -> dict:
+    choices = payload.get("choices") or []
+    if not choices:
+        raise ValueError("OpenAI returned no choices")
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    finish = str(choice.get("finish_reason") or "")
+    if finish == "content_filter":
+        raise ValueError("OpenAI blocked the response (content_filter)")
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    text = str(message.get("content") or "").strip()
+    if not text:
+        raise ValueError(f"OpenAI returned empty text (finish={finish or 'unknown'})")
+    try:
+        return _loads_json_object(text)
+    except json.JSONDecodeError as exc:
+        preview = re.sub(r"\s+", " ", text)[:180]
+        raise ValueError(f"Invalid JSON from OpenAI: {exc.msg}; preview={preview!r}") from exc
 
 
 def parse_uuid(value: object) -> UUID | None:

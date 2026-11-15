@@ -25,6 +25,7 @@ def test_preferences_defaults_and_clamp(client, auth, user, session):
     assert body["total"] == 16
     assert body["extended"] == 12
     assert body["min_per_bucket"] == 2
+    assert response.json()["llm_provider"] == "gemini"
 
     patched = client.patch(
         "/api/v1/me/preferences",
@@ -37,8 +38,39 @@ def test_preferences_defaults_and_clamp(client, auth, user, session):
         "extended": 24,
         "min_per_bucket": 2,
     }
+    assert patched.json()["llm_provider"] == "gemini"
     session.refresh(user)
     assert neighborhood_counts(user)["total"] == 32
+
+
+def test_llm_provider_preference(client, auth, user, session):
+    from app.features.knowledge_graph.preferences import llm_provider_for
+
+    bad = client.patch(
+        "/api/v1/me/preferences",
+        headers=auth,
+        json={"llm_provider": "claude"},
+    )
+    assert bad.status_code == 422
+
+    patched = client.patch(
+        "/api/v1/me/preferences",
+        headers=auth,
+        json={"llm_provider": "chatgpt"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["llm_provider"] == "openai"
+    session.refresh(user)
+    assert llm_provider_for(user) == "openai"
+    assert user.preferences.get("llm_provider") == "openai"
+
+    back = client.patch(
+        "/api/v1/me/preferences",
+        headers=auth,
+        json={"llm_provider": "gemini"},
+    )
+    assert back.status_code == 200
+    assert back.json()["llm_provider"] == "gemini"
 
 
 def test_legacy_bucket_prefs_sum_to_total(client, auth, user, session):
@@ -371,7 +403,7 @@ def test_expand_batches_sameness_into_one_match_topics_call(session, user):
     import app.features.knowledge_graph.neighborhood as neighborhood_mod
 
     original = neighborhood_mod.get_neighborhood_llm
-    neighborhood_mod.get_neighborhood_llm = lambda: BatchSpy()
+    neighborhood_mod.get_neighborhood_llm = lambda *args, **kwargs: BatchSpy()
     try:
         BatchSpy.calls = 0
         expand_neighborhood(session, job)
@@ -456,7 +488,7 @@ def test_existing_focus_skips_focus_sameness_and_fills_deficit(session, user):
     import app.features.knowledge_graph.neighborhood as neighborhood_mod
 
     original = neighborhood_mod.get_neighborhood_llm
-    neighborhood_mod.get_neighborhood_llm = lambda: Spy()
+    neighborhood_mod.get_neighborhood_llm = lambda *args, **kwargs: Spy()
     try:
         Spy.match_calls = 0
         result = expand_neighborhood(session, job)
@@ -532,7 +564,7 @@ def test_new_topic_reuse_complete_skips_neighborhood(session, user):
     import app.features.knowledge_graph.neighborhood as neighborhood_mod
 
     original = neighborhood_mod.get_neighborhood_llm
-    neighborhood_mod.get_neighborhood_llm = lambda: Spy()
+    neighborhood_mod.get_neighborhood_llm = lambda *args, **kwargs: Spy()
     try:
         Spy.generate_calls = 0
         Spy.match_calls = 0

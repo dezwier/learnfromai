@@ -13,6 +13,21 @@ class TopicChoice {
   final String? description;
 }
 
+/// Backend LLM provider preference: gemini | openai.
+class LlmProviderPref {
+  static const gemini = 'gemini';
+  static const openai = 'openai';
+
+  static String normalize(Object? raw) {
+    final value = (raw?.toString() ?? '').trim().toLowerCase();
+    if (value == openai || value == 'gpt' || value == 'chatgpt') return openai;
+    return gemini;
+  }
+
+  static String label(String provider) =>
+      provider == openai ? 'ChatGPT' : 'Gemini';
+}
+
 class NeighborhoodPrefs {
   const NeighborhoodPrefs({
     this.total = 16,
@@ -198,6 +213,7 @@ class GraphController extends ChangeNotifier {
   List<TopicChoice> suggestions = [];
   final List<String> focusHistory = [];
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
+  String llmProvider = LlmProviderPref.gemini;
   final List<TrackedJob> trackedJobs = [];
   /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
   String? lastCompletedNodeId;
@@ -557,11 +573,7 @@ class GraphController extends ChangeNotifier {
   Future<void> loadPreferences() async {
     try {
       final raw = await _get('/me/preferences');
-      final neighborhood = raw['neighborhood'];
-      if (neighborhood is Map<String, dynamic>) {
-        prefs = NeighborhoodPrefs.fromJson(neighborhood);
-        notifyListeners();
-      }
+      _applyPreferencesPayload(raw);
     } on ApiException {
       // Keep defaults when preferences are unavailable.
     }
@@ -571,12 +583,11 @@ class GraphController extends ChangeNotifier {
     prefs = next;
     notifyListeners();
     try {
-      final raw = await _patch('/me/preferences', body: {'neighborhood': next.toJson()});
-      final neighborhood = raw['neighborhood'];
-      if (neighborhood is Map<String, dynamic>) {
-        prefs = NeighborhoodPrefs.fromJson(neighborhood);
-        notifyListeners();
-      }
+      final raw = await _patch('/me/preferences', body: {
+        'neighborhood': next.toJson(),
+        'llm_provider': llmProvider,
+      });
+      _applyPreferencesPayload(raw);
       final id = focusId;
       if (id != null && !refreshing && !loading) {
         await openExisting(id);
@@ -585,6 +596,33 @@ class GraphController extends ChangeNotifier {
       error = exc.message;
       notifyListeners();
     }
+  }
+
+  Future<void> saveLlmProvider(String next) async {
+    final provider = LlmProviderPref.normalize(next);
+    llmProvider = provider;
+    notifyListeners();
+    try {
+      final raw = await _patch('/me/preferences', body: {
+        'llm_provider': provider,
+        'neighborhood': prefs.toJson(),
+      });
+      _applyPreferencesPayload(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+    }
+  }
+
+  void _applyPreferencesPayload(Map<String, dynamic> raw) {
+    final neighborhood = raw['neighborhood'];
+    if (neighborhood is Map<String, dynamic>) {
+      prefs = NeighborhoodPrefs.fromJson(neighborhood);
+    }
+    if (raw.containsKey('llm_provider')) {
+      llmProvider = LlmProviderPref.normalize(raw['llm_provider']);
+    }
+    notifyListeners();
   }
 
   Future<void> refreshTrackedJobs() async {

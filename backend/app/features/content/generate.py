@@ -53,7 +53,11 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
         return {"node_id": str(node.id), "skipped": True, "bit_ids": []}
 
     neighbor_titles = _neighbor_titles(session, node.id)
-    llm = get_content_llm()
+    from app.features.accounts.models import User
+    from app.features.knowledge_graph.preferences import preferred_llm_provider
+
+    user = session.get(User, user_id)
+    llm = get_content_llm(preferred_llm_provider(user))
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="content")
     set_progress(session, job, stage="generate", message="Writing learn · example · check…", fraction=0.35)

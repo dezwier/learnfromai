@@ -16,7 +16,12 @@ from app.features.accounts.profile import merge_profile_prefs, profile_fields
 from app.features.content.service import content_for_node, content_or_expand
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
 from app.features.knowledge_graph.node_ops import delete_knowledge_node, update_knowledge_node
-from app.features.knowledge_graph.preferences import merge_neighborhood_prefs, neighborhood_counts
+from app.features.knowledge_graph.preferences import (
+    llm_provider_for,
+    merge_llm_provider_pref,
+    merge_neighborhood_prefs,
+    neighborhood_counts,
+)
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
@@ -53,6 +58,7 @@ class KnowledgeContentBody(BaseModel):
 
 class PreferencesBody(BaseModel):
     neighborhood: dict[str, Any] | None = None
+    llm_provider: str | None = None
 
 
 class MePatchBody(BaseModel):
@@ -102,7 +108,10 @@ def patch_me(
 
 @router.get("/me/preferences")
 def get_preferences(user: User = Depends(get_current_user)):
-    return {"neighborhood": neighborhood_counts(user)}
+    return {
+        "neighborhood": neighborhood_counts(user),
+        "llm_provider": llm_provider_for(user),
+    }
 
 
 @router.patch("/me/preferences")
@@ -111,12 +120,19 @@ def patch_preferences(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    updates = body.neighborhood or {}
-    user.preferences = merge_neighborhood_prefs(user.preferences, updates)
+    prefs = user.preferences
+    if body.neighborhood is not None:
+        prefs = merge_neighborhood_prefs(prefs, body.neighborhood)
+    if body.llm_provider is not None:
+        prefs = merge_llm_provider_pref(prefs, body.llm_provider)
+    user.preferences = prefs
     session.add(user)
     session.commit()
     session.refresh(user)
-    return {"neighborhood": neighborhood_counts(user)}
+    return {
+        "neighborhood": neighborhood_counts(user),
+        "llm_provider": llm_provider_for(user),
+    }
 
 
 @router.get("/jobs")

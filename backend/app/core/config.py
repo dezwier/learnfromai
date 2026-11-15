@@ -16,19 +16,23 @@ class Settings(BaseSettings):
     google_gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_temperature: float = 0.0
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_temperature: float = 0.0
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""
     llm_daily_tokens_user_limit: int = 200_000
-    # Hard global daily cap from Gemini usageMetadata × published rates (≈€3 ≈ $3).
+    # Hard global daily cap from recorded LLM usage × published rates (≈€3 ≈ $3).
     llm_daily_spend_eur_limit: float = 3.0
     # USD per EUR for the cap (1.0 ≈ treat €1 as $1; raise to stop earlier).
     llm_usd_per_eur: float = 1.0
     graph_expansion_max_nodes: int = 80
     job_worker_concurrency: int = 2
-    # Long enough for Gemini timeouts + consolidate/merge; progress also renews the lease.
+    # Long enough for LLM timeouts + consolidate/merge; progress also renews the lease.
     job_lease_seconds: int = 600
     job_max_attempts: int = 3
     job_idle_seconds: float = 1.0
+    # Server default when the user has no llm_provider preference: gemini | openai | fake.
     llm_provider: str = "gemini"
     access_token_expire_minutes: int = 60 * 24 * 7
     api_v1_prefix: str = "/api/v1"

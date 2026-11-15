@@ -169,7 +169,8 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
 
         raise AppError("VALIDATION_ERROR", "Job is missing a user", 422)
     assert_user_quota(session, user_id)
-    from app.features.knowledge_graph.preferences import min_per_bucket
+    from app.features.accounts.models import User
+    from app.features.knowledge_graph.preferences import min_per_bucket, preferred_llm_provider
 
     total = int(payload.get("total") or 16)
     if total <= 0:
@@ -198,8 +199,9 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     session.commit()
     renew_lease(session, job)
 
-    llm = get_neighborhood_llm()
-    # Keep the lease alive across Gemini attempt timeouts (each can take ~60s).
+    user = session.get(User, user_id)
+    llm = get_neighborhood_llm(preferred_llm_provider(user))
+    # Keep the lease alive across provider attempt timeouts (each can take ~60s).
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="neighborhood")
 

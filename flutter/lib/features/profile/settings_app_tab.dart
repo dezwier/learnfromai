@@ -54,6 +54,34 @@ class SettingsAppTab extends StatelessWidget {
             },
           ),
         ),
+        const SizedBox(height: 16),
+        SettingsFormStyles.settingsRow(
+          context: context,
+          label: 'AI provider',
+          description: 'Which model backend generates neighborhoods and learning bits.',
+          control: SettingsFormStyles.densePopupField<String>(
+            context: context,
+            outlineBorder: outline,
+            selectedChild: Text(
+              LlmProviderPref.label(graph.llmProvider),
+              style: theme.textTheme.bodyMedium,
+              overflow: TextOverflow.ellipsis,
+            ),
+            entries: [
+              DensePopupEntry(
+                value: LlmProviderPref.gemini,
+                child: Text('Gemini', style: theme.textTheme.bodyMedium),
+              ),
+              DensePopupEntry(
+                value: LlmProviderPref.openai,
+                child: Text('ChatGPT', style: theme.textTheme.bodyMedium),
+              ),
+            ],
+            onSelected: (value) {
+              if (value != null) graph.saveLlmProvider(value);
+            },
+          ),
+        ),
         const SizedBox(height: 28),
         Text(
           'Neighborhood size',

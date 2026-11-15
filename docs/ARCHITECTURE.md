@@ -8,14 +8,14 @@ flowchart LR
   api[FastAPI]
   worker[Worker]
   db[(PostgreSQL)]
-  gemini[Gemini]
+  llm[Gemini or OpenAI]
   flutter -->|Firebase then API JWT| api
   api --> db
   worker -->|SKIP LOCKED| db
-  worker --> gemini
+  worker --> llm
 ```
 
-The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction.
+The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction. Provider choice comes from the user's `llm_provider` preference (Gemini or OpenAI/`gpt-4o-mini`), falling back to `LLM_PROVIDER`.
 
 ## Expand orchestrator
 

@@ -46,7 +46,7 @@ def tokens_used_today(session: Session, user_id: UUID) -> int:
 
 
 def spend_usd_today(session: Session) -> float:
-    """Global (all users) USD spend today from recorded Gemini usageMetadata."""
+    """Global (all users) USD spend today from recorded LLM usage."""
     start = _day_start()
     total = session.exec(
         select(func.coalesce(func.sum(LlmUsage.estimated_cost_usd), 0.0)).where(
@@ -77,7 +77,7 @@ def assert_user_quota(session: Session, user_id: UUID) -> None:
 
 
 def assert_daily_spend(session: Session, *, reserve_usd: float = 0.0) -> None:
-    """Hard stop when recorded Gemini-billed spend for today hits the euro cap."""
+    """Hard stop when recorded LLM-billed spend for today hits the euro cap."""
     from app.core.errors import rate_limited
 
     limit_usd = daily_spend_usd_limit()
@@ -97,7 +97,7 @@ def bind_usage_sink(
     job_id: UUID | None,
     task: str,
 ) -> None:
-    """Record every Gemini HTTP response (incl. failed JSON) and re-check the cap."""
+    """Record every provider HTTP response (incl. failed JSON) and re-check the cap."""
 
     setattr(llm, "usage_task", task)
 
@@ -129,8 +129,8 @@ def maybe_record_usage(
     task: str,
     usage: dict,
 ) -> None:
-    """Record returned usage for fake LLMs; Gemini already billed via on_usage."""
-    if getattr(llm, "name", None) == "gemini" and callable(getattr(llm, "on_usage", None)):
+    """Record returned usage for fake LLMs; live providers already billed via on_usage."""
+    if callable(getattr(llm, "on_usage", None)) and getattr(llm, "name", None) != "fake":
         assert_daily_spend(session)
         return
     record_usage(session, user_id=user_id, job_id=job_id, task=task, provider=getattr(llm, "name", "fake"), usage=usage)
