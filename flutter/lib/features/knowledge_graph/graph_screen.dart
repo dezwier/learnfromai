@@ -1407,12 +1407,14 @@ class _TopicDetailScreen extends StatelessWidget {
                   filled: !canRequestNeighbors && !canViewInGraph,
                   onPressed: onLearn,
                 ),
-                const SizedBox(width: 8),
-                _TopicIconButton(
-                  tooltip: hasImage ? 'Regenerate image' : 'Generate image',
-                  icon: Icons.image_outlined,
-                  onPressed: canGenerateImage ? onGenerateImage : null,
-                ),
+                if (!hasImage) ...[
+                  const SizedBox(width: 8),
+                  _TopicIconButton(
+                    tooltip: 'Generate image',
+                    icon: Icons.image_outlined,
+                    onPressed: canGenerateImage ? onGenerateImage : null,
+                  ),
+                ],
                 const SizedBox(width: 8),
                 _TopicIconButton(
                   tooltip: 'Edit',
@@ -2205,7 +2207,13 @@ class _NodeCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasImage) _hexImageFill(imageBytes!, flower: true),
+          if (hasImage)
+            _hexImageFill(
+              imageBytes!,
+              flower: true,
+              fill: fill,
+              spotlight: spotlight,
+            ),
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.62,
@@ -2297,7 +2305,13 @@ class _NodeCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasImage) _hexImageFill(imageBytes!, flower: false),
+          if (hasImage)
+            _hexImageFill(
+              imageBytes!,
+              flower: false,
+              fill: fill,
+              spotlight: spotlight,
+            ),
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.34,
@@ -2325,7 +2339,16 @@ class _NodeCard extends StatelessWidget {
     );
   }
 
-  Widget _hexImageFill(Uint8List bytes, {required bool flower}) {
+  Widget _hexImageFill(
+    Uint8List bytes, {
+    required bool flower,
+    required Color fill,
+    required double spotlight,
+  }) {
+    final lift = spotlight.clamp(0.0, 1.0);
+    // SoftLight keeps photo detail while washing in the role fill; spotlight
+    // lifts toward a brighter tint so the highlight still reads on image tiles.
+    final wash = Color.lerp(fill, Colors.white, 0.18 * lift)!;
     return ClipPath(
       clipper: flower ? const _FlowerTapClipper() : const _HexTapClipper(),
       child: Stack(
@@ -2336,6 +2359,12 @@ class _NodeCard extends StatelessWidget {
             fit: BoxFit.cover,
             gaplessPlayback: true,
             filterQuality: FilterQuality.medium,
+            color: wash.withValues(alpha: 0.52 + 0.22 * lift),
+            colorBlendMode: BlendMode.softLight,
+          ),
+          // Extra multiply wash so tile hue stays obvious on bright photos.
+          ColoredBox(
+            color: fill.withValues(alpha: 0.22 + 0.12 * lift),
           ),
           // Soft top veil + stronger bottom so titles stay readable on any photo.
           const DecoratedBox(
@@ -2344,9 +2373,9 @@ class _NodeCard extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0x33000000),
-                  Color(0x14000000),
-                  Color(0x99000000),
+                  Color(0x28000000),
+                  Color(0x10000000),
+                  Color(0x8A000000),
                 ],
                 stops: [0.0, 0.42, 1.0],
               ),
