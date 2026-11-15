@@ -100,3 +100,49 @@ def reserve_usd_for_call(model: str, max_output_tokens: int) -> float:
         input_pad * input_rate / 1_000_000
         + max(0, int(max_output_tokens)) * output_rate / 1_000_000
     )
+
+
+# Flat per-image USD estimates (~€0.05 target).
+_IMAGE_COST_USD: dict[str, float] = {
+    "imagen-4.0-generate-001": 0.04,
+    "imagen-4.0-fast-generate-001": 0.02,
+    "imagen-3.0-generate-002": 0.03,
+    "gpt-image-1": 0.07,
+    "gpt-image-1-mini": 0.036,
+    "dall-e-3": 0.04,
+    "fake-image": 0.0,
+}
+
+
+def image_cost_usd(model: str, *, quality: str | None = None) -> float:
+    key = (model or "").strip().lower().removeprefix("models/")
+    if key.startswith("gpt-image-1") and not key.startswith("gpt-image-1-mini"):
+        q = (quality or "medium").strip().lower()
+        if q == "low":
+            return 0.02
+        if q == "high":
+            return 0.19
+        return 0.07
+    if key in _IMAGE_COST_USD:
+        return _IMAGE_COST_USD[key]
+    for prefix, cost in _IMAGE_COST_USD.items():
+        if key.startswith(prefix):
+            return cost
+    return 0.05
+
+
+def usage_from_image_cost(model: str, cost_usd: float) -> dict:
+    """Bill a fixed per-image cost (no token counts)."""
+    return {
+        "model": model,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "thoughts_tokens": 0,
+        "cached_tokens": 0,
+        "estimated_cost_usd": max(0.0, float(cost_usd)),
+        "source": "image_flat_rate",
+    }
+
+
+def reserve_usd_for_image(model: str, *, quality: str | None = None) -> float:
+    return image_cost_usd(model, quality=quality)

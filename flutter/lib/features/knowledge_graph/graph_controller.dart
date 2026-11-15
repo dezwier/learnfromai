@@ -196,6 +196,7 @@ class GraphController extends ChangeNotifier {
     this.patcher,
     this.deleter,
     this.jobLoader,
+    this.bytesLoader,
   });
 
   final ApiClient? api;
@@ -204,6 +205,7 @@ class GraphController extends ChangeNotifier {
   final Future<Map<String, dynamic>> Function(String path, {Object? body})? patcher;
   final Future<Map<String, dynamic>> Function(String path)? deleter;
   final Future<Map<String, dynamic>> Function(String jobId)? jobLoader;
+  final Future<List<int>> Function(String path)? bytesLoader;
 
   Map<String, dynamic>? categoryGraph;
   bool loading = false;
@@ -416,6 +418,80 @@ class GraphController extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+  }
+
+  /// Request shared topic image generation (or regeneration when [regenerate] is true).
+  Future<bool> enqueueImage(String id, {String? title, bool regenerate = false}) async {
+    if (jobForNode(id) != null) {
+      _ensurePoller();
+      return true;
+    }
+    try {
+      final body = regenerate ? {'regenerate': true} : {'generate': true};
+      final payload = await _post('/knowledge/nodes/$id/image', body: body);
+      final jobId = payload['job_id']?.toString();
+      if (jobId == null) {
+        final imageUrl = payload['image_url']?.toString();
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          patchNodeImageUrl(id, imageUrl);
+        }
+        return true;
+      }
+      _trackJobFromPayload(payload, id: id, title: title, type: 'generate_image');
+      return true;
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Authenticated PNG bytes for a topic image path from the graph payload.
+  Future<List<int>?> fetchImageBytes(String imageUrl) async {
+    final path = _apiPathFromImageUrl(imageUrl);
+    if (path == null) return null;
+    try {
+      return await _getBytes(path);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  void patchNodeImageUrl(String nodeId, String? imageUrl) {
+    final graph = categoryGraph;
+    if (graph == null) return;
+    final nodes = graph['nodes'];
+    if (nodes is! List) return;
+    var changed = false;
+    final next = <dynamic>[];
+    for (final raw in nodes) {
+      if (raw is Map && raw['id']?.toString() == nodeId) {
+        final copy = Map<String, dynamic>.from(raw);
+        copy['image_url'] = imageUrl;
+        next.add(copy);
+        changed = true;
+      } else {
+        next.add(raw);
+      }
+    }
+    if (!changed) return;
+    categoryGraph = {...graph, 'nodes': next};
+    notifyListeners();
+  }
+
+  static String? _apiPathFromImageUrl(String imageUrl) {
+    final trimmed = imageUrl.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.startsWith('/api/v1/')) return trimmed.substring('/api/v1'.length);
+    if (trimmed.startsWith('/knowledge/')) return trimmed;
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.path.contains('/api/v1/')) {
+      final idx = uri.path.indexOf('/api/v1/');
+      return uri.path.substring(idx + '/api/v1'.length);
+    }
+    return null;
   }
 
   /// POST focus; if a job is returned, track it without awaiting completion.
@@ -757,9 +833,22 @@ class GraphController extends ChangeNotifier {
             final loadId = resultFocus ?? tracked.nodeId;
             lastCompletedNodeId = loadId;
             lastCompletedJobType = tracked.type;
-            // Soft-refresh neighborhood only for expand_neighborhood jobs.
-            if (tracked.type != 'expand_content' &&
+            if (tracked.type == 'generate_image') {
+              final imageUrl = result is Map ? result['image_url']?.toString() : null;
+              if (imageUrl != null && imageUrl.isNotEmpty) {
+                patchNodeImageUrl(loadId, imageUrl);
+              } else {
+                try {
+                  final meta = await _get('/knowledge/nodes/$loadId/image');
+                  final url = meta['image_url']?.toString();
+                  if (url != null && url.isNotEmpty) patchNodeImageUrl(loadId, url);
+                } on ApiException {
+                  // Keep current graph.
+                }
+              }
+            } else if (tracked.type != 'expand_content' &&
                 (focusId == tracked.nodeId || focusId == loadId)) {
+              // Soft-refresh neighborhood only for expand_neighborhood jobs.
               try {
                 categoryGraph = await _get('/knowledge/graph/$loadId');
               } on ApiException {
@@ -776,7 +865,9 @@ class GraphController extends ChangeNotifier {
               error = job['error_message']?.toString() ??
                   (tracked.type == 'expand_content'
                       ? 'Content generation failed'
-                      : 'Neighborhood generation failed');
+                      : tracked.type == 'generate_image'
+                          ? 'Image generation failed'
+                          : 'Neighborhood generation failed');
             }
             notifyListeners();
             continue;
@@ -819,6 +910,14 @@ class GraphController extends ChangeNotifier {
     final client = api;
     if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
     return Map<String, dynamic>.from(await client.get(path) as Map);
+  }
+
+  Future<List<int>> _getBytes(String path) async {
+    final fetch = bytesLoader;
+    if (fetch != null) return fetch(path);
+    final client = api;
+    if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
+    return client.getBytes(path);
   }
 
   Future<Map<String, dynamic>> _post(String path, {Object? body}) async {

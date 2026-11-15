@@ -50,8 +50,8 @@ LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
 
 A real worker calls Gemini and/or OpenAI depending on each user's **Settings → App → AI provider** switch (default Gemini). Configure both keys on the worker so either side of the switch works:
 
-- `GOOGLE_GEMINI_API_KEY` (+ optional `GEMINI_MODEL`)
-- `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-4o-mini`)
+- `GOOGLE_GEMINI_API_KEY` (+ optional `GEMINI_MODEL`, `GEMINI_IMAGE_MODEL=imagen-4.0-generate-001`)
+- `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-4o-mini`, `OPENAI_IMAGE_MODEL=gpt-image-1`, `OPENAI_IMAGE_QUALITY=medium`)
 - `LLM_PROVIDER=gemini` as the server default when a user has not chosen
 
 See [LLM provider setup](#llm-provider-setup) below.
@@ -97,7 +97,7 @@ railway ssh --service api -- python -m scripts.seed
 
 ## LLM provider setup
 
-What the code already does: App settings switch (Gemini / ChatGPT), preference API, OpenAI + Gemini adapters (`gpt-4o-mini` by default), shared prompts, and spend capping for both.
+What the code already does: App settings switch (Gemini / ChatGPT), preference API, OpenAI + Gemini adapters (`gpt-4o-mini` by default), shared topic image generation (Imagen / `gpt-image-1`), shared prompts, and spend capping for both.
 
 What you need to do:
 

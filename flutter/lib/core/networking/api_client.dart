@@ -24,6 +24,34 @@ class ApiClient {
 
   Future<dynamic> delete(String path) => _send('DELETE', path, retry: false);
 
+  /// Authenticated GET that returns raw response bytes (e.g. PNG).
+  Future<List<int>> getBytes(String path, {bool retry = true}) async {
+    final attempts = retry ? 3 : 1;
+    Object? lastError;
+    for (var attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        final response = await _dispatch('GET', path);
+        if (response.statusCode == 401 && refreshIdToken != null) {
+          final refreshed = await _refreshOnce();
+          if (refreshed) {
+            final again = await _dispatch('GET', path);
+            if (again.statusCode >= 200 && again.statusCode < 300) return again.bodyBytes;
+            throw ApiException(again.statusCode, 'HTTP_${again.statusCode}', 'Request failed');
+          }
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) return response.bodyBytes;
+        throw ApiException(response.statusCode, 'HTTP_${response.statusCode}', 'Request failed');
+      } on ApiException {
+        rethrow;
+      } catch (error) {
+        lastError = error;
+        if (attempt == attempts) break;
+        await Future<void>.delayed(Duration(milliseconds: 300 * attempt));
+      }
+    }
+    throw ApiException(0, 'NETWORK', 'Network request failed: $lastError');
+  }
+
   Future<dynamic> _send(
     String method,
     String path, {

@@ -13,6 +13,7 @@ class GraphNode {
     this.distance = 0,
     this.kind = 'focus',
     this.description,
+    this.imageUrl,
   });
 
   final String id;
@@ -21,6 +22,7 @@ class GraphNode {
   final int distance;
   final String kind;
   final String? description;
+  final String? imageUrl;
 
   NodeRole get role {
     switch (kind) {
@@ -65,6 +67,7 @@ class PlacedNode {
     required this.radius,
     this.isFlower = false,
     this.description,
+    this.imageUrl,
     this.viaRole,
     this.opacity = 1,
     this.flowerAmount,
@@ -85,6 +88,7 @@ class PlacedNode {
   /// Focus is the solid union of unit hexes (no internal gaps).
   final bool isFlower;
   final String? description;
+  final String? imageUrl;
   /// For [NodeRole.extended]: role of the direct neighbor this tile hangs off.
   final NodeRole? viaRole;
   /// 0–1 visibility while morphing layouts (departing / arriving tiles).
@@ -116,6 +120,7 @@ class PlacedNode {
     NodeRole? role,
     String? title,
     String? description,
+    String? imageUrl,
     double? opacity,
     double? flowerAmount,
   }) {
@@ -133,6 +138,7 @@ class PlacedNode {
       radius: radius ?? this.radius,
       isFlower: isFlower ?? this.isFlower,
       description: description ?? this.description,
+      imageUrl: imageUrl ?? this.imageUrl,
       viaRole: viaRole,
       opacity: opacity ?? this.opacity,
       flowerAmount: flowerAmount ?? this.flowerAmount,
@@ -188,6 +194,7 @@ PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
     kind: b.kind,
     role: tt < 0.5 ? a.role : b.role,
     description: tt < 0.5 ? a.description : b.description,
+    imageUrl: tt < 0.5 ? a.imageUrl : b.imageUrl,
     viaRole: tt < 0.5 ? a.viaRole : b.viaRole,
     x: lerpDouble(a.x, b.x, tt)!,
     y: lerpDouble(a.y, b.y, tt)!,
@@ -963,6 +970,7 @@ PlacedNode _hex(
     kind: node.kind,
     role: node.role,
     description: node.description,
+    imageUrl: node.imageUrl,
     viaRole: viaRole,
     radius: radius,
     x: cx - bounds.width / 2,
@@ -982,6 +990,7 @@ PlacedNode _flower(GraphNode node, {required double cx, required double cy, requ
     kind: node.kind,
     role: node.role,
     description: node.description,
+    imageUrl: node.imageUrl,
     radius: latticeSize,
     isFlower: true,
     x: cx - bounds.width / 2,

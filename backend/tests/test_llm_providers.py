@@ -11,6 +11,12 @@ from app.features.platform.content_llm import (
     OpenAIContentLLM,
     get_content_llm,
 )
+from app.features.platform.image_llm import (
+    FakeImageLLM,
+    GeminiImageLLM,
+    OpenAIImageLLM,
+    get_image_llm,
+)
 from app.features.platform.llm import bind_usage_sink, maybe_record_usage
 from app.features.platform.llm_usage_pricing import usage_from_openai_usage
 from app.features.platform.models import LlmUsage
@@ -53,10 +59,13 @@ def test_factory_branches_by_provider(monkeypatch):
 
     assert isinstance(get_neighborhood_llm("fake"), FakeNeighborhoodLLM)
     assert isinstance(get_content_llm("fake"), FakeContentLLM)
+    assert isinstance(get_image_llm("fake"), FakeImageLLM)
     assert isinstance(get_neighborhood_llm("gemini"), GeminiNeighborhoodLLM)
     assert isinstance(get_content_llm("gemini"), GeminiContentLLM)
+    assert isinstance(get_image_llm("gemini"), GeminiImageLLM)
     assert isinstance(get_neighborhood_llm("openai"), OpenAINeighborhoodLLM)
     assert isinstance(get_content_llm("chatgpt"), OpenAIContentLLM)
+    assert isinstance(get_image_llm("chatgpt"), OpenAIImageLLM)
     assert isinstance(get_neighborhood_llm("gpt"), OpenAINeighborhoodLLM)
 
     monkeypatch.setenv("LLM_PROVIDER", "openai")
@@ -67,6 +76,7 @@ def test_factory_branches_by_provider(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     get_settings.cache_clear()
     assert isinstance(get_neighborhood_llm("openai"), FakeNeighborhoodLLM)
+    assert isinstance(get_image_llm("openai"), FakeImageLLM)
 
     get_settings.cache_clear()
 

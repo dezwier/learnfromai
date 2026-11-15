@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -399,9 +400,20 @@ class _GraphScreenState extends State<GraphScreen>
     _handlingJobCompletion = true;
     graph.clearLastCompleted();
     // Learn sheet listens for content jobs itself — don't remount the graph.
-    if (jobType == 'expand_content') {
+    // Image jobs patch image_url on the graph; mirror onto the open topic tile.
+    if (jobType == 'expand_content' || jobType == 'generate_image') {
+      if (jobType == 'generate_image' && mounted) {
+        final url = _imageUrlFromGraph(graph, id);
+        final current = _highlighted;
+        if (current != null && current.id == id && url != current.imageUrl) {
+          setState(() => _highlighted = current.copyWith(imageUrl: url));
+        } else if (mounted) {
+          setState(() {});
+        }
+      } else if (mounted) {
+        setState(() {});
+      }
       _handlingJobCompletion = false;
-      if (mounted) setState(() {});
       return;
     }
     _incompleteByNode[id] = false;
@@ -484,6 +496,7 @@ class _GraphScreenState extends State<GraphScreen>
       if (n.id == current.id &&
           n.title == current.title &&
           n.description == current.description &&
+          n.imageUrl == current.imageUrl &&
           n.role == current.role) {
         return;
       }
@@ -555,9 +568,17 @@ class _GraphScreenState extends State<GraphScreen>
         radius: node.radius,
         isFlower: node.isFlower,
         description: description,
+        imageUrl: node.imageUrl,
         viaRole: node.viaRole,
       );
     });
+  }
+
+  Future<void> _generateImage(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null) return;
+    final hasImage = (node.imageUrl ?? '').trim().isNotEmpty;
+    await graph.enqueueImage(node.id, title: node.title, regenerate: hasImage);
   }
 
   Future<void> _confirmDeleteHighlighted(GraphController graph) async {
@@ -937,6 +958,8 @@ class _GraphScreenState extends State<GraphScreen>
                 focusId: graph.focusId,
                 busy: graph.jobForNode(_highlighted!.id) != null,
                 progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
+                imageGenerating:
+                    graph.jobForNode(_highlighted!.id)?.type == 'generate_image',
                 relationsPending: openingRelated,
                 showRelations: showRelations,
                 canRequestNeighbors:
@@ -945,6 +968,7 @@ class _GraphScreenState extends State<GraphScreen>
                     !openingRelated,
                 canViewInGraph:
                     _highlighted!.id != graph.focusId && !openingRelated,
+                canGenerateImage: graph.jobForNode(_highlighted!.id) == null,
                 onClose: _closeTopic,
                 onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
                 onViewInGraph: () {
@@ -956,9 +980,11 @@ class _GraphScreenState extends State<GraphScreen>
                   if (node == null) return;
                   unawaited(_openLearn(node));
                 },
+                onGenerateImage: () => unawaited(_generateImage(graph)),
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
+                loadImageBytes: graph.fetchImageBytes,
               ),
             ),
         ],
@@ -969,6 +995,18 @@ class _GraphScreenState extends State<GraphScreen>
   bool _hasNodes(GraphController graph) {
     final nodes = graph.categoryGraph?['nodes'];
     return nodes is List && nodes.isNotEmpty;
+  }
+
+  String? _imageUrlFromGraph(GraphController graph, String nodeId) {
+    final nodes = graph.categoryGraph?['nodes'];
+    if (nodes is! List) return null;
+    for (final raw in nodes) {
+      if (raw is Map && raw['id']?.toString() == nodeId) {
+        final url = raw['image_url']?.toString().trim();
+        return (url == null || url.isEmpty) ? null : url;
+      }
+    }
+    return null;
   }
 
   Widget _body(BuildContext context, GraphController graph) {
@@ -1041,7 +1079,8 @@ class _GraphScreenState extends State<GraphScreen>
             if (n.id != matchId) continue;
             if (n.role != highlighted.role ||
                 n.title != highlighted.title ||
-                n.description != highlighted.description) {
+                n.description != highlighted.description ||
+                n.imageUrl != highlighted.imageUrl) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
                 _syncHighlightedFromLayout(matchId);
@@ -1112,6 +1151,7 @@ class _GraphScreenState extends State<GraphScreen>
             distance: (raw['distance'] as num?)?.toInt() ?? 0,
             kind: raw['kind']?.toString() ?? 'focus',
             description: raw['description']?.toString(),
+            imageUrl: raw['image_url']?.toString(),
           ),
     ];
     final edges = [
@@ -1239,13 +1279,17 @@ class _TopicDetailScreen extends StatelessWidget {
     required this.onRequestNeighbors,
     required this.onViewInGraph,
     required this.onLearn,
+    required this.onGenerateImage,
     required this.onEdit,
     required this.onDelete,
     required this.onOpenRelated,
+    required this.loadImageBytes,
     this.layout,
     this.focusId,
     this.busy = false,
     this.progressMessage,
+    this.imageGenerating = false,
+    this.canGenerateImage = true,
     this.relationsPending = false,
   });
 
@@ -1254,22 +1298,28 @@ class _TopicDetailScreen extends StatelessWidget {
   final String? focusId;
   final bool busy;
   final String? progressMessage;
+  final bool imageGenerating;
   final bool relationsPending;
   final bool showRelations;
   final bool canRequestNeighbors;
   final bool canViewInGraph;
+  final bool canGenerateImage;
   final VoidCallback onClose;
   final VoidCallback onRequestNeighbors;
   final VoidCallback onViewInGraph;
   final VoidCallback onLearn;
+  final VoidCallback onGenerateImage;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
+  final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final desc = (node.description ?? '').trim();
+    final imageUrl = (node.imageUrl ?? '').trim();
+    final hasImage = imageUrl.isNotEmpty;
     final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: false);
 
     return OverlayPanel(
@@ -1279,6 +1329,14 @@ class _TopicDetailScreen extends StatelessWidget {
         child: ListView(
           padding: studyPagePadding.copyWith(bottom: bottomClearance),
           children: [
+            if (hasImage || imageGenerating) ...[
+              _TopicHeroImage(
+                imageUrl: hasImage ? imageUrl : null,
+                loading: imageGenerating,
+                loadImageBytes: loadImageBytes,
+              ),
+              const SizedBox(height: 16),
+            ],
             Text(
               node.title,
               style: TextStyle(
@@ -1334,6 +1392,12 @@ class _TopicDetailScreen extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 _TopicIconButton(
+                  tooltip: hasImage ? 'Regenerate image' : 'Generate image',
+                  icon: Icons.image_outlined,
+                  onPressed: canGenerateImage ? onGenerateImage : null,
+                ),
+                const SizedBox(width: 8),
+                _TopicIconButton(
                   tooltip: 'Edit',
                   icon: Icons.edit_outlined,
                   onPressed: onEdit,
@@ -1350,7 +1414,9 @@ class _TopicDetailScreen extends StatelessWidget {
             const SizedBox(height: 20),
             if (busy) ...[
               _TopicProgressCard(
-                message: progressMessage ?? 'Loading related topics…',
+                title: imageGenerating ? 'Creating image' : 'Building neighborhood',
+                message: progressMessage ??
+                    (imageGenerating ? 'Creating topic image…' : 'Loading related topics…'),
               ),
               if (showRelations || relationsPending) const SizedBox(height: 12),
             ],
@@ -1375,9 +1441,91 @@ class _TopicDetailScreen extends StatelessWidget {
   }
 }
 
-class _TopicProgressCard extends StatelessWidget {
-  const _TopicProgressCard({required this.message});
+class _TopicHeroImage extends StatefulWidget {
+  const _TopicHeroImage({
+    required this.loadImageBytes,
+    this.imageUrl,
+    this.loading = false,
+  });
 
+  final String? imageUrl;
+  final bool loading;
+  final Future<List<int>?> Function(String imageUrl) loadImageBytes;
+
+  @override
+  State<_TopicHeroImage> createState() => _TopicHeroImageState();
+}
+
+class _TopicHeroImageState extends State<_TopicHeroImage> {
+  List<int>? _bytes;
+  var _loadingBytes = false;
+  String? _loadedUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _TopicHeroImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      unawaited(_load());
+    }
+  }
+
+  Future<void> _load() async {
+    final url = (widget.imageUrl ?? '').trim();
+    if (url.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _bytes = null;
+          _loadedUrl = null;
+          _loadingBytes = false;
+        });
+      }
+      return;
+    }
+    if (url == _loadedUrl && _bytes != null) return;
+    setState(() => _loadingBytes = true);
+    final bytes = await widget.loadImageBytes(url);
+    if (!mounted) return;
+    setState(() {
+      _bytes = bytes;
+      _loadedUrl = url;
+      _loadingBytes = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = BorderRadius.all(Radius.circular(16));
+    final showPlaceholder = widget.loading || _loadingBytes || _bytes == null;
+    return AspectRatio(
+      aspectRatio: 16 / 10,
+      child: ClipRRect(
+        borderRadius: radius,
+        child: showPlaceholder
+            ? const PulsePlaceholder.image(borderRadius: radius)
+            : Image.memory(
+                Uint8List.fromList(_bytes!),
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+              ),
+      ),
+    );
+  }
+}
+
+class _TopicProgressCard extends StatelessWidget {
+  const _TopicProgressCard({
+    required this.message,
+    this.title = 'Building neighborhood',
+  });
+
+  final String title;
   final String message;
 
   @override
@@ -1407,7 +1555,7 @@ class _TopicProgressCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Building neighborhood',
+                    title,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: scheme.onSurface.withValues(alpha: 0.72),
                           fontWeight: FontWeight.w700,
@@ -1623,16 +1771,18 @@ class _TopicIconButton extends StatelessWidget {
 
   final String tooltip;
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool filled;
   final Color? foreground;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fg = foreground ?? (filled ? scheme.onPrimary : scheme.onSurfaceVariant);
+    final enabled = onPressed != null;
+    final fg = (foreground ?? (filled ? scheme.onPrimary : scheme.onSurfaceVariant))
+        .withValues(alpha: enabled ? 1 : 0.38);
     final bg = filled
-        ? scheme.primary
+        ? scheme.primary.withValues(alpha: enabled ? 1 : 0.38)
         : scheme.onSurface.withValues(alpha: scheme.brightness == Brightness.dark ? 0.10 : 0.06);
     return Tooltip(
       message: tooltip,

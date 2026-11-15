@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
+from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
@@ -25,6 +26,11 @@ from app.features.knowledge_graph.preferences import (
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
+from app.features.node_image.service import (
+    image_bytes_for_node,
+    image_for_node,
+    image_or_generate,
+)
 from app.features.platform.jobs import list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
@@ -54,6 +60,11 @@ class KnowledgeNodePatchBody(BaseModel):
 
 class KnowledgeContentBody(BaseModel):
     expand: bool = False
+
+
+class KnowledgeImageBody(BaseModel):
+    generate: bool = False
+    regenerate: bool = False
 
 
 class PreferencesBody(BaseModel):
@@ -247,6 +258,47 @@ def post_knowledge_node_content(
     session: Session = Depends(get_session),
 ):
     payload, status = content_or_expand(session, user=user, node_id=node_id, expand=body.expand)
+    session.commit()
+    response.status_code = status
+    return payload
+
+
+@router.get("/knowledge/nodes/{node_id}/image/file")
+def get_knowledge_node_image_file(
+    node_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    png = image_bytes_for_node(session, node_id)
+    return RawResponse(content=png, media_type="image/png")
+
+
+@router.get("/knowledge/nodes/{node_id}/image")
+def get_knowledge_node_image(
+    node_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    return image_for_node(session, node_id)
+
+
+@router.post("/knowledge/nodes/{node_id}/image")
+def post_knowledge_node_image(
+    node_id: UUID,
+    body: KnowledgeImageBody,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    payload, status = image_or_generate(
+        session,
+        user=user,
+        node_id=node_id,
+        generate=body.generate,
+        regenerate=body.regenerate,
+    )
     session.commit()
     response.status_code = status
     return payload

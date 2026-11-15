@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, Text
 from sqlmodel import Field, SQLModel
 
 from app.core.time import utcnow
@@ -18,6 +18,8 @@ class KnowledgeNode(SQLModel, table=True):
     name: str
     name_key: str = Field(index=True)
     description: str | None = None
+    image_url: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    image_bytes: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 

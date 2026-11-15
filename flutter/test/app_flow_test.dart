@@ -363,6 +363,69 @@ void main() {
     expect(graph.jobForNode('2')?.jobId, 'job-content');
   });
 
+  test('enqueueImage posts generate and tracks image job', () async {
+    Map<String, dynamic>? lastBody;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        expect(path, '/knowledge/nodes/2/image');
+        lastBody = body is Map ? Map<String, dynamic>.from(body) : null;
+        return {
+          'status': 'queued',
+          'job_id': 'job-image',
+          'focus_node_id': '2',
+          'progress': {'message': 'Creating topic image…'},
+        };
+      },
+      loader: (path) async => _compact(),
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Creating…'},
+          },
+    )..categoryGraph = _compact();
+    final ok = await graph.enqueueImage('2', title: 'Dinosaurs');
+    expect(ok, isTrue);
+    expect(lastBody?['generate'], isTrue);
+    expect(graph.activeJobCount, 1);
+    expect(graph.trackedJobs.first.type, 'generate_image');
+    expect(graph.jobForNode('2')?.jobId, 'job-image');
+  });
+
+  test('enqueueImage patches image_url when generate returns ready', () async {
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        expect(path, '/knowledge/nodes/2/image');
+        expect((body as Map)['generate'], isTrue);
+        return {
+          'node_id': '2',
+          'image_url': '/knowledge/nodes/2/image/file',
+          'incomplete': false,
+        };
+      },
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    final ok = await graph.enqueueImage('2', title: 'Dinosaurs');
+    expect(ok, isTrue);
+    expect(graph.activeJobCount, 0);
+    final nodes = graph.categoryGraph?['nodes'] as List;
+    final focus = nodes.cast<Map>().firstWhere((n) => n['id'] == '2');
+    expect(focus['image_url'], '/knowledge/nodes/2/image/file');
+  });
+
+  testWidgets('topic screen shows Generate image button', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => {},
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Generate image'), findsOneWidget);
+    graph.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Learn sheet loads bits after content job completes', (tester) async {
     var polls = 0;
     final graph = GraphController(

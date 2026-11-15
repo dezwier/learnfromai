@@ -43,6 +43,7 @@ def update_knowledge_node(
         "id": str(row.id),
         "title": row.name,
         "description": row.description,
+        "image_url": row.image_url,
     }
 
 

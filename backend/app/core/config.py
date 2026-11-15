@@ -16,9 +16,13 @@ class Settings(BaseSettings):
     google_gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_temperature: float = 0.0
+    gemini_image_model: str = "imagen-4.0-generate-001"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.0
+    openai_image_model: str = "gpt-image-1"
+    openai_image_quality: str = "medium"
+    openai_image_size: str = "1024x1024"
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""
     llm_daily_tokens_user_limit: int = 200_000
