@@ -1048,7 +1048,8 @@ class _GraphScreenState extends State<GraphScreen>
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
-                loadImageBytes: graph.fetchImageBytes,
+                loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+                cachedImageBytes: graph.cachedImageBytes,
               ),
             ),
         ],
@@ -1355,6 +1356,7 @@ class _TopicDetailScreen extends StatelessWidget {
     required this.onDelete,
     required this.onOpenRelated,
     required this.loadImageBytes,
+    required this.cachedImageBytes,
     this.layout,
     this.focusId,
     this.busy = false,
@@ -1384,6 +1386,7 @@ class _TopicDetailScreen extends StatelessWidget {
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
+  final Uint8List? Function(String? imageUrl) cachedImageBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -1402,7 +1405,9 @@ class _TopicDetailScreen extends StatelessWidget {
           children: [
             if (hasImage || imageGenerating) ...[
               _TopicHeroImage(
+                key: ValueKey(node.id),
                 imageUrl: hasImage ? imageUrl : null,
+                cachedBytes: hasImage ? cachedImageBytes(imageUrl) : null,
                 loading: imageGenerating,
                 loadImageBytes: loadImageBytes,
               ),
@@ -1514,12 +1519,15 @@ class _TopicDetailScreen extends StatelessWidget {
 
 class _TopicHeroImage extends StatefulWidget {
   const _TopicHeroImage({
+    super.key,
     required this.loadImageBytes,
     this.imageUrl,
+    this.cachedBytes,
     this.loading = false,
   });
 
   final String? imageUrl;
+  final Uint8List? cachedBytes;
   final bool loading;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
@@ -1528,13 +1536,15 @@ class _TopicHeroImage extends StatefulWidget {
 }
 
 class _TopicHeroImageState extends State<_TopicHeroImage> {
-  List<int>? _bytes;
+  Uint8List? _bytes;
   var _loadingBytes = false;
   String? _loadedUrl;
+  var _loadGen = 0;
 
   @override
   void initState() {
     super.initState();
+    _hydrateFromCache();
     unawaited(_load());
   }
 
@@ -1542,12 +1552,27 @@ class _TopicHeroImageState extends State<_TopicHeroImage> {
   void didUpdateWidget(covariant _TopicHeroImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl) {
+      _hydrateFromCache();
       unawaited(_load());
+      return;
     }
+    if (_bytes == null && widget.cachedBytes != null && widget.cachedBytes!.isNotEmpty) {
+      setState(_hydrateFromCache);
+    }
+  }
+
+  void _hydrateFromCache() {
+    final url = (widget.imageUrl ?? '').trim();
+    final cached = widget.cachedBytes;
+    if (url.isEmpty || cached == null || cached.isEmpty) return;
+    _bytes = cached;
+    _loadedUrl = url;
+    _loadingBytes = false;
   }
 
   Future<void> _load() async {
     final url = (widget.imageUrl ?? '').trim();
+    final gen = ++_loadGen;
     if (url.isEmpty) {
       if (mounted) {
         setState(() {
@@ -1559,11 +1584,23 @@ class _TopicHeroImageState extends State<_TopicHeroImage> {
       return;
     }
     if (url == _loadedUrl && _bytes != null) return;
-    setState(() => _loadingBytes = true);
+    if (_bytes == null) {
+      setState(() => _loadingBytes = true);
+    }
     final bytes = await widget.loadImageBytes(url);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
+    if ((widget.imageUrl ?? '').trim() != url) return;
+    if (bytes == null || bytes.isEmpty) {
+      setState(() => _loadingBytes = false);
+      return;
+    }
+    final next = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    if (url == _loadedUrl && _bytes != null && identical(_bytes, next)) {
+      if (_loadingBytes) setState(() => _loadingBytes = false);
+      return;
+    }
     setState(() {
-      _bytes = bytes;
+      _bytes = next;
       _loadedUrl = url;
       _loadingBytes = false;
     });
@@ -1572,7 +1609,8 @@ class _TopicHeroImageState extends State<_TopicHeroImage> {
   @override
   Widget build(BuildContext context) {
     const radius = BorderRadius.all(Radius.circular(16));
-    final showPlaceholder = widget.loading || _loadingBytes || _bytes == null;
+    final bytes = _bytes;
+    final showPlaceholder = bytes == null && (widget.loading || _loadingBytes);
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
@@ -1580,10 +1618,12 @@ class _TopicHeroImageState extends State<_TopicHeroImage> {
         child: showPlaceholder
             ? const PulsePlaceholder.image(borderRadius: radius)
             : Image.memory(
-                Uint8List.fromList(_bytes!),
+                bytes!,
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
               ),
       ),
     );

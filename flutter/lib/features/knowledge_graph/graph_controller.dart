@@ -237,6 +237,7 @@ class GraphController extends ChangeNotifier {
   /// Auth-fetched image bytes keyed by API image path (full or thumb).
   final Map<String, Uint8List> imageBytesByUrl = {};
   final Set<String> _imageLoadsInFlight = {};
+  final Map<String, Future<Uint8List?>> _imageFetchesInFlight = {};
   int _suggestToken = 0;
   Timer? _jobPoller;
   var _polling = false;
@@ -491,21 +492,42 @@ class GraphController extends ChangeNotifier {
   }
 
   /// Authenticated image bytes for a topic image path from the graph payload.
-  Future<List<int>?> fetchImageBytes(String imageUrl) async {
+  ///
+  /// Concurrent callers share one in-flight request per path. Pass [notify] false
+  /// when the caller will update its own widget (avoids a second hero rebuild).
+  Future<List<int>?> fetchImageBytes(String imageUrl, {bool notify = true}) async {
     final path = _apiPathFromImageUrl(imageUrl);
     if (path == null) return null;
     final cached = imageBytesByUrl[path] ?? imageBytesByUrl[imageUrl];
     if (cached != null) return cached;
+
+    final existing = _imageFetchesInFlight[path];
+    if (existing != null) {
+      final shared = await existing;
+      if (notify && shared != null) notifyListeners();
+      return shared;
+    }
+
+    final future = _downloadImageBytes(path, imageUrl);
+    _imageFetchesInFlight[path] = future;
+    try {
+      final stored = await future;
+      if (notify) notifyListeners();
+      return stored;
+    } finally {
+      _imageFetchesInFlight.remove(path);
+    }
+  }
+
+  Future<Uint8List?> _downloadImageBytes(String path, String imageUrl) async {
     try {
       final bytes = await _getBytes(path);
       final stored = Uint8List.fromList(bytes);
       imageBytesByUrl[path] = stored;
       imageBytesByUrl[imageUrl] = stored;
-      notifyListeners();
       return stored;
     } on ApiException catch (exc) {
       error = exc.message;
-      notifyListeners();
       return null;
     }
   }
@@ -516,7 +538,7 @@ class GraphController extends ChangeNotifier {
     return imageBytesByUrl[path] ?? imageBytesByUrl[imageUrl];
   }
 
-  /// Fire-and-forget load for graph thumbs; notifies when bytes arrive.
+  /// Fire-and-forget load; notifies when bytes arrive (hex tiles / warm cache).
   void ensureImageCached(String? imageUrl) {
     if (imageUrl == null || imageUrl.trim().isEmpty) return;
     if (cachedImageBytes(imageUrl) != null) return;
@@ -524,7 +546,7 @@ class GraphController extends ChangeNotifier {
     if (!_imageLoadsInFlight.add(path)) return;
     unawaited(() async {
       try {
-        await fetchImageBytes(imageUrl);
+        await fetchImageBytes(imageUrl, notify: true);
       } finally {
         _imageLoadsInFlight.remove(path);
       }
@@ -888,6 +910,16 @@ class GraphController extends ChangeNotifier {
   void _upsertTracked(TrackedJob job) {
     final index = trackedJobs.indexWhere((j) => j.jobId == job.jobId || j.nodeId == job.nodeId);
     if (index >= 0) {
+      final previous = trackedJobs[index];
+      if (previous.jobId == job.jobId &&
+          previous.nodeId == job.nodeId &&
+          previous.state == job.state &&
+          previous.type == job.type &&
+          previous.progressMessage == job.progressMessage &&
+          previous.fraction == job.fraction &&
+          previous.title == job.title) {
+        return;
+      }
       trackedJobs[index] = job;
     } else {
       trackedJobs.insert(0, job);
