@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 /// Themed splash: honeycomb mark only (no title).
+///
+/// [markSize] matches the native launch image point size (256) from
+/// `flutter_native_splash` so the logo does not jump when the Flutter splash takes over.
 class BrandedSplash extends StatelessWidget {
   const BrandedSplash({super.key, this.dark});
 
@@ -9,6 +12,9 @@ class BrandedSplash extends StatelessWidget {
 
   static const paperLight = Color(0xFFF4F1EA);
   static const paperDark = Color(0xFF16181C);
+
+  /// Native LaunchImage / Android pre-12 splash mark size in logical pixels.
+  static const double markSize = 256;
 
   @override
   Widget build(BuildContext context) {
@@ -22,8 +28,8 @@ class BrandedSplash extends StatelessWidget {
       child: Center(
         child: Image.asset(
           logoAsset,
-          width: 132,
-          height: 132,
+          width: markSize,
+          height: markSize,
           fit: BoxFit.contain,
           filterQuality: FilterQuality.high,
         ),

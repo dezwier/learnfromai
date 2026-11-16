@@ -1121,7 +1121,20 @@ class _GraphScreenState extends State<GraphScreen>
         _viewport = viewport;
         final nextLayout = _layoutFor(graph, viewport);
         final focusId = graph.focusId;
-        if (_settledLayout == null || focusId != _transformFocusId) {
+        // First layout: snap the camera in this build so we never paint one frame of
+        // identity transform on a wide canvas (looks like a blank drawer from the right).
+        if (_settledLayout == null && !viewport.isEmpty) {
+          _settledLayout = nextLayout;
+          _morphFrom = null;
+          _morphTo = null;
+          _layoutMorph.stop();
+          _layoutMorph.value = 1;
+          _snapCameraToCanvasCenter(
+            focusId: focusId,
+            viewport: viewport,
+            canvas: Size(nextLayout.width, nextLayout.height),
+          );
+        } else if (_settledLayout == null || focusId != _transformFocusId) {
           if (!_pendingFocusMorph) {
             _pendingFocusMorph = true;
             final previous = _settledLayout;
