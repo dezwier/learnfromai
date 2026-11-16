@@ -6,22 +6,26 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 
 - Authentication uses Firebase. The API exchanges a Firebase ID token for its own JWT.
 - There is one shared topic graph. A search merges into that universe; it does not create a private graph.
-- A node has a UUID, canonical `name`, `name_key`, a standalone `description`, and an optional shared iconic `image_url` (PNG bytes generated on demand). Names are not globally unique when the model says two same-titled topics are different concepts.
+- A node has a UUID, canonical `name`, `name_key`, a standalone `description`, and an optional shared iconic `image_url` (PNG bytes generated or uploaded on demand). Names are not globally unique when the model says two same-titled topics are different concepts.
 - Edges are typed `parent`, `child`, `sibling`, or `acquaintance`, and are stored in both directions.
 - Each signed-in user sets a total neighborhood budget (`total`, 8–32, default 16) and how many neighbors-of-neighbors (`extended`, 0–24, default 12) to show. The model chooses how many parents, siblings, children, and acquaintances to return (a bit of each).
 - Focusing or opening a topic returns whatever neighbors already exist (`incomplete` when under the user’s total budget). A Railway worker runs `expand_neighborhood` only when the user explicitly requests neighbors.
 - Expand uses two reusable LLM prompts plus deterministic retrieve: `neighborhood_v5` (invent related topics for the deficit, excluding existing neighbor titles) and `sameness_v3` (batched same-concept? → id or null). Learn bits use `content_bits_v2` separately.
 - Scenarios: (1) new topic → retrieve → sameness → exists → under budget → neighborhood → retrieve/sameness per result → write; (2) new → retrieve → sameness → not exists → neighborhood → …; (3) existing focus → under budget → neighborhood → …; (4) new → retrieve → sameness → exists → budget met → Done; (5) existing focus → budget met → Done. Existing-tile expand skips focus sameness.
 - Each topic can have shared learning bits (`learn`, `example`, `check1`, `check2`, `check3`) generated on demand via an `expand_content` job. Opening Learn loads existing bits; if incomplete (including older topics that only have one check), the client may request expand for the missing kinds only. Bits are cached on the node for all users. Legacy kind `check` is treated as `check1`.
-- Each topic can have one shared iconic image generated on demand via a `generate_image` job (Gemini or OpenAI Images from the user’s AI provider setting). One generation produces a full (~1024) asset for the topic screen and a 512px JPEG thumb for hex tiles. The topic screen shows the square image above the title and offers Generate / Regenerate; hex tiles fill with the thumb plus a scrim for title readability.
+- Each topic has at most one shared iconic image today (generate via AI or upload). One generation/upload produces a full (~1024) asset for the topic screen and a 512px JPEG thumb for hex tiles. The topic screen shows the square image above the title; the image button opens Generate / Upload (or Regenerate / Replace when an image already exists). Hex tiles fill with the thumb plus a scrim for title readability.
+- **Later (not built):** a topic may hold multiple visuals (gallery / testing variants) with one chosen primary for tiles and hero. Keep the single-image fields as the primary until that gallery lands.
 - Each request stores hop distances and kinds for the returned neighborhood.
-- Profile fields `username`, `full_name`, and `photo_url` live in `users.preferences.profile`. Learning XP/level on the HUD are placeholders until mastery tracking exists.
+- Profile fields `username`, `full_name`, and `photo_url` live in `users.preferences.profile`. Uploaded avatars are stored as `users.photo_bytes` and served at `GET /me/photo` (`photo_url` is that API path). Learning XP/level on the HUD are placeholders until mastery tracking exists.
 
 ## API
 
 - `POST /api/v1/auth/firebase`
 - `GET /api/v1/me`
 - `PATCH /api/v1/me` `{username?, full_name?, photo_url?, display_name?, timezone?}`
+- `GET /api/v1/me/photo` → JPEG bytes (auth)
+- `PUT /api/v1/me/photo` multipart `file` → user payload with `photo_url`
+- `DELETE /api/v1/me/photo`
 - `GET /api/v1/me/preferences`
 - `PATCH /api/v1/me/preferences`
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
@@ -30,6 +34,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `POST /api/v1/knowledge/nodes/{node_id}/content` `{expand?: bool}` → content (200); with `expand: true` and incomplete → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes/{node_id}/image` → `{image_url, incomplete}`
 - `POST /api/v1/knowledge/nodes/{node_id}/image` `{generate?, regenerate?}` → metadata (200) or `{job_id}` (202)
+- `PUT /api/v1/knowledge/nodes/{node_id}/image` multipart `file` → metadata (200)
 - `GET /api/v1/knowledge/nodes/{node_id}/image/file?variant=full|thumb` → PNG (full) or JPEG (thumb) bytes (auth)
 - `GET /api/v1/knowledge/graph` resume latest neighborhood only (no expand)
 - `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
@@ -42,4 +47,4 @@ Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `relat
 
 ## Client
 
-Edge-to-edge neighborhood canvas with a top-left profile HUD (avatar, level, name, XP bar). Tapping the HUD opens a profile overlay with Settings, Logout, and learning placeholders. Settings is a Talivo-style sheet with App (appearance + neighborhood tile counts), Profile (username, full name, photo URL), and Account (email/password) tabs. A small neutral search FAB opens a field above the keyboard and lists matching existing topics as the user types; tapping one opens that node without an LLM expand. Submitting a new topic opens it immediately; the user requests neighbors explicitly. The topic drawer shows an optional hero image above the title, with Learn and Generate image actions (pulse placeholder while a `generate_image` job runs). Learn opens a sheet with learn · example · check1 · check2 · check3 (pulse placeholders while an `expand_content` job runs). While a job runs, a lower-left chip shows live progress. TT Ramillas is used only on hex tile labels and search result titles; the rest of the UI uses the platform font.
+Edge-to-edge neighborhood canvas with a top-left profile HUD (avatar, level, name, XP bar). Tapping the HUD opens a profile overlay with Settings, Logout, and learning placeholders. Settings is a Talivo-style sheet with App (appearance + neighborhood tile counts), Profile (username, full name, photo upload), and Account (email/password) tabs. A small neutral search FAB opens a field above the keyboard and lists matching existing topics as the user types; tapping one opens that node without an LLM expand. Submitting a new topic opens it immediately; the user requests neighbors explicitly. The topic drawer shows an optional hero image above the title, with Learn and image actions (pulse placeholder while a `generate_image` job or upload runs). Learn opens a sheet with learn · example · check1 · check2 · check3 (pulse placeholders while an `expand_content` job runs). While a job runs, a lower-left chip shows live progress. TT Ramillas is used only on hex tile labels and search result titles; the rest of the UI uses the platform font.

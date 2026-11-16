@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../auth/auth_controller.dart';
@@ -10,21 +12,34 @@ class SettingsProfileTab extends StatelessWidget {
     required this.usernameController,
     required this.fullNameController,
     required this.photoUrl,
+    this.photoBytes,
     required this.onPickPhoto,
     required this.onClearPhoto,
+    this.photoBusy = false,
   });
 
   final UserProfile user;
   final TextEditingController usernameController;
   final TextEditingController fullNameController;
   final String? photoUrl;
+  final Uint8List? photoBytes;
   final VoidCallback onPickPhoto;
   final VoidCallback onClearPhoto;
+  final bool photoBusy;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasPhoto = photoUrl != null && photoUrl!.trim().isNotEmpty;
+    final hasPhoto = (photoBytes != null && photoBytes!.isNotEmpty) ||
+        (photoUrl != null && photoUrl!.trim().isNotEmpty);
+    ImageProvider? image;
+    if (photoBytes != null && photoBytes!.isNotEmpty) {
+      image = MemoryImage(photoBytes!);
+    } else if (photoUrl != null &&
+        photoUrl!.trim().isNotEmpty &&
+        (photoUrl!.startsWith('http://') || photoUrl!.startsWith('https://'))) {
+      image = NetworkImage(photoUrl!);
+    }
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
       children: [
@@ -32,36 +47,47 @@ class SettingsProfileTab extends StatelessWidget {
           child: Column(
             children: [
               GestureDetector(
-                onTap: onPickPhoto,
-                child: CircleAvatar(
-                  radius: 36,
-                  backgroundColor: scheme.primary.withValues(alpha: 0.15),
-                  backgroundImage: hasPhoto ? NetworkImage(photoUrl!) : null,
-                  onBackgroundImageError: hasPhoto ? (_, __) {} : null,
-                  child: hasPhoto
-                      ? null
-                      : Text(
-                          user.initial,
-                          style: TextStyle(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 28,
-                          ),
-                        ),
+                onTap: photoBusy ? null : onPickPhoto,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: scheme.primary.withValues(alpha: 0.15),
+                      backgroundImage: image,
+                      onBackgroundImageError: image != null ? (_, _) {} : null,
+                      child: image == null
+                          ? Text(
+                              user.initial,
+                              style: TextStyle(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 28,
+                              ),
+                            )
+                          : null,
+                    ),
+                    if (photoBusy)
+                      const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: onPickPhoto,
+                onPressed: photoBusy ? null : onPickPhoto,
                 child: const Text('Change photo'),
               ),
               if (hasPhoto)
                 TextButton(
-                  onPressed: onClearPhoto,
+                  onPressed: photoBusy ? null : onClearPhoto,
                   child: const Text('Remove photo'),
                 ),
               Text(
-                'Paste an image URL for now — uploads come later.',
+                'Upload a photo from your library.',
                 style: SettingsFormStyles.finePrintStyle(context),
                 textAlign: TextAlign.center,
               ),

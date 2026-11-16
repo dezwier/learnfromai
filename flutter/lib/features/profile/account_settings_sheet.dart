@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/media/image_pick.dart';
 import '../auth/auth_controller.dart';
 import 'settings_account_tab.dart';
 import 'settings_app_tab.dart';
@@ -33,6 +36,7 @@ class _AccountSettingsSheetState extends State<AccountSettingsSheet> with Single
   final _confirmPassword = TextEditingController();
   String? _photoUrl;
   var _saving = false;
+  var _photoBusy = false;
   String? _error;
   var _tabIndex = 0;
 
@@ -78,7 +82,6 @@ class _AccountSettingsSheetState extends State<AccountSettingsSheet> with Single
         await auth.updateProfile(
           username: _username.text.trim(),
           fullName: _fullName.text.trim(),
-          photoUrl: _photoUrl?.trim() ?? '',
         );
       } else if (_tabIndex == 2) {
         final next = _newPassword.text;
@@ -104,31 +107,44 @@ class _AccountSettingsSheetState extends State<AccountSettingsSheet> with Single
     }
   }
 
-  Future<void> _pickPhotoUrl() async {
-    final controller = TextEditingController(text: _photoUrl ?? '');
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Photo URL'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(hintText: 'https://…'),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Use'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-    if (value == null) return;
-    setState(() => _photoUrl = value.isEmpty ? null : value);
+  Future<void> _pickPhoto() async {
+    final auth = context.read<AuthController>();
+    final picked = await pickImageBytes();
+    if (picked == null || !mounted) return;
+    setState(() {
+      _photoBusy = true;
+      _error = null;
+    });
+    try {
+      await auth.uploadPhoto(
+        bytes: picked.bytes,
+        filename: picked.filename,
+        contentType: picked.mimeType,
+      );
+      if (!mounted) return;
+      setState(() => _photoUrl = auth.user?.photoUrl);
+    } catch (exc) {
+      if (mounted) setState(() => _error = exc.toString());
+    } finally {
+      if (mounted) setState(() => _photoBusy = false);
+    }
+  }
+
+  Future<void> _clearPhoto() async {
+    final auth = context.read<AuthController>();
+    setState(() {
+      _photoBusy = true;
+      _error = null;
+    });
+    try {
+      await auth.clearPhoto();
+      if (!mounted) return;
+      setState(() => _photoUrl = null);
+    } catch (exc) {
+      if (mounted) setState(() => _error = exc.toString());
+    } finally {
+      if (mounted) setState(() => _photoBusy = false);
+    }
   }
 
   @override
@@ -188,8 +204,10 @@ class _AccountSettingsSheetState extends State<AccountSettingsSheet> with Single
                     usernameController: _username,
                     fullNameController: _fullName,
                     photoUrl: _photoUrl,
-                    onPickPhoto: _pickPhotoUrl,
-                    onClearPhoto: () => setState(() => _photoUrl = null),
+                    photoBytes: context.watch<AuthController>().photoBytes,
+                    photoBusy: _photoBusy,
+                    onPickPhoto: () => unawaited(_pickPhoto()),
+                    onClearPhoto: () => unawaited(_clearPhoto()),
                   ),
                 SettingsAccountTab(
                   emailController: _email,

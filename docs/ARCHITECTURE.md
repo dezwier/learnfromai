@@ -15,7 +15,7 @@ flowchart LR
   worker --> llm
 ```
 
-The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction. Provider choice comes from the user's `llm_provider` preference (Gemini or OpenAI/`gpt-4o-mini`), falling back to `LLM_PROVIDER`. Topic images use the same preference: Gemini Imagen or OpenAI Images (`generate_image` job), with PNG bytes stored on the knowledge node.
+The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction. Provider choice comes from the user's `llm_provider` preference (Gemini or OpenAI/`gpt-4o-mini`), falling back to `LLM_PROVIDER`. Topic images use the same preference for generation: Gemini Imagen or OpenAI Images (`generate_image` job). Uploaded topic images skip the worker and write full + thumb bytes on the knowledge node immediately. Profile photos are uploaded to `users.photo_bytes` and served at `/me/photo`. Today each topic has one iconic image; a multi-visual gallery (testing variants) is anticipated but not implemented.
 
 ## Expand orchestrator
 

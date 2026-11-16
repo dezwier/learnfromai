@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/media/image_pick.dart';
 import '../../core/widgets/pulse_placeholder.dart';
 import '../../core/widgets/study_card.dart';
 import '../profile/overlay_panel_chrome.dart';
@@ -41,6 +42,7 @@ class _GraphScreenState extends State<GraphScreen>
   var _profileOpen = false;
   var _topicOpen = false;
   var _jobsPanelOpen = false;
+  var _imageUploading = false;
   PlacedNode? _highlighted;
   GraphLayout? _layout;
   GraphLayout? _settledLayout;
@@ -583,11 +585,59 @@ class _GraphScreenState extends State<GraphScreen>
     });
   }
 
-  Future<void> _generateImage(GraphController graph) async {
+  Future<void> _chooseImageAction(GraphController graph) async {
     final node = _highlighted;
     if (node == null) return;
     final hasImage = (node.imageUrl ?? '').trim().isNotEmpty;
-    await graph.enqueueImage(node.id, title: node.title, regenerate: hasImage);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: Text(hasImage ? 'Regenerate with AI' : 'Generate with AI'),
+                onTap: () => Navigator.pop(context, 'generate'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.upload_outlined),
+                title: Text(hasImage ? 'Replace with upload' : 'Upload image'),
+                onTap: () => Navigator.pop(context, 'upload'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'generate') {
+      await graph.enqueueImage(node.id, title: node.title, regenerate: hasImage);
+      return;
+    }
+    if (choice == 'upload') {
+      await _uploadTopicImage(graph, node);
+    }
+  }
+
+  Future<void> _uploadTopicImage(GraphController graph, PlacedNode node) async {
+    final picked = await pickImageBytes();
+    if (picked == null || !mounted) return;
+    setState(() => _imageUploading = true);
+    try {
+      final ok = await graph.uploadImage(
+        node.id,
+        bytes: picked.bytes,
+        filename: picked.filename,
+        contentType: picked.mimeType,
+      );
+      if (!ok || !mounted) return;
+      _syncHighlightedFromLayout(node.id);
+    } finally {
+      if (mounted) setState(() => _imageUploading = false);
+    }
   }
 
   Future<void> _confirmDeleteHighlighted(GraphController graph) async {
@@ -966,19 +1016,23 @@ class _GraphScreenState extends State<GraphScreen>
                 // Settled layout only — morphing display layout thrash-rebuilds relations.
                 layout: _settledLayout,
                 focusId: graph.focusId,
-                busy: graph.jobForNode(_highlighted!.id) != null,
-                progressMessage: graph.jobForNode(_highlighted!.id)?.progressMessage,
-                imageGenerating:
+                busy: graph.jobForNode(_highlighted!.id) != null || _imageUploading,
+                progressMessage: _imageUploading
+                    ? 'Uploading topic image…'
+                    : graph.jobForNode(_highlighted!.id)?.progressMessage,
+                imageGenerating: _imageUploading ||
                     graph.jobForNode(_highlighted!.id)?.type == 'generate_image',
                 relationsPending: openingRelated,
                 showRelations: showRelations,
                 canRequestNeighbors:
                     knownIncomplete == true &&
                     graph.jobForNode(_highlighted!.id) == null &&
-                    !openingRelated,
+                    !openingRelated &&
+                    !_imageUploading,
                 canViewInGraph:
                     _highlighted!.id != graph.focusId && !openingRelated,
-                canGenerateImage: graph.jobForNode(_highlighted!.id) == null,
+                canEditImage:
+                    graph.jobForNode(_highlighted!.id) == null && !_imageUploading,
                 onClose: _closeTopic,
                 onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
                 onViewInGraph: () {
@@ -990,7 +1044,7 @@ class _GraphScreenState extends State<GraphScreen>
                   if (node == null) return;
                   unawaited(_openLearn(node));
                 },
-                onGenerateImage: () => unawaited(_generateImage(graph)),
+                onImageAction: () => unawaited(_chooseImageAction(graph)),
                 onEdit: () => _editHighlighted(graph),
                 onDelete: () => _confirmDeleteHighlighted(graph),
                 onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
@@ -1296,7 +1350,7 @@ class _TopicDetailScreen extends StatelessWidget {
     required this.onRequestNeighbors,
     required this.onViewInGraph,
     required this.onLearn,
-    required this.onGenerateImage,
+    required this.onImageAction,
     required this.onEdit,
     required this.onDelete,
     required this.onOpenRelated,
@@ -1306,7 +1360,7 @@ class _TopicDetailScreen extends StatelessWidget {
     this.busy = false,
     this.progressMessage,
     this.imageGenerating = false,
-    this.canGenerateImage = true,
+    this.canEditImage = true,
     this.relationsPending = false,
   });
 
@@ -1320,12 +1374,12 @@ class _TopicDetailScreen extends StatelessWidget {
   final bool showRelations;
   final bool canRequestNeighbors;
   final bool canViewInGraph;
-  final bool canGenerateImage;
+  final bool canEditImage;
   final VoidCallback onClose;
   final VoidCallback onRequestNeighbors;
   final VoidCallback onViewInGraph;
   final VoidCallback onLearn;
-  final VoidCallback onGenerateImage;
+  final VoidCallback onImageAction;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<PlacedNode> onOpenRelated;
@@ -1407,14 +1461,12 @@ class _TopicDetailScreen extends StatelessWidget {
                   filled: !canRequestNeighbors && !canViewInGraph,
                   onPressed: onLearn,
                 ),
-                if (!hasImage) ...[
-                  const SizedBox(width: 8),
-                  _TopicIconButton(
-                    tooltip: 'Generate image',
-                    icon: Icons.image_outlined,
-                    onPressed: canGenerateImage ? onGenerateImage : null,
-                  ),
-                ],
+                const SizedBox(width: 8),
+                _TopicIconButton(
+                  tooltip: hasImage ? 'Change image' : 'Add image',
+                  icon: Icons.image_outlined,
+                  onPressed: canEditImage ? onImageAction : null,
+                ),
                 const SizedBox(width: 8),
                 _TopicIconButton(
                   tooltip: 'Edit',
@@ -1433,9 +1485,9 @@ class _TopicDetailScreen extends StatelessWidget {
             const SizedBox(height: 20),
             if (busy) ...[
               _TopicProgressCard(
-                title: imageGenerating ? 'Creating image' : 'Building neighborhood',
+                title: imageGenerating ? 'Updating image' : 'Building neighborhood',
                 message: progressMessage ??
-                    (imageGenerating ? 'Creating topic image…' : 'Loading related topics…'),
+                    (imageGenerating ? 'Working on topic image…' : 'Loading related topics…'),
               ),
               if (showRelations || relationsPending) const SizedBox(height: 12),
             ],

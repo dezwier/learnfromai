@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -53,6 +55,7 @@ class ProfileHud extends StatelessWidget {
     final name = profile?.hudName ?? 'Learner';
     final initial = profile?.initial ?? 'L';
     final photoUrl = profile?.photoUrl;
+    final photoBytes = auth.photoBytes;
 
     const nameColor = Color(0xFFF8F4EC);
     final muted = Colors.white.withValues(alpha: 0.82);
@@ -71,6 +74,7 @@ class ProfileHud extends StatelessWidget {
               _AvatarWithLevel(
                 initial: initial,
                 photoUrl: photoUrl,
+                photoBytes: photoBytes,
                 level: placeholderLevel,
               ),
               const SizedBox(width: 10),
@@ -189,18 +193,24 @@ class _AvatarWithLevel extends StatelessWidget {
     required this.initial,
     required this.level,
     this.photoUrl,
+    this.photoBytes,
   });
 
   final String initial;
   final int level;
   final String? photoUrl;
+  final Uint8List? photoBytes;
 
   static const double _size = 52;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasPhoto = photoUrl != null && photoUrl!.trim().isNotEmpty;
+    final memory = photoBytes != null && photoBytes!.isNotEmpty;
+    final network = !memory &&
+        photoUrl != null &&
+        photoUrl!.trim().isNotEmpty &&
+        (photoUrl!.startsWith('http://') || photoUrl!.startsWith('https://'));
     return SizedBox(
       width: _size + 4,
       height: _size + 4,
@@ -225,13 +235,19 @@ class _AvatarWithLevel extends StatelessWidget {
                 ],
               ),
               clipBehavior: Clip.antiAlias,
-              child: hasPhoto
-                  ? Image.network(
-                      photoUrl!,
+              child: memory
+                  ? Image.memory(
+                      photoBytes!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _Initial(initial: initial),
+                      errorBuilder: (_, _, _) => _Initial(initial: initial),
                     )
-                  : _Initial(initial: initial),
+                  : network
+                      ? Image.network(
+                          photoUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => _Initial(initial: initial),
+                        )
+                      : _Initial(initial: initial),
             ),
           ),
           Positioned(

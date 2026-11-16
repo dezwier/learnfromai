@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import 'api_exception.dart';
 import 'token_storage.dart';
@@ -20,9 +21,60 @@ class ApiClient {
     return _send('POST', path, body: body, idempotencyKey: idempotencyKey, skipAuth: skipAuth, retry: false);
   }
 
+  Future<dynamic> put(String path, {Object? body}) => _send('PUT', path, body: body, retry: false);
+
   Future<dynamic> patch(String path, {Object? body}) => _send('PATCH', path, body: body, retry: false);
 
   Future<dynamic> delete(String path) => _send('DELETE', path, retry: false);
+
+  /// Authenticated multipart PUT (e.g. image upload). [bytes] is the file body.
+  Future<dynamic> putMultipart(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String field = 'file',
+    String? contentType,
+    bool allowRefresh = true,
+  }) async {
+    final token = await tokens.read();
+    final uri = Uri.parse('$baseUrl/api/v1$path');
+    final request = http.MultipartRequest('PUT', uri);
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    MediaType? mediaType;
+    if (contentType != null && contentType.trim().isNotEmpty) {
+      try {
+        mediaType = MediaType.parse(contentType);
+      } on FormatException {
+        mediaType = null;
+      }
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        field,
+        bytes,
+        filename: filename,
+        contentType: mediaType,
+      ),
+    );
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode == 401 && allowRefresh && refreshIdToken != null) {
+      final refreshed = await _refreshOnce();
+      if (refreshed) {
+        return putMultipart(
+          path,
+          bytes: bytes,
+          filename: filename,
+          field: field,
+          contentType: contentType,
+          allowRefresh: false,
+        );
+      }
+    }
+    return _decode(response);
+  }
 
   /// Authenticated GET that returns raw response bytes (e.g. PNG).
   Future<List<int>> getBytes(String path, {bool retry = true}) async {
@@ -105,6 +157,8 @@ class ApiClient {
         return http.get(uri, headers: headers);
       case 'POST':
         return http.post(uri, headers: headers, body: jsonEncode(body ?? {}));
+      case 'PUT':
+        return http.put(uri, headers: headers, body: jsonEncode(body ?? {}));
       case 'PATCH':
         return http.patch(uri, headers: headers, body: jsonEncode(body ?? {}));
       case 'DELETE':

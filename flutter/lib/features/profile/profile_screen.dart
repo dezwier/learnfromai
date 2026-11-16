@@ -54,22 +54,33 @@ class ProfileScreen extends StatelessWidget {
               subtitle: 'Learner · Level ${ProfileHud.placeholderLevel}',
               footer: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: scheme.primary.withValues(alpha: 0.15),
-                    backgroundImage: (user?.photoUrl?.trim().isNotEmpty == true)
-                        ? NetworkImage(user!.photoUrl!)
-                        : null,
-                    child: (user?.photoUrl?.trim().isNotEmpty == true)
-                        ? null
-                        : Text(
-                            user?.initial ?? 'L',
-                            style: TextStyle(
-                              color: scheme.primary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 22,
-                            ),
-                          ),
+                  Builder(
+                    builder: (context) {
+                      final bytes = auth.photoBytes;
+                      final url = user?.photoUrl?.trim() ?? '';
+                      ImageProvider? image;
+                      if (bytes != null && bytes.isNotEmpty) {
+                        image = MemoryImage(bytes);
+                      } else if (url.startsWith('http://') || url.startsWith('https://')) {
+                        image = NetworkImage(url);
+                      }
+                      return CircleAvatar(
+                        radius: 28,
+                        backgroundColor: scheme.primary.withValues(alpha: 0.15),
+                        backgroundImage: image,
+                        onBackgroundImageError: image != null ? (_, _) {} : null,
+                        child: image == null
+                            ? Text(
+                                user?.initial ?? 'L',
+                                style: TextStyle(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 22,
+                                ),
+                              )
+                            : null,
+                      );
+                    },
                   ),
                   const SizedBox(width: 14),
                   Expanded(

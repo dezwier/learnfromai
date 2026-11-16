@@ -204,6 +204,7 @@ class GraphController extends ChangeNotifier {
     this.deleter,
     this.jobLoader,
     this.bytesLoader,
+    this.uploader,
   });
 
   final ApiClient? api;
@@ -213,6 +214,12 @@ class GraphController extends ChangeNotifier {
   final Future<Map<String, dynamic>> Function(String path)? deleter;
   final Future<Map<String, dynamic>> Function(String jobId)? jobLoader;
   final Future<List<int>> Function(String path)? bytesLoader;
+  final Future<Map<String, dynamic>> Function(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  })? uploader;
 
   Map<String, dynamic>? categoryGraph;
   bool loading = false;
@@ -448,6 +455,33 @@ class GraphController extends ChangeNotifier {
         return true;
       }
       _trackJobFromPayload(payload, id: id, title: title, type: 'generate_image');
+      return true;
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Upload a user-picked image for the topic (replaces any existing iconic image).
+  Future<bool> uploadImage(
+    String id, {
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async {
+    try {
+      final payload = await _upload(
+        '/knowledge/nodes/$id/image',
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+      );
+      final imageUrl = payload['image_url']?.toString();
+      final thumbUrl = payload['image_thumb_url']?.toString();
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        patchNodeImageUrl(id, imageUrl, imageThumbUrl: thumbUrl);
+      }
       return true;
     } on ApiException catch (exc) {
       error = exc.message;
@@ -995,6 +1029,30 @@ class GraphController extends ChangeNotifier {
     final client = api;
     if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
     return Map<String, dynamic>.from(await client.post(path, body: body) as Map);
+  }
+
+  Future<Map<String, dynamic>> _upload(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async {
+    final upload = uploader;
+    if (upload != null) {
+      return Map<String, dynamic>.from(
+        await upload(path, bytes: bytes, filename: filename, contentType: contentType),
+      );
+    }
+    final client = api;
+    if (client == null) throw ApiException(0, 'NETWORK', 'API is not configured');
+    return Map<String, dynamic>.from(
+      await client.putMultipart(
+        path,
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+      ) as Map,
+    );
   }
 
   Future<Map<String, dynamic>> _patch(String path, {Object? body}) async {

@@ -18,6 +18,8 @@ class KnowledgeNode(SQLModel, table=True):
     name: str
     name_key: str = Field(index=True)
     description: str | None = None
+    # One shared iconic image today (generate or upload). Later: multiple visuals
+    # per topic (gallery / testing variants) with a chosen primary for tiles/hero.
     image_url: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     image_bytes: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
     image_thumb_bytes: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))

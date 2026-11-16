@@ -412,7 +412,7 @@ void main() {
     expect(focus['image_url'], '/knowledge/nodes/2/image/file');
   });
 
-  testWidgets('topic screen shows Generate image button', (tester) async {
+  testWidgets('topic screen shows Add image button', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => {},
       loader: (path) async => _compact(),
@@ -421,9 +421,42 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Generate image'), findsOneWidget);
+    expect(find.byTooltip('Add image'), findsOneWidget);
     graph.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('uploadImage puts multipart and patches image_url', () async {
+    Map<String, dynamic>? lastUpload;
+    final graph = GraphController(
+      uploader: (path, {required bytes, required filename, contentType}) async {
+        lastUpload = {
+          'path': path,
+          'filename': filename,
+          'bytes': bytes.length,
+          'contentType': contentType,
+        };
+        return {
+          'node_id': '2',
+          'image_url': '/knowledge/nodes/2/image/file',
+          'image_thumb_url': '/knowledge/nodes/2/image/file?variant=thumb',
+          'incomplete': false,
+        };
+      },
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    final ok = await graph.uploadImage(
+      '2',
+      bytes: List<int>.filled(12, 1),
+      filename: 'topic.png',
+      contentType: 'image/png',
+    );
+    expect(ok, isTrue);
+    expect(lastUpload?['path'], '/knowledge/nodes/2/image');
+    expect(lastUpload?['filename'], 'topic.png');
+    final nodes = graph.categoryGraph?['nodes'] as List;
+    final focus = nodes.cast<Map>().firstWhere((n) => n['id'] == '2');
+    expect(focus['image_url'], '/knowledge/nodes/2/image/file');
   });
 
   testWidgets('Learn sheet loads bits after content job completes', (tester) async {

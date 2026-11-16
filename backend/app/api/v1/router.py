@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -13,6 +13,12 @@ from app.core.errors import AppError, forbidden, not_found
 from app.core.security import get_current_user
 from app.features.accounts.firebase_auth import exchange_firebase_token
 from app.features.accounts.models import User
+from app.features.accounts.photo import (
+    clear_photo,
+    clear_photo_bytes_if_external_url,
+    photo_bytes_for,
+    store_uploaded_photo,
+)
 from app.features.accounts.profile import merge_profile_prefs, profile_fields
 from app.features.content.service import content_for_node, content_or_expand
 from app.features.knowledge_graph.graph import focus_or_enqueue, graph_for_focus
@@ -31,6 +37,7 @@ from app.features.node_image.service import (
     image_for_node,
     image_or_generate,
 )
+from app.features.node_image.upload import upload_node_image
 from app.features.platform.jobs import list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
@@ -110,8 +117,40 @@ def patch_me(
             user.display_name = name
     profile_updates = {key: updates[key] for key in ("username", "full_name", "photo_url") if key in updates}
     if profile_updates:
+        if "photo_url" in profile_updates:
+            clear_photo_bytes_if_external_url(user, profile_updates.get("photo_url"))
         user.preferences = merge_profile_prefs(user.preferences, profile_updates)
     session.add(user)
+    session.commit()
+    session.refresh(user)
+    return _user_payload(user)
+
+
+@router.get("/me/photo")
+def get_me_photo(user: User = Depends(get_current_user)):
+    payload, media_type = photo_bytes_for(user)
+    return RawResponse(content=payload, media_type=media_type)
+
+
+@router.put("/me/photo")
+async def put_me_photo(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    raw = await file.read()
+    store_uploaded_photo(session, user, raw, content_type=file.content_type)
+    session.commit()
+    session.refresh(user)
+    return _user_payload(user)
+
+
+@router.delete("/me/photo")
+def delete_me_photo(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    clear_photo(session, user)
     session.commit()
     session.refresh(user)
     return _user_payload(user)
@@ -306,6 +345,20 @@ def post_knowledge_node_image(
     )
     session.commit()
     response.status_code = status
+    return payload
+
+
+@router.put("/knowledge/nodes/{node_id}/image")
+async def put_knowledge_node_image(
+    node_id: UUID,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    raw = await file.read()
+    payload = upload_node_image(session, node_id, raw=raw, content_type=file.content_type)
+    session.commit()
     return payload
 
 

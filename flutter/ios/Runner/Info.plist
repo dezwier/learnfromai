@@ -49,5 +49,7 @@
 		<false/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<true/>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Choose a topic image or profile photo.</string>
 	</dict>
 </plist>

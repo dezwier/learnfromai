@@ -64,6 +64,8 @@ class AuthController extends ChangeNotifier {
   final ApiClient api;
   final AuthGateway gateway;
   UserProfile? user;
+  /// Cached bytes for API-hosted `/me/photo` (not for external http URLs).
+  Uint8List? photoBytes;
   bool loading = false;
   String? error;
 
@@ -78,6 +80,7 @@ class AuthController extends ChangeNotifier {
       final response = await api.post('/auth/firebase', body: {'id_token': idToken}, skipAuth: true);
       await api.tokens.write(response['access_token'] as String);
       user = UserProfile.fromJson(Map<String, dynamic>.from(response['user'] as Map));
+      await _refreshPhotoBytes();
     } on ApiException catch (exc) {
       error = exc.message;
     } catch (exc) {
@@ -110,11 +113,13 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       user = UserProfile.fromJson(Map<String, dynamic>.from(await api.get('/me') as Map));
+      await _refreshPhotoBytes();
       error = null;
     } on ApiException catch (exc) {
       if (exc.status == 401) {
         error = 'Session expired';
         user = null;
+        photoBytes = null;
       } else {
         error = exc.message;
       }
@@ -136,7 +141,53 @@ class AuthController extends ChangeNotifier {
     if (body.isEmpty) return;
     final raw = Map<String, dynamic>.from(await api.patch('/me', body: body) as Map);
     user = UserProfile.fromJson(raw);
+    if (photoUrl != null) await _refreshPhotoBytes();
     notifyListeners();
+  }
+
+  Future<void> uploadPhoto({
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async {
+    final raw = Map<String, dynamic>.from(
+      await api.putMultipart(
+        '/me/photo',
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+      ) as Map,
+    );
+    user = UserProfile.fromJson(raw);
+    photoBytes = Uint8List.fromList(bytes);
+    // Prefer server-normalized JPEG when available.
+    await _refreshPhotoBytes();
+    notifyListeners();
+  }
+
+  Future<void> clearPhoto() async {
+    final raw = Map<String, dynamic>.from(await api.delete('/me/photo') as Map);
+    user = UserProfile.fromJson(raw);
+    photoBytes = null;
+    notifyListeners();
+  }
+
+  bool get hasApiPhoto {
+    final url = user?.photoUrl?.trim() ?? '';
+    return url == '/me/photo' || url.endsWith('/me/photo');
+  }
+
+  Future<void> _refreshPhotoBytes() async {
+    if (!hasApiPhoto) {
+      photoBytes = null;
+      return;
+    }
+    try {
+      final bytes = await api.getBytes('/me/photo');
+      photoBytes = Uint8List.fromList(bytes);
+    } on ApiException {
+      photoBytes = null;
+    }
   }
 
   Future<void> updateAccount({
@@ -165,6 +216,7 @@ class AuthController extends ChangeNotifier {
     await gateway.signOut();
     await api.tokens.write(null);
     user = null;
+    photoBytes = null;
     notifyListeners();
   }
 }
