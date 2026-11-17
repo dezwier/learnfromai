@@ -57,6 +57,8 @@ class _GraphScreenState extends State<GraphScreen>
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
   var _pendingFocusMorph = false;
+  /// Trail shown in chrome; held steady until morph starts so chips don't pop early.
+  List<FocusTrailEntry> _trailShown = const [];
   /// Relation tap in flight — keep topic screen stable until the new focus lands.
   String? _openingRelatedId;
 
@@ -154,6 +156,7 @@ class _GraphScreenState extends State<GraphScreen>
     if (!_layoutMorph.isCompleted) return;
     _morphFrom = null;
     _morphTo = null;
+    _trailShown = List.of(context.read<GraphController>().focusTrail);
     // Neighbors finished rearranging — ease the grown focus into true center.
     _animateCameraToCanvasCenter(
       viewport: _viewport,
@@ -212,6 +215,8 @@ class _GraphScreenState extends State<GraphScreen>
       _morphFrom = aligned;
       _morphTo = next;
       _settledLayout = next;
+      // Reveal the new trail chip with the morph, not on the network frame before it.
+      _trailShown = List.of(context.read<GraphController>().focusTrail);
     });
     _layoutMorph.forward();
   }
@@ -229,6 +234,7 @@ class _GraphScreenState extends State<GraphScreen>
       _morphTo = null;
       _layoutMorph.stop();
       _layoutMorph.value = 1;
+      _trailShown = List.of(context.read<GraphController>().focusTrail);
       if (focusChanged) {
         _snapCameraToCanvasCenter(focusId: focusId, viewport: viewport, canvas: Size(next.width, next.height));
       }
@@ -776,7 +782,12 @@ class _GraphScreenState extends State<GraphScreen>
     final showRelations = highlight != null && !openingRelated;
     final showChrome = !_searchOpen && !overlayOpen;
     final chromeOpaque = showChrome;
-    final trail = graph.focusTrail;
+    final liveTrail = graph.focusTrail;
+    // Hold the previous trail until morph begins (avoids a pop on the fetch frame).
+    final trail = (_pendingFocusMorph && _trailShown.isNotEmpty) ? _trailShown : liveTrail;
+    if (!_pendingFocusMorph && !_layoutMorph.isAnimating && _morphFrom == null) {
+      _trailShown = liveTrail;
+    }
     // Trail under FABs; search sits just above the row.
     // On iPhone, nestle into the home-indicator inset so the row sits lower.
     const trailHeight = 40.0;
@@ -1206,11 +1217,11 @@ class _GraphScreenState extends State<GraphScreen>
         } else if (!_layoutMorph.isAnimating) {
           _settledLayout = nextLayout;
         }
-        // Never mount InteractiveViewer until the camera matches this focus —
-        // constrained:false defaults to top-left and a wide canvas looks like a
-        // right-hand drawer for one frame.
+        // Cold start only: blank until the first camera snap. After that, keep
+        // painting through pending adopt / morph — swapping to ColoredBox on
+        // every focus change was the hop flicker.
         final cameraReady =
-            !viewport.isEmpty && _settledLayout != null && _transformFocusId == focusId;
+            !viewport.isEmpty && _settledLayout != null && _transformFocusId != null;
         if (!cameraReady) {
           return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
         }
