@@ -513,13 +513,14 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   void _syncHighlightedFromLayout(String? focusId) {
-    final layout = _layout;
+    final layout = _layout ?? _settledLayout;
+    final targetId = focusId ?? _highlighted?.id;
+    if (layout == null || targetId == null) return;
     final current = _highlighted;
-    if (layout == null || current == null) return;
-    final targetId = focusId ?? current.id;
     for (final n in layout.nodes) {
       if (n.id != targetId) continue;
-      if (n.id == current.id &&
+      if (current != null &&
+          n.id == current.id &&
           n.title == current.title &&
           n.description == current.description &&
           n.imageUrl == current.imageUrl &&
@@ -530,6 +531,55 @@ class _GraphScreenState extends State<GraphScreen>
       setState(() => _highlighted = n);
       return;
     }
+  }
+
+  /// Prefer the live graph payload so profile taps don't reuse a stale layout tile.
+  PlacedNode? _placedNodeById(String nodeId) {
+    final graph = context.read<GraphController>();
+    final nodes = graph.categoryGraph?['nodes'];
+    if (nodes is List) {
+      for (final raw in nodes) {
+        if (raw is! Map || raw['id']?.toString() != nodeId) continue;
+        final title = raw['title']?.toString() ?? raw['name']?.toString() ?? 'Topic';
+        final urls = _imageUrlsFromGraph(graph, nodeId);
+        final layout = _layout ?? _settledLayout;
+        PlacedNode? fromLayout;
+        if (layout != null) {
+          for (final n in layout.nodes) {
+            if (n.id == nodeId) {
+              fromLayout = n;
+              break;
+            }
+          }
+        }
+        // Use layout geometry when the canvas already shows this id as focus.
+        if (fromLayout != null && graph.focusId == nodeId && fromLayout.role == NodeRole.focus) {
+          return fromLayout;
+        }
+        return PlacedNode(
+          id: nodeId,
+          title: title,
+          depth: 0,
+          distance: 0,
+          kind: 'focus',
+          role: NodeRole.focus,
+          x: fromLayout?.x ?? 0,
+          y: fromLayout?.y ?? 0,
+          width: fromLayout?.width ?? 1,
+          height: fromLayout?.height ?? 1,
+          radius: fromLayout?.radius ?? 1,
+          description: raw['description']?.toString() ?? fromLayout?.description,
+          imageUrl: urls.$1 ?? fromLayout?.imageUrl,
+          imageThumbUrl: urls.$2 ?? fromLayout?.imageThumbUrl,
+        );
+      }
+    }
+    final layout = _layout ?? _settledLayout;
+    if (layout == null) return null;
+    for (final n in layout.nodes) {
+      if (n.id == nodeId) return n;
+    }
+    return null;
   }
 
   Future<void> _openLearn(PlacedNode node) async {
@@ -803,14 +853,38 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _openTopicFromProfile(String nodeId) async {
-    _closeProfile();
     final graph = context.read<GraphController>();
+    _closeProfile();
+    // openExisting no-ops while another load is in flight — wait it out.
+    for (var i = 0; i < 40 && (graph.loading || graph.refreshing); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (!mounted) return;
+    }
     await graph.openExisting(nodeId);
     if (!mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    _syncHighlightedFromLayout(graph.focusId ?? nodeId);
-    _openTopicOverlay(source: 'graph');
+    // Wait until this node is the focus (or present) before opening the sheet.
+    PlacedNode? placed;
+    for (var i = 0; i < 24; i++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      if (graph.loading || graph.refreshing) continue;
+      placed = _placedNodeById(nodeId);
+      if (placed != null && graph.focusId == nodeId) break;
+    }
+    placed ??= _placedNodeById(nodeId);
+    if (placed == null || !mounted) return;
+    setState(() {
+      _highlighted = placed;
+      _topicOpen = true;
+      _profileOpen = false;
+    });
+    unawaited(
+      graph.trackEvent(
+        nodeId: nodeId,
+        kind: 'open',
+        payload: {'source': 'graph'},
+      ),
+    );
   }
 
   @override

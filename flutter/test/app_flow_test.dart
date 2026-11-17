@@ -110,7 +110,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Logout'), findsOneWidget);
-    expect(find.text('Recent study'), findsOneWidget);
+    expect(find.text('Learning about'), findsOneWidget);
     expect(find.text('Study a few topics to grow your map.'), findsOneWidget);
 
     await tester.tap(find.text('Settings'));
@@ -146,7 +146,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Learn'), findsOneWidget);
     expect(find.text('Settings'), findsNothing);
-    expect(find.text('Recent study'), findsNothing);
+    expect(find.text('Learning about'), findsNothing);
   });
 
   testWidgets('job queue tracks expands without blocking navigation', (tester) async {

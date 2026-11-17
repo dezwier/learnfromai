@@ -9,7 +9,7 @@ import '../../knowledge_graph/graph_controller.dart';
 import 'topic_affinity_map.dart';
 import 'topic_affinity_models.dart';
 
-/// Recent-study card: loads topic affinity and renders the bubble map.
+/// Recent-study card: loads topic affinity and renders cluster badges.
 class TopicAffinityCard extends StatefulWidget {
   const TopicAffinityCard({super.key, required this.onOpenTopic});
 
@@ -65,31 +65,27 @@ class _TopicAffinityCardState extends State<TopicAffinityCard> {
         child: PulsePlaceholder.image(borderRadius: BorderRadius.circular(20)),
       );
     } else if (_error != null) {
-      footer = SizedBox(
-        height: affinityMapHeight,
-        child: Center(
-          child: Text(
-            _error!,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.error,
-                  height: 1.35,
-                ),
-          ),
+      footer = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Text(
+          _error!,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.error,
+                height: 1.35,
+              ),
         ),
       );
     } else if (_payload == null || _payload!.isEmpty) {
-      footer = SizedBox(
-        height: affinityMapHeight,
-        child: Center(
-          child: Text(
-            'Study a few topics to grow your map.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.62),
-                  height: 1.35,
-                ),
-          ),
+      footer = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 28),
+        child: Text(
+          'Study a few topics to grow your map.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurface.withValues(alpha: 0.62),
+                height: 1.35,
+              ),
         ),
       );
     } else {
@@ -101,7 +97,7 @@ class _TopicAffinityCardState extends State<TopicAffinityCard> {
 
     return StudyCard(
       eyebrow: 'TOPICS',
-      title: 'Recent study',
+      title: 'Learning about',
       footer: footer,
     );
   }
