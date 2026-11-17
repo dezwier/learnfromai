@@ -192,17 +192,6 @@ class _LearnSheetState extends State<LearnSheet> {
       });
       return;
     }
-    // New pack finished in the background: keep the user's current pack/step.
-    if (_generatingAnother && next.pack(_packIndex) != null) {
-      setState(() {
-        _content = next;
-        _mergeCompletedFrom(next);
-        _loading = false;
-        _error = null;
-        _generatingAnother = false;
-      });
-      return;
-    }
     final prefer = next.packs.isNotEmpty ? next.packs.last.packIndex : _packIndex;
     _applyContent(next, selectPack: prefer);
   }
