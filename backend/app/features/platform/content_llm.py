@@ -78,7 +78,9 @@ def build_content_prompt(
         parts.append(
             "learn and example are objects {title, markdown} with concise Markdown "
             "(a few short paragraphs max). "
-            "learn defines the facet; example is one concrete scene (not another definition). "
+            "learn defines the facet. "
+            "example shares one concrete instance of that learning—something specific that "
+            "happened, was built, observed, or used—not a definition restated. "
         )
     if checks_needed:
         parts.append(
@@ -145,9 +147,9 @@ class FakeContentLLM:
             payload["example"] = {
                 "title": f"{topic} in practice",
                 "markdown": (
-                    f"Imagine explaining **{topic}** ({facet}) to a curious friend in two sentences: "
-                    f"start with the plain meaning"
-                    f"{f' ({desc})' if desc else ''}, then name one concrete situation where it shows up."
+                    f"A field guide uses **{topic}** ({facet}) when labeling a specimen: "
+                    f"the entry starts from the plain meaning"
+                    f"{f' ({desc})' if desc else ''}, then names one concrete place it shows up."
                 ),
             }
         if pack_index == 1:

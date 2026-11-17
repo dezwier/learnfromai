@@ -9,7 +9,7 @@ Color learnOkColor(Brightness brightness) =>
 Color learnBadColor(Brightness brightness) =>
     brightness == Brightness.dark ? const Color(0xFFE57373) : const Color(0xFFC62828);
 
-class LearnPackBadgeRow extends StatelessWidget {
+class LearnPackBadgeRow extends StatefulWidget {
   const LearnPackBadgeRow({
     super.key,
     required this.packs,
@@ -24,20 +24,99 @@ class LearnPackBadgeRow extends StatelessWidget {
   final ValueChanged<int> onSelectPack;
 
   @override
+  State<LearnPackBadgeRow> createState() => _LearnPackBadgeRowState();
+}
+
+class _LearnPackBadgeRowState extends State<LearnPackBadgeRow> {
+  final _scrollController = ScrollController();
+  final Map<int, GlobalKey> _badgeKeys = {};
+
+  GlobalKey _keyFor(int packIndex) =>
+      _badgeKeys.putIfAbsent(packIndex, GlobalKey.new);
+
+  int _focusPackIndex() {
+    for (final pack in widget.packs) {
+      if (!widget.completedPackIndexes.contains(pack.packIndex)) {
+        return pack.packIndex;
+      }
+    }
+    return widget.packs.isEmpty ? 1 : widget.packs.last.packIndex;
+  }
+
+  void _scrollToFocus() {
+    if (widget.packs.isEmpty) return;
+    final allDone = widget.packs.every(
+      (pack) => widget.completedPackIndexes.contains(pack.packIndex),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (allDone) {
+        if (!_scrollController.hasClients) return;
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+      final key = _keyFor(_focusPackIndex());
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollToFocus();
+  }
+
+  @override
+  void didUpdateWidget(covariant LearnPackBadgeRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final packsChanged = oldWidget.packs.length != widget.packs.length ||
+        oldWidget.packs.map((p) => p.packIndex).join() !=
+            widget.packs.map((p) => p.packIndex).join();
+    final completedChanged = oldWidget.completedPackIndexes.length !=
+            widget.completedPackIndexes.length ||
+        !oldWidget.completedPackIndexes.containsAll(widget.completedPackIndexes);
+    if (packsChanged || completedChanged) {
+      _scrollToFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 36,
       child: ListView(
+        controller: _scrollController,
         scrollDirection: Axis.horizontal,
         children: [
-          for (var i = 0; i < packs.length; i++) ...[
+          for (var i = 0; i < widget.packs.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
-            _PackBadge(
-              label: packs[i].badgeLabel,
-              selected: packs[i].packIndex == selectedPackIndex,
-              incomplete: packs[i].incomplete,
-              completed: completedPackIndexes.contains(packs[i].packIndex),
-              onTap: () => onSelectPack(packs[i].packIndex),
+            KeyedSubtree(
+              key: _keyFor(widget.packs[i].packIndex),
+              child: _PackBadge(
+                label: widget.packs[i].badgeLabel,
+                selected: widget.packs[i].packIndex == widget.selectedPackIndex,
+                incomplete: widget.packs[i].incomplete,
+                completed:
+                    widget.completedPackIndexes.contains(widget.packs[i].packIndex),
+                onTap: () => widget.onSelectPack(widget.packs[i].packIndex),
+              ),
             ),
           ],
         ],
@@ -64,7 +143,7 @@ class LearnGenerateAnotherButton extends StatelessWidget {
       width: double.infinity,
       child: OutlinedButton(
         onPressed: enabled ? onTap : null,
-        child: Text(busy ? 'Generating…' : 'Generate another'),
+        child: Text(busy ? 'Generating…' : 'Generate another atomic pack'),
       ),
     );
   }
