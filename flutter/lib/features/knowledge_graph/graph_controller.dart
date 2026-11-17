@@ -90,6 +90,8 @@ class GraphController extends ChangeNotifier {
       }
     }
     if (focusHistory.isNotEmpty && focusHistory.last == id) return;
+    // Keep ids unique: revisiting a topic moves it to the end (no duplicate chips).
+    focusHistory.remove(id);
     focusHistory.add(id);
     while (focusHistory.length > maxFocusTrail) {
       final dropped = focusHistory.removeAt(0);

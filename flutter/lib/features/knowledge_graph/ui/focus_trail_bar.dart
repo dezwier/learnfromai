@@ -22,7 +22,10 @@ class _FocusTrailBarState extends State<FocusTrailBar> {
   final Set<String> _settled = {};
 
   /// Match focus morph so the chip eases in alongside the graph.
-  static const _enter = Duration(milliseconds: 360);
+  static const _enter = Duration(milliseconds: 480);
+
+  /// Stable tween — a new [Tween] each build restarts [TweenAnimationBuilder].
+  static final _revealTween = Tween<double>(begin: 0, end: 1);
 
   @override
   void initState() {
@@ -42,8 +45,6 @@ class _FocusTrailBarState extends State<FocusTrailBar> {
     final scheme = Theme.of(context).colorScheme;
     // reverse keeps newest pinned on the right. Entrance widthFactor grows the
     // new chip from the right so the row shifts left in the same motion.
-    // Do not mark ids settled until onEnd — morph setStates would otherwise
-    // flip animate→false mid-tween and snap.
     return RepaintBoundary(
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -57,27 +58,23 @@ class _FocusTrailBarState extends State<FocusTrailBar> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (var i = 0; i < widget.entries.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 6),
-                    () {
-                      final entry = widget.entries[i];
-                      return _FocusTrailChipReveal(
-                        key: ValueKey(entry.id),
-                        animate: !_settled.contains(entry.id),
-                        duration: _enter,
-                        onFinished: () {
-                          if (!mounted) return;
-                          setState(() => _settled.add(entry.id));
-                        },
-                        child: _FocusTrailChip(
-                          entry: entry,
-                          current: entry.id == widget.currentId,
-                          onTap: () => widget.onSelect(entry),
-                          scheme: scheme,
-                        ),
-                      );
-                    }(),
-                  ],
+                  for (var i = 0; i < widget.entries.length; i++)
+                    _FocusTrailChipReveal(
+                      key: ValueKey('trail-$i-${widget.entries[i].id}'),
+                      animate: !_settled.contains(widget.entries[i].id),
+                      duration: _enter,
+                      padLeft: i > 0 ? 6 : 0,
+                      onFinished: () {
+                        if (!mounted) return;
+                        setState(() => _settled.add(widget.entries[i].id));
+                      },
+                      child: _FocusTrailChip(
+                        entry: widget.entries[i],
+                        current: widget.entries[i].id == widget.currentId,
+                        onTap: () => widget.onSelect(widget.entries[i]),
+                        scheme: scheme,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -93,20 +90,25 @@ class _FocusTrailChipReveal extends StatelessWidget {
     super.key,
     required this.animate,
     required this.duration,
+    required this.padLeft,
     required this.onFinished,
     required this.child,
   });
 
   final bool animate;
   final Duration duration;
+  final double padLeft;
   final VoidCallback onFinished;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    if (!animate) return child;
+    final padded = padLeft > 0
+        ? Padding(padding: EdgeInsets.only(left: padLeft), child: child)
+        : child;
+    if (!animate) return padded;
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
+      tween: _FocusTrailBarState._revealTween,
       duration: duration,
       curve: Curves.easeOutCubic,
       onEnd: onFinished,
@@ -119,7 +121,7 @@ class _FocusTrailChipReveal extends StatelessWidget {
           ),
         );
       },
-      child: child,
+      child: padded,
     );
   }
 }
@@ -188,4 +190,3 @@ class _FocusTrailChip extends StatelessWidget {
     );
   }
 }
-
