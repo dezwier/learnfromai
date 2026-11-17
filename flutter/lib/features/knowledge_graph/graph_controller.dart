@@ -70,14 +70,17 @@ class GraphController extends ChangeNotifier {
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
 
-  /// Oldest → newest focus trail for the bottom breadcrumb (max [maxFocusTrail]).
-  List<FocusTrailEntry> get focusTrail => [
-        for (final id in focusHistory)
-          FocusTrailEntry(
-            id: id,
-            title: _focusTitles[id] ?? _titleForNode(id) ?? 'Topic',
-          ),
-      ];
+  /// Oldest → newest prior focuses for the bottom breadcrumb (excludes current).
+  List<FocusTrailEntry> get focusTrail {
+    if (focusHistory.length <= 1) return const [];
+    return [
+      for (final id in focusHistory.sublist(0, focusHistory.length - 1))
+        FocusTrailEntry(
+          id: id,
+          title: _focusTitles[id] ?? _titleForNode(id) ?? 'Topic',
+        ),
+    ];
+  }
 
   void _recordFocus(String id, {String? title}) {
     final label = title?.trim();

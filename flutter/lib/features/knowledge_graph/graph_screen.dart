@@ -872,29 +872,19 @@ class _GraphScreenState extends State<GraphScreen>
     }
     await graph.openExisting(nodeId);
     if (!mounted) return;
-    // Wait until this node is the focus (or present) before opening the sheet.
-    PlacedNode? placed;
+    // Focus only — do not open the topic screen.
     for (var i = 0; i < 24; i++) {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
       if (graph.loading || graph.refreshing) continue;
-      placed = _placedNodeById(nodeId);
-      if (placed != null && graph.focusId == nodeId) break;
+      if (graph.focusId == nodeId) break;
     }
-    placed ??= _placedNodeById(nodeId);
-    if (placed == null || !mounted) return;
-    setState(() {
-      _highlighted = placed;
-      _topicOpen = true;
-      _profileOpen = false;
-    });
-    unawaited(
-      graph.trackEvent(
-        nodeId: nodeId,
-        kind: 'open',
-        payload: {'source': 'graph'},
-      ),
-    );
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId ?? nodeId);
+    final placed = _placedNodeById(nodeId);
+    if (placed != null && _highlighted?.id != placed.id) {
+      setState(() => _highlighted = placed);
+    }
   }
 
   @override
