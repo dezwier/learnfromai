@@ -242,6 +242,7 @@ class GraphController extends ChangeNotifier {
   Timer? _jobPoller;
   var _polling = false;
   var _disposed = false;
+  Future<void>? _resumeInFlight;
 
   String? get focusId {
     final raw = categoryGraph?['focus_node_id'];
@@ -289,10 +290,29 @@ class GraphController extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<void> resume() async {
+  /// Cold start / foreground: load prefs + latest neighborhood. Concurrent callers share one run.
+  Future<void> resume() {
+    final existing = _resumeInFlight;
+    if (existing != null) return existing;
+    late final Future<void> future;
+    future = _resumeBody().whenComplete(() {
+      if (identical(_resumeInFlight, future)) _resumeInFlight = null;
+    });
+    _resumeInFlight = future;
+    return future;
+  }
+
+  Future<void> _resumeBody() async {
     await loadPreferences();
-    if (categoryGraph == null && candidates.isEmpty && !loading && !refreshing) {
-      await _focus(body: const {});
+    if (categoryGraph == null && candidates.isEmpty) {
+      // Wait out a concurrent open/focus instead of no-oping while loading.
+      while ((loading || refreshing) && categoryGraph == null && candidates.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+        if (_disposed) return;
+      }
+      if (categoryGraph == null && candidates.isEmpty && !loading && !refreshing) {
+        await _focus(body: const {});
+      }
     }
     // Always re-hook watched jobs (cold start or after the OS suspended timers).
     await reattachJobs();

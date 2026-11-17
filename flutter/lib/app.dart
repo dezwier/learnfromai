@@ -88,6 +88,19 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
     await themes.bindUser(widget.auth.user?.id);
     if (!mounted) return;
 
+    // Load the graph under the splash so the first visible frame is centered.
+    // Otherwise InteractiveViewer paints one identity-transform frame (left strip
+    // of a wide canvas — looks like a drawer covering the right).
+    if (widget.auth.user != null) {
+      await widget.graph.resume();
+      if (!mounted) return;
+      // Router may still be mounting GraphScreen; give it frames to layout + snap.
+      for (var i = 0; i < 4; i++) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+      }
+    }
+
     setState(() => _ready = true);
     // Force a paint so the overlay actually tears down without waiting for a gesture.
     SchedulerBinding.instance.scheduleFrame();

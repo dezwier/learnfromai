@@ -1127,8 +1127,11 @@ class _GraphScreenState extends State<GraphScreen>
           _settledLayout = nextLayout;
           _morphFrom = null;
           _morphTo = null;
+          // Avoid notifying _onLayoutMorphTick (setState) during LayoutBuilder.
           _layoutMorph.stop();
+          _layoutMorph.removeListener(_onLayoutMorphTick);
           _layoutMorph.value = 1;
+          _layoutMorph.addListener(_onLayoutMorphTick);
           _snapCameraToCanvasCenter(
             focusId: focusId,
             viewport: viewport,
@@ -1146,10 +1149,20 @@ class _GraphScreenState extends State<GraphScreen>
               } else if (_settledLayout == null || focusId != _transformFocusId) {
                 _adoptLayout(next: nextLayout, focusId: focusId, viewport: viewport);
               }
+              // Reveal InteractiveViewer after the camera snap (see cameraReady).
+              if (mounted) setState(() {});
             });
           }
         } else if (!_layoutMorph.isAnimating) {
           _settledLayout = nextLayout;
+        }
+        // Never mount InteractiveViewer until the camera matches this focus —
+        // constrained:false defaults to top-left and a wide canvas looks like a
+        // right-hand drawer for one frame.
+        final cameraReady =
+            !viewport.isEmpty && _settledLayout != null && _transformFocusId == focusId;
+        if (!cameraReady) {
+          return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
         }
         final layout = _displayLayout(_settledLayout ?? nextLayout);
         _layout = layout;
