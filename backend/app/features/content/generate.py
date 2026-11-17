@@ -1,4 +1,4 @@
-"""Worker: generate shared learn / example / check bits for one node."""
+"""Worker: generate shared learn / example / check bits for one pack."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ from app.features.content.models import (
 )
 from app.features.content.service import (
     existing_check_bodies,
-    is_content_complete,
+    existing_pack_digests,
+    is_pack_complete,
     missing_content_kinds,
 )
 from app.features.knowledge_graph.neighborhood import set_progress
@@ -44,6 +45,7 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     node_id = parse_uuid(payload.get("node_id"))
     band = str(payload.get("band") or DEFAULT_BAND)
     recipe_version = int(payload.get("recipe_version") or RECIPE_VERSION)
+    pack_index = int(payload.get("pack_index") or 1)
     if node_id is None:
         raise AppError("VALIDATION_ERROR", "Job is missing node_id", 422)
 
@@ -52,11 +54,18 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
 
-    missing = missing_content_kinds(session, node.id, band=band, recipe_version=recipe_version)
+    missing = missing_content_kinds(
+        session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
+    )
     if not missing:
         set_progress(session, job, stage="done", message="Content already ready", fraction=1.0)
         session.commit()
-        return {"node_id": str(node.id), "skipped": True, "bit_ids": []}
+        return {
+            "node_id": str(node.id),
+            "pack_index": pack_index,
+            "skipped": True,
+            "bit_ids": [],
+        }
 
     neighbor_titles = _neighbor_titles(session, node.id)
     from app.features.accounts.models import User
@@ -70,12 +79,23 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     message = (
         "Writing extra checks…"
         if only_checks
-        else "Writing learn · example · checks…"
+        else f"Writing learning pack {pack_index}…"
     )
     set_progress(session, job, stage="generate", message=message, fraction=0.35)
     assert_user_quota(session, user_id)
     existing_checks = existing_check_bodies(
-        session, node.id, band=band, recipe_version=recipe_version
+        session,
+        node.id,
+        pack_index=pack_index,
+        band=band,
+        recipe_version=recipe_version,
+    )
+    other_packs = existing_pack_digests(
+        session,
+        node.id,
+        band=band,
+        recipe_version=recipe_version,
+        exclude_pack_index=pack_index,
     )
     bits, usage = llm.generate_bits(
         node.name,
@@ -83,6 +103,8 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
         neighbor_titles,
         kinds=missing,
         existing_checks=existing_checks or None,
+        existing_packs=other_packs or None,
+        pack_index=pack_index,
     )
     renew_lease(session, job)
     maybe_record_usage(session, llm, user_id=user_id, job_id=job.id, task="content", usage=usage)
@@ -93,6 +115,7 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     bit_ids = _upsert_bits(
         session,
         node_id=node.id,
+        pack_index=pack_index,
         bits=bits,
         band=band,
         recipe_version=recipe_version,
@@ -101,9 +124,12 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     session.commit()
     return {
         "node_id": str(node.id),
+        "pack_index": pack_index,
         "skipped": False,
         "bit_ids": bit_ids,
-        "complete": is_content_complete(session, node.id, band=band, recipe_version=recipe_version),
+        "complete": is_pack_complete(
+            session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
+        ),
     }
 
 
@@ -127,6 +153,7 @@ def _upsert_bits(
     session: Session,
     *,
     node_id: UUID,
+    pack_index: int,
     bits: dict,
     band: str,
     recipe_version: int,
@@ -139,16 +166,18 @@ def _upsert_bits(
         existing = session.exec(
             select(KnowledgeBit).where(
                 KnowledgeBit.node_id == node_id,
+                KnowledgeBit.pack_index == pack_index,
                 KnowledgeBit.kind == kind,
                 KnowledgeBit.band == band,
                 KnowledgeBit.recipe_version == recipe_version,
             )
         ).first()
-        # Prefer overwriting a legacy "check" row when writing check1.
-        if existing is None and kind == "check1":
+        # Prefer overwriting a legacy "check" row when writing check1 on pack 1.
+        if existing is None and kind == "check1" and pack_index == 1:
             existing = session.exec(
                 select(KnowledgeBit).where(
                     KnowledgeBit.node_id == node_id,
+                    KnowledgeBit.pack_index == pack_index,
                     KnowledgeBit.kind == LEGACY_CHECK_KIND,
                     KnowledgeBit.band == band,
                     KnowledgeBit.recipe_version == recipe_version,
@@ -159,6 +188,7 @@ def _upsert_bits(
         if existing is None:
             row = KnowledgeBit(
                 node_id=node_id,
+                pack_index=pack_index,
                 kind=kind,
                 band=band,
                 recipe_version=recipe_version,

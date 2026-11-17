@@ -50,7 +50,7 @@ flowchart TD
 
 - `accounts` — Firebase exchange and users
 - `knowledge_graph` — the shared graph, nodes, edges, and the workspace payload
-- `content` — shared learn / example / check1–3 bits and `expand_content` jobs
+- `content` — shared atomic learning packs (`pack_index` + learn / example / typed checks) and `expand_content` jobs
 - `graph_extend` — extend requests and the merge
 - `platform` — jobs, LLM client, quota, worker heartbeat
 

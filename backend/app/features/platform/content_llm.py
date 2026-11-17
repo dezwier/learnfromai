@@ -1,4 +1,4 @@
-"""LLM contracts for shared tile content (learn / example / checks)."""
+"""LLM contracts for shared tile content (atomic learning packs)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.errors import AppError, generation_unavailable
-from app.features.content.models import CHECK_KINDS, CONTENT_KINDS
+from app.features.content.models import CHECK_KINDS, CHECK_TYPES, CONTENT_KINDS
 from app.features.platform.llm_usage_pricing import (
     reserve_usd_for_call,
     usage_from_gemini_metadata,
@@ -25,7 +25,7 @@ from app.features.platform.neighborhood_llm import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_CONTENT = "content_bits_v2"
+PROMPT_CONTENT = "content_bits_v3"
 
 
 class ContentLLM(Protocol):
@@ -39,6 +39,8 @@ class ContentLLM(Protocol):
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
+        existing_packs: list[dict] | None = None,
+        pack_index: int = 1,
     ) -> tuple[dict, dict]: ...
 
 
@@ -49,6 +51,8 @@ def build_content_prompt(
     *,
     kinds: list[str] | None = None,
     existing_checks: dict[str, dict] | None = None,
+    existing_packs: list[dict] | None = None,
+    pack_index: int = 1,
 ) -> str:
     required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
     if not required:
@@ -56,36 +60,51 @@ def build_content_prompt(
     checks_needed = [k for k in required if k in CHECK_KINDS]
     text_needed = [k for k in required if k in ("learn", "example")]
     parts = [
-        "Create short learning content for one topic. Return JSON only with these keys: "
+        "Create one atomic learning pack for a single topic. Return JSON only with these keys: "
         + ", ".join(required)
         + ". "
+        "Teach ONLY this topic. Neighbors are out of scope—mention them only as what this topic "
+        "is not; never explain how neighbors work. "
+        "Do not invent prerequisites. Keep language clear and standalone. "
+        f"This is pack_index {pack_index}. "
     ]
+    if existing_packs:
+        parts.append(
+            "Do not repeat ideas already covered by existing packs on this topic: "
+            + json.dumps(existing_packs)
+            + ". Cover a different facet of the same topic. "
+        )
     if text_needed:
         parts.append(
             "learn and example are objects {title, markdown} with concise Markdown "
             "(a few short paragraphs max). "
+            "learn defines the facet; example is one concrete scene (not another definition). "
         )
     if checks_needed:
         parts.append(
             "Each of "
             + ", ".join(checks_needed)
-            + " is {question, choices, answer_index, explanation} where choices is an array "
-            "of exactly 4 short strings, answer_index is 0..3, and explanation is one short sentence. "
-            "The three checks must ask different questions (not paraphrases) that probe the same topic. "
+            + " is a standalone check that does not require reading learn/example first. "
+            "Choose a type per check among mc, true_false, cloze (mix types when useful). "
+            "mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}. "
+            "true_false: {type:'true_false', statement, answer (boolean), explanation}. "
+            "cloze: {type:'cloze', prompt (include ___ for the blank), answer, aliases (optional string array), explanation}. "
+            "The three checks must probe different claims (not paraphrases). "
         )
         if existing_checks:
             parts.append(
-                "Existing checks to avoid duplicating: "
+                "Existing checks in this pack to avoid duplicating: "
                 + json.dumps(existing_checks)
                 + ". "
             )
-    parts.append("Do not invent prerequisites. Keep language clear and standalone.\n")
+    parts.append("\n")
     parts.append(
         json.dumps(
             {
                 "topic": name,
                 "description": description or "",
                 "neighbors": neighbor_titles[:12],
+                "pack_index": pack_index,
                 "required_keys": required,
             }
         )
@@ -104,17 +123,20 @@ class FakeContentLLM:
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
+        existing_packs: list[dict] | None = None,
+        pack_index: int = 1,
     ) -> tuple[dict, dict]:
         topic = (name or "Topic").strip() or "Topic"
         desc = (description or "").strip()
         neighbors = ", ".join(neighbor_titles[:4]) if neighbor_titles else "related ideas"
         required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
+        facet = f"pack {pack_index}" if pack_index > 1 else "core idea"
         payload: dict = {}
         if "learn" in required:
             payload["learn"] = {
-                "title": f"What is {topic}?",
+                "title": f"What is {topic}?" if pack_index == 1 else f"{topic}: {facet}",
                 "markdown": (
-                    f"**{topic}** is a topic you can learn in short steps. "
+                    f"**{topic}** is a topic you can learn in short steps ({facet}). "
                     f"{desc or f'It sits near {neighbors}.'} "
                     "Focus on the core idea before details."
                 ),
@@ -123,53 +145,84 @@ class FakeContentLLM:
             payload["example"] = {
                 "title": f"{topic} in practice",
                 "markdown": (
-                    f"Imagine explaining **{topic}** to a curious friend in two sentences: "
+                    f"Imagine explaining **{topic}** ({facet}) to a curious friend in two sentences: "
                     f"start with the plain meaning"
                     f"{f' ({desc})' if desc else ''}, then name one concrete situation where it shows up."
                 ),
             }
-        check_templates = {
-            "check1": (
-                f"Which statement best fits {topic}?",
-                [
-                    f"{topic} is a learning topic with a clear core idea.",
-                    f"{topic} is unrelated to anything nearby.",
-                    f"{topic} has no practical uses.",
-                    f"{topic} only exists as a random label.",
-                ],
-                f"The first choice matches how we introduce {topic}.",
-            ),
-            "check2": (
-                f"What is a useful next step when learning {topic}?",
-                [
-                    f"Start from the core idea of {topic}, then add one concrete example.",
-                    f"Ignore {topic} and memorize unrelated trivia.",
-                    f"Assume {topic} has no connection to nearby ideas.",
-                    f"Skip explanations and only collect buzzwords about {topic}.",
-                ],
-                f"Building from the core idea with an example is the useful next step for {topic}.",
-            ),
-            "check3": (
-                f"Which claim about {topic} is weakest?",
-                [
-                    f"{topic} can be explained in plain language without jargon.",
-                    f"{topic} is only a random string of letters with no meaning.",
-                    f"{topic} often sits near related ideas in a knowledge map.",
-                    f"{topic} can be checked with a short multiple-choice question.",
-                ],
-                f"Calling {topic} meaningless is the weakest claim.",
-            ),
-        }
+        if pack_index == 1:
+            check_templates = {
+                "check1": {
+                    "type": "mc",
+                    "question": f"Which statement best fits {topic}?",
+                    "choices": [
+                        f"{topic} is a learning topic with a clear core idea.",
+                        f"{topic} is unrelated to anything nearby.",
+                        f"{topic} has no practical uses.",
+                        f"{topic} only exists as a random label.",
+                    ],
+                    "answer_index": 0,
+                    "explanation": f"The first choice matches how we introduce {topic}.",
+                },
+                "check2": {
+                    "type": "mc",
+                    "question": f"What is a useful next step when learning {topic}?",
+                    "choices": [
+                        f"Start from the core idea of {topic}, then add one concrete example.",
+                        f"Ignore {topic} and memorize unrelated trivia.",
+                        f"Assume {topic} has no connection to nearby ideas.",
+                        f"Skip explanations and only collect buzzwords about {topic}.",
+                    ],
+                    "answer_index": 0,
+                    "explanation": (
+                        f"Building from the core idea with an example is the useful next step for {topic}."
+                    ),
+                },
+                "check3": {
+                    "type": "mc",
+                    "question": f"Which claim about {topic} is weakest?",
+                    "choices": [
+                        f"{topic} can be explained in plain language without jargon.",
+                        f"{topic} is only a random string of letters with no meaning.",
+                        f"{topic} often sits near related ideas in a knowledge map.",
+                        f"{topic} can be checked with a short multiple-choice question.",
+                    ],
+                    "answer_index": 1,
+                    "explanation": f"Calling {topic} meaningless is the weakest claim.",
+                },
+            }
+        else:
+            check_templates = {
+                "check1": {
+                    "type": "true_false",
+                    "statement": f"{topic} can be learned in short standalone steps.",
+                    "answer": True,
+                    "explanation": f"Atomic packs are designed for short steps about {topic}.",
+                },
+                "check2": {
+                    "type": "cloze",
+                    "prompt": f"A short concrete scene that shows {topic} in use is called an ___.",
+                    "answer": "example",
+                    "aliases": ["Example", "an example"],
+                    "explanation": "The example step is the concrete scene.",
+                },
+                "check3": {
+                    "type": "mc",
+                    "question": f"Which focus fits a later pack about {topic}?",
+                    "choices": [
+                        f"A different facet of {topic} not covered yet.",
+                        f"A full course on every neighbor of {topic}.",
+                        f"Ignoring {topic} entirely.",
+                        f"Only memorizing the word {topic}.",
+                    ],
+                    "answer_index": 0,
+                    "explanation": f"Later packs deepen {topic} without leaving the topic.",
+                },
+            }
         for kind in CHECK_KINDS:
             if kind not in required:
                 continue
-            question, choices, explanation = check_templates[kind]
-            payload[kind] = {
-                "question": question,
-                "choices": choices,
-                "answer_index": 0 if kind != "check3" else 1,
-                "explanation": explanation,
-            }
+            payload[kind] = check_templates[kind]
         return normalize_bits(payload, required_kinds=required), _usage("fake", 20, 80)
 
 
@@ -193,6 +246,8 @@ class GeminiContentLLM:
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
+        existing_packs: list[dict] | None = None,
+        pack_index: int = 1,
     ) -> tuple[dict, dict]:
         required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
         parsed, usage = self._json(
@@ -202,6 +257,8 @@ class GeminiContentLLM:
                 neighbor_titles,
                 kinds=required,
                 existing_checks=existing_checks,
+                existing_packs=existing_packs,
+                pack_index=pack_index,
             )
         )
         return normalize_bits(parsed, required_kinds=required), usage
@@ -292,6 +349,8 @@ class OpenAIContentLLM:
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
+        existing_packs: list[dict] | None = None,
+        pack_index: int = 1,
     ) -> tuple[dict, dict]:
         required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
         parsed, usage = self._json(
@@ -301,6 +360,8 @@ class OpenAIContentLLM:
                 neighbor_titles,
                 kinds=required,
                 existing_checks=existing_checks,
+                existing_packs=existing_packs,
+                pack_index=pack_index,
             )
         )
         return normalize_bits(parsed, required_kinds=required), usage
@@ -388,8 +449,7 @@ def get_content_llm(provider: str | None = None) -> ContentLLM:
     return GeminiContentLLM()
 
 
-def _normalize_check(raw: object, *, kind: str) -> dict:
-    check = raw if isinstance(raw, dict) else {}
+def _normalize_mc(check: dict, *, kind: str) -> dict:
     question = str(check.get("question") or "").strip()
     choices_raw = check.get("choices") if isinstance(check.get("choices"), list) else []
     choices = [str(item).strip() for item in choices_raw if str(item).strip()]
@@ -406,11 +466,75 @@ def _normalize_check(raw: object, *, kind: str) -> dict:
     if not question:
         raise ValueError(f"{kind} is missing question")
     return {
+        "type": "mc",
         "question": question,
         "choices": choices,
         "answer_index": answer_index,
         "explanation": explanation,
     }
+
+
+def _normalize_true_false(check: dict, *, kind: str) -> dict:
+    statement = str(check.get("statement") or check.get("question") or "").strip()
+    if not statement:
+        raise ValueError(f"{kind} is missing statement")
+    raw = check.get("answer")
+    if isinstance(raw, bool):
+        answer = raw
+    elif isinstance(raw, str) and raw.strip().lower() in {"true", "false"}:
+        answer = raw.strip().lower() == "true"
+    elif raw in (0, 1):
+        answer = bool(raw)
+    else:
+        raise ValueError(f"{kind} answer must be a boolean")
+    explanation = str(check.get("explanation") or "").strip() or None
+    return {
+        "type": "true_false",
+        "statement": statement,
+        "answer": answer,
+        "explanation": explanation,
+    }
+
+
+def _normalize_cloze(check: dict, *, kind: str) -> dict:
+    prompt = str(check.get("prompt") or check.get("question") or "").strip()
+    answer = str(check.get("answer") or "").strip()
+    if not prompt:
+        raise ValueError(f"{kind} is missing prompt")
+    if not answer:
+        raise ValueError(f"{kind} is missing answer")
+    aliases_raw = check.get("aliases") if isinstance(check.get("aliases"), list) else []
+    aliases = [str(item).strip() for item in aliases_raw if str(item).strip()]
+    explanation = str(check.get("explanation") or "").strip() or None
+    return {
+        "type": "cloze",
+        "prompt": prompt,
+        "answer": answer,
+        "aliases": aliases,
+        "explanation": explanation,
+    }
+
+
+def _normalize_check(raw: object, *, kind: str) -> dict:
+    check = raw if isinstance(raw, dict) else {}
+    raw_type = str(check.get("type") or "").strip().lower()
+    if not raw_type:
+        # Legacy bodies without type are multiple-choice.
+        if "choices" in check or "answer_index" in check:
+            raw_type = "mc"
+        elif "statement" in check or isinstance(check.get("answer"), bool):
+            raw_type = "true_false"
+        elif "prompt" in check:
+            raw_type = "cloze"
+        else:
+            raw_type = "mc"
+    if raw_type not in CHECK_TYPES:
+        raise ValueError(f"{kind} type must be one of {CHECK_TYPES}")
+    if raw_type == "mc":
+        return _normalize_mc(check, kind=kind)
+    if raw_type == "true_false":
+        return _normalize_true_false(check, kind=kind)
+    return _normalize_cloze(check, kind=kind)
 
 
 def normalize_bits(raw: dict, *, required_kinds: list[str] | None = None) -> dict:

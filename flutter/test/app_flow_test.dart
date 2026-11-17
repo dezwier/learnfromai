@@ -347,7 +347,8 @@ void main() {
           'status': 'queued',
           'job_id': 'job-content',
           'focus_node_id': '2',
-          'progress': {'message': 'Writing learn · example · checks…'},
+          'pack_index': 1,
+          'progress': {'message': 'Writing learning pack 1…'},
         };
       },
       loader: (path) async {
@@ -355,7 +356,8 @@ void main() {
           return {
             'node_id': '2',
             'incomplete': true,
-            'bits': <Map<String, dynamic>>[],
+            'pack_count': 0,
+            'packs': <Map<String, dynamic>>[],
           };
         }
         return _compact();
@@ -368,10 +370,37 @@ void main() {
     );
     final queued = await graph.enqueueContent('2', title: 'Dinosaurs');
     expect(lastBody?['expand'], isTrue);
+    expect(lastBody?.containsKey('new_pack'), isFalse);
     expect(queued?.incomplete, isTrue);
     expect(graph.activeJobCount, 1);
     expect(graph.trackedJobs.first.type, 'expand_content');
     expect(graph.jobForNode('2')?.jobId, 'job-content');
+  });
+
+  test('enqueueContent newPack posts new_pack', () async {
+    Map<String, dynamic>? lastBody;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        lastBody = body is Map ? Map<String, dynamic>.from(body) : null;
+        return {
+          'status': 'queued',
+          'job_id': 'job-content-2',
+          'focus_node_id': '2',
+          'pack_index': 2,
+          'progress': {'message': 'Writing learning pack 2…'},
+        };
+      },
+      loader: (path) async => _contentReady(),
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          },
+    );
+    await graph.enqueueContent('2', title: 'Dinosaurs', newPack: true);
+    expect(lastBody?['expand'], isTrue);
+    expect(lastBody?['new_pack'], isTrue);
+    expect(graph.jobForNode('2')?.jobId, 'job-content-2');
   });
 
   test('enqueueImage posts generate and tracks image job', () async {
@@ -479,7 +508,8 @@ void main() {
             'status': 'queued',
             'job_id': 'job-content',
             'focus_node_id': '2',
-            'progress': {'message': 'Writing learn · example · checks…'},
+            'pack_index': 1,
+            'progress': {'message': 'Writing learning pack 1…'},
           };
         }
         return {};
@@ -490,7 +520,8 @@ void main() {
           return {
             'node_id': '2',
             'incomplete': true,
-            'bits': <Map<String, dynamic>>[],
+            'pack_count': 0,
+            'packs': <Map<String, dynamic>>[],
           };
         }
         if (path == '/me/preferences') {
@@ -534,6 +565,9 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
+    expect(find.textContaining('1 learning'), findsWidgets);
+    expect(find.textContaining('1 · What is Dinosaurs'), findsWidgets);
+    expect(find.text('Generate another'), findsOneWidget);
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
     expect(find.textContaining('Which statement best fits'), findsNothing);
 
@@ -749,8 +783,10 @@ Map<String, dynamic> _contentReady() {
     return {
       'id': id,
       'kind': kind,
+      'pack_index': 1,
       'position': position,
       'body': {
+        'type': 'mc',
         'question': question,
         'choices': [
           'Dinosaurs are a learning topic with a clear core idea.',
@@ -769,22 +805,38 @@ Map<String, dynamic> _contentReady() {
     'incomplete': false,
     'band': 'default',
     'recipe_version': 1,
-    'bits': [
+    'pack_count': 1,
+    'packs': [
       {
-        'id': 'b1',
-        'kind': 'learn',
-        'position': 0,
-        'body': {'title': 'What is Dinosaurs?', 'markdown': '**Dinosaurs** are extinct reptiles.'},
+        'pack_index': 1,
+        'incomplete': false,
+        'title': 'What is Dinosaurs?',
+        'bits': [
+          {
+            'id': 'b1',
+            'kind': 'learn',
+            'pack_index': 1,
+            'position': 0,
+            'body': {
+              'title': 'What is Dinosaurs?',
+              'markdown': '**Dinosaurs** are extinct reptiles.',
+            },
+          },
+          {
+            'id': 'b2',
+            'kind': 'example',
+            'pack_index': 1,
+            'position': 1,
+            'body': {
+              'title': 'Dinosaurs in practice',
+              'markdown': 'Explain fossils to a friend.',
+            },
+          },
+          check('b3', 'check1', 2, 'Which statement best fits Dinosaurs?'),
+          check('b4', 'check2', 3, 'What is a useful next step when learning Dinosaurs?'),
+          check('b5', 'check3', 4, 'Which claim about Dinosaurs is weakest?'),
+        ],
       },
-      {
-        'id': 'b2',
-        'kind': 'example',
-        'position': 1,
-        'body': {'title': 'Dinosaurs in practice', 'markdown': 'Explain fossils to a friend.'},
-      },
-      check('b3', 'check1', 2, 'Which statement best fits Dinosaurs?'),
-      check('b4', 'check2', 3, 'What is a useful next step when learning Dinosaurs?'),
-      check('b5', 'check3', 4, 'Which claim about Dinosaurs is weakest?'),
     ],
   };
 }

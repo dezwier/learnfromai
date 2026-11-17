@@ -292,13 +292,23 @@ class GraphController extends ChangeNotifier {
   }
 
   /// Request shared content expand when incomplete; track the job like neighborhood.
-  Future<TopicContent?> enqueueContent(String id, {String? title}) async {
+  Future<TopicContent?> enqueueContent(
+    String id, {
+    String? title,
+    bool newPack = false,
+  }) async {
     if (jobForNode(id) != null) {
       _ensurePoller();
       return fetchContent(id);
     }
     try {
-      final payload = await _post('/knowledge/nodes/$id/content', body: {'expand': true});
+      final payload = await _post(
+        '/knowledge/nodes/$id/content',
+        body: {
+          'expand': true,
+          if (newPack) 'new_pack': true,
+        },
+      );
       final jobId = payload['job_id']?.toString();
       if (jobId == null) {
         return TopicContent.fromJson(payload);
@@ -307,7 +317,7 @@ class GraphController extends ChangeNotifier {
       return TopicContent(
         nodeId: payload['focus_node_id']?.toString() ?? id,
         incomplete: true,
-        bits: const [],
+        packs: const [],
       );
     } on ApiException catch (exc) {
       error = exc.message;

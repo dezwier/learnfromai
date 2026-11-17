@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/widgets/pulse_placeholder.dart';
 import '../../profile/overlay_panel_chrome.dart';
 import '../graph_controller.dart';
+import '../models.dart';
+import 'learn_check_bits.dart';
+import 'learn_pack_chrome.dart';
 
 const _lessonKinds = ['learn', 'example', 'check1', 'check2', 'check3'];
 const _lessonLabels = ['Learn', 'Example', 'Check 1', 'Check 2', 'Check 3'];
@@ -49,8 +51,13 @@ class _LearnSheetState extends State<LearnSheet> {
   var _selectedChoice = -1;
   var _revealed = false;
   var _step = 0;
+  var _packIndex = 1;
+  var _generatingAnother = false;
   GraphController? _graph;
   final Set<String> _trackedKinds = {};
+  final _clozeController = TextEditingController();
+
+  TopicPack? get _activePack => _content?.pack(_packIndex);
 
   @override
   void initState() {
@@ -90,38 +97,54 @@ class _LearnSheetState extends State<LearnSheet> {
       });
       return;
     }
-    if (!existing.incomplete) {
+    if (existing.packs.isNotEmpty && !existing.incomplete) {
+      _applyContent(existing, selectPack: existing.packs.first.packIndex);
+      return;
+    }
+    if (existing.packs.isNotEmpty) {
+      _applyContent(existing, selectPack: existing.packs.first.packIndex);
+    } else {
       setState(() {
         _content = existing;
         _loading = false;
       });
-      _maybeTrackView(graph);
-      return;
     }
-    setState(() {
-      _content = existing;
-      _loading = false;
-    });
-    _maybeTrackView(graph);
     if (graph.jobForNode(widget.nodeId) != null) {
       _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
       _listen(graph);
       return;
     }
+    if (!existing.incomplete) return;
     final queued = await graph.enqueueContent(widget.nodeId, title: widget.title);
     if (!mounted) return;
     if (queued == null) {
       setState(() => _error = graph.error ?? 'Could not start content generation');
       return;
     }
-    if (!queued.incomplete) {
-      setState(() => _content = queued);
-      _maybeTrackView(graph);
+    if (queued.packs.isNotEmpty && !queued.incomplete) {
+      _applyContent(queued, selectPack: queued.packs.first.packIndex);
       return;
     }
     _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
     _listen(graph);
     setState(() => _content = queued);
+  }
+
+  void _applyContent(TopicContent content, {required int selectPack}) {
+    final pack = content.pack(selectPack) ?? content.packs.firstOrNull;
+    setState(() {
+      _content = content;
+      _loading = false;
+      _error = null;
+      _packIndex = pack?.packIndex ?? 1;
+      _step = 0;
+      _selectedChoice = -1;
+      _revealed = false;
+      _generatingAnother = false;
+      _clozeController.clear();
+      _trackedKinds.clear();
+    });
+    final graph = _graph ?? context.read<GraphController>();
     _maybeTrackView(graph);
   }
 
@@ -146,13 +169,15 @@ class _LearnSheetState extends State<LearnSheet> {
     final graph = _graph ?? context.read<GraphController>();
     final next = await graph.fetchContent(widget.nodeId);
     if (!mounted) return;
-    setState(() {
-      _content = next;
-      _error = next == null ? (graph.error ?? 'Could not load learning bits') : null;
-      _selectedChoice = -1;
-      _revealed = false;
-    });
-    _maybeTrackView(graph);
+    if (next == null) {
+      setState(() {
+        _error = graph.error ?? 'Could not load learning bits';
+        _generatingAnother = false;
+      });
+      return;
+    }
+    final prefer = next.packs.isNotEmpty ? next.packs.last.packIndex : _packIndex;
+    _applyContent(next, selectPack: prefer);
   }
 
   void _dismiss() {
@@ -165,6 +190,7 @@ class _LearnSheetState extends State<LearnSheet> {
       _step -= 1;
       _selectedChoice = -1;
       _revealed = false;
+      _clozeController.clear();
     });
     final graph = _graph ?? context.read<GraphController>();
     _maybeTrackView(graph);
@@ -179,35 +205,143 @@ class _LearnSheetState extends State<LearnSheet> {
       _step += 1;
       _selectedChoice = -1;
       _revealed = false;
+      _clozeController.clear();
     });
     final graph = _graph ?? context.read<GraphController>();
     _maybeTrackView(graph);
   }
 
+  void _selectPack(int packIndex) {
+    if (_packIndex == packIndex) return;
+    setState(() {
+      _packIndex = packIndex;
+      _step = 0;
+      _selectedChoice = -1;
+      _revealed = false;
+      _clozeController.clear();
+      _trackedKinds.clear();
+    });
+    final graph = _graph ?? context.read<GraphController>();
+    _maybeTrackView(graph);
+  }
+
+  Future<void> _generateAnother() async {
+    final graph = _graph ?? context.read<GraphController>();
+    if (graph.jobForNode(widget.nodeId) != null) return;
+    if (_content?.allPacksComplete != true) return;
+    setState(() {
+      _generatingAnother = true;
+      _error = null;
+    });
+    final queued = await graph.enqueueContent(
+      widget.nodeId,
+      title: widget.title,
+      newPack: true,
+    );
+    if (!mounted) return;
+    if (queued == null) {
+      setState(() {
+        _generatingAnother = false;
+        _error = graph.error ?? 'Could not start content generation';
+      });
+      return;
+    }
+    if (queued.packs.isNotEmpty && queued.allPacksComplete) {
+      _applyContent(queued, selectPack: queued.packs.last.packIndex);
+      return;
+    }
+    _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
+    _listen(graph);
+    setState(() => _content = queued);
+  }
+
+  String _trackKey(String kind) => '$_packIndex:$kind';
+
   void _maybeTrackView(GraphController graph) {
     final kind = _lessonKinds[_step];
     if (_checkKinds.contains(kind)) return;
-    if (_trackedKinds.contains(kind)) return;
-    if (_content?.bit(kind) == null) return;
-    _trackedKinds.add(kind);
-    unawaited(graph.trackEvent(nodeId: widget.nodeId, kind: kind));
+    if (_trackedKinds.contains(_trackKey(kind))) return;
+    if (_activePack?.bit(kind) == null) return;
+    _trackedKinds.add(_trackKey(kind));
+    unawaited(
+      graph.trackEvent(
+        nodeId: widget.nodeId,
+        kind: kind,
+        payload: {'pack_index': _packIndex},
+      ),
+    );
   }
 
-  void _trackCheckAnswer(GraphController graph, String kind, int choiceIndex) {
-    if (_trackedKinds.contains(kind)) return;
-    final bit = _content?.bit(kind);
-    if (bit == null) return;
-    final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
-    _trackedKinds.add(kind);
+  void _trackCheckAnswer(
+    GraphController graph,
+    String kind, {
+    required bool correct,
+    int? choiceIndex,
+    bool? answerBool,
+    String? answerText,
+  }) {
+    if (_trackedKinds.contains(_trackKey(kind))) return;
+    if (_activePack?.bit(kind) == null) return;
+    _trackedKinds.add(_trackKey(kind));
     unawaited(
       graph.trackEvent(
         nodeId: widget.nodeId,
         kind: kind,
         payload: {
-          'correct': choiceIndex == answerIndex,
-          'choice_index': choiceIndex,
+          'pack_index': _packIndex,
+          'correct': correct,
+          if (choiceIndex != null) 'choice_index': choiceIndex,
+          if (answerBool != null) 'answer_bool': answerBool,
+          if (answerText != null) 'answer_text': answerText,
         },
       ),
+    );
+  }
+
+  void _onSelectMc(GraphController graph, String kind, int choiceIndex) {
+    if (_revealed) return;
+    final bit = _activePack?.bit(kind);
+    final answerIndex = (bit?.body['answer_index'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _selectedChoice = choiceIndex;
+      _revealed = true;
+    });
+    _trackCheckAnswer(
+      graph,
+      kind,
+      correct: choiceIndex == answerIndex,
+      choiceIndex: choiceIndex,
+    );
+  }
+
+  void _onSelectBool(GraphController graph, String kind, bool value) {
+    if (_revealed) return;
+    final bit = _activePack?.bit(kind);
+    final answer = bit?.body['answer'] == true;
+    setState(() {
+      _selectedChoice = value ? 1 : 0;
+      _revealed = true;
+    });
+    _trackCheckAnswer(
+      graph,
+      kind,
+      correct: value == answer,
+      answerBool: value,
+    );
+  }
+
+  void _onSubmitCloze(GraphController graph, String kind) {
+    if (_revealed) return;
+    final bit = _activePack?.bit(kind);
+    if (bit == null) return;
+    final text = _clozeController.text;
+    final correct = gradeCloze(bit, text);
+    setState(() => _revealed = true);
+    _trackCheckAnswer(
+      graph,
+      kind,
+      correct: correct,
+      answerText: text.trim(),
     );
   }
 
@@ -217,7 +351,7 @@ class _LearnSheetState extends State<LearnSheet> {
   }) {
     if (_error != null) return true;
     if (_loading) return false;
-    if (_content?.bit(kind) != null) return true;
+    if (_activePack?.bit(kind) != null) return true;
     if (generating) return false;
     return true;
   }
@@ -225,6 +359,7 @@ class _LearnSheetState extends State<LearnSheet> {
   @override
   void dispose() {
     _stopListening();
+    _clozeController.dispose();
     super.dispose();
   }
 
@@ -233,16 +368,20 @@ class _LearnSheetState extends State<LearnSheet> {
     final graph = context.watch<GraphController>();
     final scheme = Theme.of(context).colorScheme;
     final job = graph.jobForNode(widget.nodeId);
-    final generating =
-        job != null || (_content?.incomplete == true && _content?.bits.isEmpty == true);
+    final generating = job != null ||
+        _generatingAnother ||
+        (_content != null && _content!.packs.isEmpty && _content!.incomplete);
     final kind = _lessonKinds[_step];
     final label = _lessonLabels[_step];
     final ready = _stepReady(generating: generating, kind: kind);
     final onCheck = _checkKinds.contains(kind);
     final continueEnabled =
-        ready && (!onCheck || _revealed || _content?.bit(kind) == null);
+        ready && (!onCheck || _revealed || _activePack?.bit(kind) == null);
     final continueLabel = _step >= _lessonKinds.length - 1 ? 'Done' : 'Continue';
     final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: true);
+    final packs = _content?.packs ?? const <TopicPack>[];
+    final canGenerateAnother =
+        !generating && (_content?.allPacksComplete == true) && packs.isNotEmpty;
 
     return OverlayPanel(
       onDismiss: _dismiss,
@@ -263,7 +402,9 @@ class _LearnSheetState extends State<LearnSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    label,
+                    packs.isEmpty
+                        ? label
+                        : '${packs.length} learning${packs.length == 1 ? '' : 's'} · $label',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: scheme.onSurface.withValues(alpha: 0.55),
                           fontWeight: FontWeight.w600,
@@ -289,8 +430,20 @@ class _LearnSheetState extends State<LearnSheet> {
                           ),
                     ),
                   ],
+                  if (packs.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    LearnPackBadgeRow(
+                      packs: packs,
+                      selectedPackIndex: _packIndex,
+                      canGenerateAnother: canGenerateAnother,
+                      generatingAnother: generating && _generatingAnother,
+                      onSelectPack: _selectPack,
+                      onGenerateAnother:
+                          canGenerateAnother ? () => unawaited(_generateAnother()) : null,
+                    ),
+                  ],
                   const SizedBox(height: 12),
-                  _StepDots(step: _step, total: _lessonKinds.length),
+                  LearnStepDots(step: _step, total: _lessonKinds.length),
                 ],
               ),
             ),
@@ -306,24 +459,20 @@ class _LearnSheetState extends State<LearnSheet> {
                         style: TextStyle(color: scheme.error, height: 1.35),
                       ),
                     ),
-                  _BitSection(
+                  LearnBitSection(
                     label: label,
                     loading: !ready && _error == null,
                     child: onCheck
-                        ? _CheckBit(
-                            bit: _content?.bit(kind),
+                        ? LearnCheckBit(
+                            bit: _activePack?.bit(kind),
                             selected: _selectedChoice,
                             revealed: _revealed,
-                            onSelect: (index) {
-                              if (_revealed) return;
-                              setState(() {
-                                _selectedChoice = index;
-                                _revealed = true;
-                              });
-                              _trackCheckAnswer(graph, kind, index);
-                            },
+                            clozeController: _clozeController,
+                            onSelectChoice: (index) => _onSelectMc(graph, kind, index),
+                            onSelectBool: (value) => _onSelectBool(graph, kind, value),
+                            onSubmitCloze: () => _onSubmitCloze(graph, kind),
                           )
-                        : _MarkdownBit(bit: _content?.bit(kind)),
+                        : LearnMarkdownBit(bit: _activePack?.bit(kind)),
                   ),
                 ],
               ),
@@ -333,258 +482,4 @@ class _LearnSheetState extends State<LearnSheet> {
       ),
     );
   }
-}
-
-class _StepDots extends StatelessWidget {
-  const _StepDots({required this.step, required this.total});
-
-  final int step;
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        for (var i = 0; i < total; i++) ...[
-          if (i > 0) const SizedBox(width: 6),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            width: i == step ? 22 : 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: i == step
-                  ? scheme.primary
-                  : scheme.onSurface.withValues(alpha: i < step ? 0.35 : 0.16),
-              borderRadius: BorderRadius.circular(99),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _BitSection extends StatelessWidget {
-  const _BitSection({
-    required this.label,
-    required this.loading,
-    required this.child,
-  });
-
-  final String label;
-  final bool loading;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.onSurface.withValues(
-        alpha: scheme.brightness == Brightness.dark ? 0.10 : 0.045,
-      ),
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurface.withValues(alpha: 0.72),
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: 10),
-            if (loading)
-              const SizedBox(
-                height: 110,
-                child: PulsePlaceholder(
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                ),
-              )
-            else
-              child,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MarkdownBit extends StatelessWidget {
-  const _MarkdownBit({this.bit});
-
-  final TopicBit? bit;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (bit == null) {
-      return Text(
-        'No content yet.',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.45),
-              fontStyle: FontStyle.italic,
-            ),
-      );
-    }
-    final title = bit!.body['title']?.toString().trim();
-    final markdown = bit!.body['markdown']?.toString().trim() ?? '';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (title != null && title.isNotEmpty) ...[
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        Text(
-          _plainMarkdown(markdown),
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                height: 1.45,
-                color: scheme.onSurface.withValues(alpha: 0.88),
-              ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CheckBit extends StatelessWidget {
-  const _CheckBit({
-    required this.selected,
-    required this.revealed,
-    required this.onSelect,
-    this.bit,
-  });
-
-  final TopicBit? bit;
-  final int selected;
-  final bool revealed;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (bit == null) {
-      return Text(
-        'No check yet.',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.45),
-              fontStyle: FontStyle.italic,
-            ),
-      );
-    }
-    final question = bit!.body['question']?.toString() ?? '';
-    final choicesRaw = bit!.body['choices'];
-    final choices = [
-      if (choicesRaw is List)
-        for (final row in choicesRaw) row.toString(),
-    ];
-    final answerIndex = (bit!.body['answer_index'] as num?)?.toInt() ?? 0;
-    final explanation = bit!.body['explanation']?.toString().trim();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          question,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < choices.length; i++) ...[
-          if (i > 0) const SizedBox(height: 8),
-          _ChoiceTile(
-            label: choices[i],
-            selected: selected == i,
-            revealed: revealed,
-            correct: i == answerIndex,
-            onTap: () => onSelect(i),
-          ),
-        ],
-        if (revealed && explanation != null && explanation.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            explanation,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.72),
-                  height: 1.4,
-                ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _ChoiceTile extends StatelessWidget {
-  const _ChoiceTile({
-    required this.label,
-    required this.selected,
-    required this.revealed,
-    required this.correct,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final bool revealed;
-  final bool correct;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    Color border = scheme.onSurface.withValues(alpha: 0.12);
-    Color fill = Colors.transparent;
-    if (revealed && correct) {
-      border = scheme.primary.withValues(alpha: 0.55);
-      fill = scheme.primary.withValues(alpha: 0.12);
-    } else if (revealed && selected && !correct) {
-      border = scheme.error.withValues(alpha: 0.55);
-      fill = scheme.error.withValues(alpha: 0.10);
-    } else if (selected) {
-      border = scheme.primary.withValues(alpha: 0.4);
-      fill = scheme.primary.withValues(alpha: 0.06);
-    }
-    return Material(
-      color: fill,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: revealed ? null : onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: border),
-          ),
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.35),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _plainMarkdown(String raw) {
-  // Lightweight: keep readable without a markdown package dependency.
-  return raw
-      .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
-      .replaceAllMapped(RegExp(r'`([^`]+)`'), (m) => m.group(1) ?? '')
-      .replaceAll(RegExp(r'^#+\s*', multiLine: true), '')
-      .trim();
 }

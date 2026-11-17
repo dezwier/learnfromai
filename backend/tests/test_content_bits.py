@@ -1,9 +1,10 @@
-"""Shared learn / example / check1–3 content jobs."""
+"""Shared learn / example / check packs content jobs."""
 
 from sqlmodel import func, select
 
 from app.features.content.models import KnowledgeBit
 from app.features.knowledge_graph.node_models import KnowledgeNode
+from app.features.platform.content_llm import build_content_prompt, normalize_bits
 from app.features.platform.jobs import claim_next
 from app.features.platform.models import GenerationJob
 from app.workers.handlers import handle
@@ -18,6 +19,10 @@ def _run_queued(session):
     return session.get(GenerationJob, job.id)
 
 
+def _kinds(pack: dict) -> set[str]:
+    return {bit["kind"] for bit in pack["bits"]}
+
+
 def test_content_get_never_enqueues(client, auth, session):
     node = KnowledgeNode(name="Attention", name_key="attention", description="Weighting context.")
     session.add(node)
@@ -27,7 +32,8 @@ def test_content_get_never_enqueues(client, auth, session):
     assert response.status_code == 200
     body = response.json()
     assert body["incomplete"] is True
-    assert body["bits"] == []
+    assert body["pack_count"] == 0
+    assert body["packs"] == []
     assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
 
 
@@ -44,6 +50,7 @@ def test_content_expand_generates_five_bits(client, auth, session):
     assert queued.status_code == 202
     assert queued.json()["job_id"]
     assert queued.json()["focus_node_id"] == str(node.id)
+    assert queued.json()["pack_index"] == 1
 
     job = _run_queued(session)
     assert job is not None
@@ -53,10 +60,15 @@ def test_content_expand_generates_five_bits(client, auth, session):
     assert ready.status_code == 200
     body = ready.json()
     assert body["incomplete"] is False
-    kinds = {bit["kind"] for bit in body["bits"]}
-    assert kinds == {"learn", "example", "check1", "check2", "check3"}
+    assert body["pack_count"] == 1
+    assert len(body["packs"]) == 1
+    pack = body["packs"][0]
+    assert pack["pack_index"] == 1
+    assert pack["incomplete"] is False
+    assert _kinds(pack) == {"learn", "example", "check1", "check2", "check3"}
     for kind in ("check1", "check2", "check3"):
-        check = next(bit for bit in body["bits"] if bit["kind"] == kind)
+        check = next(bit for bit in pack["bits"] if bit["kind"] == kind)
+        assert check["body"]["type"] == "mc"
         assert len(check["body"]["choices"]) == 4
         assert check["body"]["answer_index"] in (0, 1, 2, 3)
 
@@ -102,18 +114,21 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
         [
             KnowledgeBit(
                 node_id=node.id,
+                pack_index=1,
                 kind="learn",
                 position=0,
                 body={"title": "What is Gradient?", "markdown": "A gradient points uphill."},
             ),
             KnowledgeBit(
                 node_id=node.id,
+                pack_index=1,
                 kind="example",
                 position=1,
                 body={"title": "Gradient in practice", "markdown": "Follow the slope on a hill."},
             ),
             KnowledgeBit(
                 node_id=node.id,
+                pack_index=1,
                 kind="check",
                 position=2,
                 body={
@@ -130,8 +145,8 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
     before = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
     assert before.status_code == 200
     assert before.json()["incomplete"] is True
-    kinds_before = {bit["kind"] for bit in before.json()["bits"]}
-    assert kinds_before == {"learn", "example", "check1"}
+    pack = before.json()["packs"][0]
+    assert _kinds(pack) == {"learn", "example", "check1"}
 
     queued = client.post(
         f"/api/v1/knowledge/nodes/{node.id}/content",
@@ -142,6 +157,7 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
     job = session.get(GenerationJob, queued.json()["job_id"])
     assert job is not None
     assert job.payload.get("missing_kinds") == ["check2", "check3"]
+    assert job.payload.get("pack_index") == 1
 
     done = _run_queued(session)
     assert done is not None
@@ -151,8 +167,127 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
     assert ready.status_code == 200
     body = ready.json()
     assert body["incomplete"] is False
-    kinds = {bit["kind"] for bit in body["bits"]}
-    assert kinds == {"learn", "example", "check1", "check2", "check3"}
-    # Legacy check row is exposed as check1 and kept (renamed or mapped).
-    check1 = next(bit for bit in body["bits"] if bit["kind"] == "check1")
+    pack = body["packs"][0]
+    assert _kinds(pack) == {"learn", "example", "check1", "check2", "check3"}
+    check1 = next(bit for bit in pack["bits"] if bit["kind"] == "check1")
     assert check1["body"]["question"] == "Which fits Gradient?"
+
+
+def test_content_new_pack_after_complete(client, auth, session):
+    node = KnowledgeNode(name="Entropy", name_key="entropy", description="Uncertainty measure.")
+    session.add(node)
+    session.commit()
+
+    first = client.post(
+        f"/api/v1/knowledge/nodes/{node.id}/content",
+        headers=auth,
+        json={"expand": True},
+    )
+    assert first.status_code == 202
+    _run_queued(session)
+
+    second = client.post(
+        f"/api/v1/knowledge/nodes/{node.id}/content",
+        headers=auth,
+        json={"expand": True, "new_pack": True},
+    )
+    assert second.status_code == 202
+    assert second.json()["pack_index"] == 2
+    job = _run_queued(session)
+    assert job is not None
+    assert job.state == "succeeded"
+
+    ready = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
+    body = ready.json()
+    assert body["pack_count"] == 2
+    assert body["incomplete"] is False
+    types = {
+        bit["body"]["type"]
+        for pack in body["packs"]
+        if pack["pack_index"] == 2
+        for bit in pack["bits"]
+        if bit["kind"].startswith("check")
+    }
+    assert "true_false" in types
+    assert "cloze" in types
+
+
+def test_content_new_pack_rejected_while_incomplete(client, auth, session):
+    node = KnowledgeNode(name="Bias", name_key="bias", description="Systematic error.")
+    session.add(node)
+    session.flush()
+    session.add(
+        KnowledgeBit(
+            node_id=node.id,
+            pack_index=1,
+            kind="learn",
+            position=0,
+            body={"title": "Bias", "markdown": "A systematic error."},
+        )
+    )
+    session.commit()
+
+    response = client.post(
+        f"/api/v1/knowledge/nodes/{node.id}/content",
+        headers=auth,
+        json={"expand": True, "new_pack": True},
+    )
+    assert response.status_code == 422
+
+
+def test_normalize_bits_typed_checks():
+    normalized = normalize_bits(
+        {
+            "learn": {"title": "T", "markdown": "Body"},
+            "example": {"title": "E", "markdown": "Scene"},
+            "check1": {
+                "type": "mc",
+                "question": "Q?",
+                "choices": ["A", "B", "C", "D"],
+                "answer_index": 2,
+                "explanation": "C",
+            },
+            "check2": {
+                "type": "true_false",
+                "statement": "Softmax outputs sum to 1.",
+                "answer": True,
+                "explanation": "Yes.",
+            },
+            "check3": {
+                "type": "cloze",
+                "prompt": "Outputs are ___.",
+                "answer": "probabilities",
+                "aliases": ["probs"],
+                "explanation": "Probabilities.",
+            },
+        }
+    )
+    assert normalized["check1"]["type"] == "mc"
+    assert normalized["check2"]["type"] == "true_false"
+    assert normalized["check2"]["answer"] is True
+    assert normalized["check3"]["type"] == "cloze"
+    assert normalized["check3"]["aliases"] == ["probs"]
+
+
+def test_build_content_prompt_includes_existing_packs_and_neighbors():
+    prompt = build_content_prompt(
+        "Softmax",
+        "Normalize scores",
+        ["Attention", "Logits"],
+        kinds=["learn", "example", "check1", "check2", "check3"],
+        existing_packs=[
+            {
+                "pack_index": 1,
+                "title": "What is Softmax?",
+                "learn_snippet": "Softmax maps scores to probs.",
+                "check_stems": ["Which statement best fits Softmax?"],
+            }
+        ],
+        pack_index=2,
+    )
+    assert "existing packs" in prompt
+    assert "What is Softmax?" in prompt
+    assert "Attention" in prompt
+    assert "true_false" in prompt
+    assert "cloze" in prompt
+    assert '"pack_index": 2' in prompt

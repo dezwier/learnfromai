@@ -83,6 +83,7 @@ class TopicBit {
     required this.id,
     required this.kind,
     required this.body,
+    this.packIndex = 1,
     this.band = 'default',
     this.recipeVersion = 1,
     this.position = 0,
@@ -90,6 +91,7 @@ class TopicBit {
 
   final String id;
   final String kind;
+  final int packIndex;
   final String band;
   final int recipeVersion;
   final int position;
@@ -100,6 +102,7 @@ class TopicBit {
     return TopicBit(
       id: raw['id']?.toString() ?? '',
       kind: raw['kind']?.toString() ?? '',
+      packIndex: (raw['pack_index'] as num?)?.toInt() ?? 1,
       band: raw['band']?.toString() ?? 'default',
       recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
       position: (raw['position'] as num?)?.toInt() ?? 0,
@@ -108,26 +111,31 @@ class TopicBit {
   }
 }
 
-class TopicContent {
-  const TopicContent({
-    required this.nodeId,
+class TopicPack {
+  const TopicPack({
+    required this.packIndex,
     required this.incomplete,
     required this.bits,
-    this.band = 'default',
-    this.recipeVersion = 1,
+    this.title,
   });
 
-  final String nodeId;
+  final int packIndex;
   final bool incomplete;
-  final String band;
-  final int recipeVersion;
+  final String? title;
   final List<TopicBit> bits;
+
+  String get badgeLabel {
+    final raw = title?.trim();
+    final short = (raw == null || raw.isEmpty)
+        ? 'Pack $packIndex'
+        : (raw.length <= 28 ? raw : '${raw.substring(0, 27)}…');
+    return '$packIndex · $short';
+  }
 
   TopicBit? bit(String kind) {
     for (final bit in bits) {
       if (bit.kind == kind) return bit;
     }
-    // Legacy API rows used kind "check" for the first question.
     if (kind == 'check1') {
       for (final bit in bits) {
         if (bit.kind == 'check') return bit;
@@ -136,18 +144,89 @@ class TopicContent {
     return null;
   }
 
-  factory TopicContent.fromJson(Map<String, dynamic> raw) {
+  factory TopicPack.fromJson(Map<String, dynamic> raw) {
     final rows = raw['bits'];
-    return TopicContent(
-      nodeId: raw['node_id']?.toString() ?? '',
+    return TopicPack(
+      packIndex: (raw['pack_index'] as num?)?.toInt() ?? 1,
       incomplete: raw['incomplete'] == true,
-      band: raw['band']?.toString() ?? 'default',
-      recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
+      title: raw['title']?.toString(),
       bits: [
         if (rows is List)
           for (final row in rows)
             if (row is Map) TopicBit.fromJson(Map<String, dynamic>.from(row)),
       ],
+    );
+  }
+}
+
+class TopicContent {
+  const TopicContent({
+    required this.nodeId,
+    required this.incomplete,
+    required this.packs,
+    this.band = 'default',
+    this.recipeVersion = 1,
+    this.packCount = 0,
+  });
+
+  final String nodeId;
+  final bool incomplete;
+  final String band;
+  final int recipeVersion;
+  final int packCount;
+  final List<TopicPack> packs;
+
+  bool get allPacksComplete =>
+      packs.isNotEmpty && packs.every((pack) => !pack.incomplete);
+
+  TopicPack? pack(int packIndex) {
+    for (final pack in packs) {
+      if (pack.packIndex == packIndex) return pack;
+    }
+    return null;
+  }
+
+  factory TopicContent.fromJson(Map<String, dynamic> raw) {
+    final packRows = raw['packs'];
+    final packs = <TopicPack>[
+      if (packRows is List)
+        for (final row in packRows)
+          if (row is Map) TopicPack.fromJson(Map<String, dynamic>.from(row)),
+    ];
+    // Legacy flat `bits` payload → single pack.
+    if (packs.isEmpty) {
+      final rows = raw['bits'];
+      if (rows is List && rows.isNotEmpty) {
+        final bits = [
+          for (final row in rows)
+            if (row is Map) TopicBit.fromJson(Map<String, dynamic>.from(row)),
+        ];
+        String? title;
+        for (final bit in bits) {
+          if (bit.kind != 'learn') continue;
+          final value = bit.body['title']?.toString().trim();
+          if (value != null && value.isNotEmpty) {
+            title = value;
+            break;
+          }
+        }
+        packs.add(
+          TopicPack(
+            packIndex: 1,
+            incomplete: raw['incomplete'] == true,
+            title: title,
+            bits: bits,
+          ),
+        );
+      }
+    }
+    return TopicContent(
+      nodeId: raw['node_id']?.toString() ?? '',
+      incomplete: raw['incomplete'] == true,
+      band: raw['band']?.toString() ?? 'default',
+      recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
+      packCount: (raw['pack_count'] as num?)?.toInt() ?? packs.length,
+      packs: packs,
     );
   }
 }

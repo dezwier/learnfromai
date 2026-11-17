@@ -16,25 +16,28 @@ DEFAULT_BAND = "default"
 # check1 is stored as "check1"; legacy rows may still use kind "check".
 CONTENT_KINDS = ("learn", "example", "check1", "check2", "check3")
 CHECK_KINDS = ("check1", "check2", "check3")
+CHECK_TYPES = ("mc", "true_false", "cloze")
 LEGACY_CHECK_KIND = "check"
 
 
 class KnowledgeBit(SQLModel, table=True):
-    """One typed learning bit for a shared topic (learn / example / check / …)."""
+    """One typed learning bit for a shared topic pack (learn / example / check / …)."""
 
     __tablename__ = "knowledge_bits"
     __table_args__ = (
         UniqueConstraint(
             "node_id",
+            "pack_index",
             "kind",
             "band",
             "recipe_version",
-            name="uq_knowledge_bits_node_kind_band_recipe",
+            name="uq_knowledge_bits_node_pack_kind_band_recipe",
         ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     node_id: UUID = Field(sa_column=Column(ForeignKey("knowledge_nodes.id"), nullable=False, index=True))
+    pack_index: int = Field(default=1, sa_column=Column(Integer, nullable=False))
     kind: str = Field(sa_column=Column(Text, nullable=False))
     band: str = Field(default=DEFAULT_BAND, sa_column=Column(Text, nullable=False))
     recipe_version: int = Field(default=RECIPE_VERSION, sa_column=Column(Integer, nullable=False))

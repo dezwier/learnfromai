@@ -69,6 +69,7 @@ class KnowledgeNodePatchBody(BaseModel):
 
 class KnowledgeContentBody(BaseModel):
     expand: bool = False
+    new_pack: bool = False
 
 
 class KnowledgeImageBody(BaseModel):
@@ -333,7 +334,13 @@ def post_knowledge_node_content(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    payload, status = content_or_expand(session, user=user, node_id=node_id, expand=body.expand)
+    payload, status = content_or_expand(
+        session,
+        user=user,
+        node_id=node_id,
+        expand=body.expand,
+        new_pack=body.new_pack,
+    )
     session.commit()
     response.status_code = status
     return payload
