@@ -15,19 +15,13 @@ class LearnPackBadgeRow extends StatelessWidget {
     required this.packs,
     required this.selectedPackIndex,
     required this.completedPackIndexes,
-    required this.canGenerateAnother,
-    required this.generatingAnother,
     required this.onSelectPack,
-    required this.onGenerateAnother,
   });
 
   final List<TopicPack> packs;
   final int selectedPackIndex;
   final Set<int> completedPackIndexes;
-  final bool canGenerateAnother;
-  final bool generatingAnother;
   final ValueChanged<int> onSelectPack;
-  final VoidCallback? onGenerateAnother;
 
   @override
   Widget build(BuildContext context) {
@@ -36,22 +30,41 @@ class LearnPackBadgeRow extends StatelessWidget {
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
-          for (final pack in packs) ...[
+          for (var i = 0; i < packs.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
             _PackBadge(
-              label: pack.badgeLabel,
-              selected: pack.packIndex == selectedPackIndex,
-              incomplete: pack.incomplete,
-              completed: completedPackIndexes.contains(pack.packIndex),
-              onTap: () => onSelectPack(pack.packIndex),
+              label: packs[i].badgeLabel,
+              selected: packs[i].packIndex == selectedPackIndex,
+              incomplete: packs[i].incomplete,
+              completed: completedPackIndexes.contains(packs[i].packIndex),
+              onTap: () => onSelectPack(packs[i].packIndex),
             ),
-            const SizedBox(width: 8),
           ],
-          _GenerateAnotherChip(
-            enabled: canGenerateAnother,
-            busy: generatingAnother,
-            onTap: onGenerateAnother,
-          ),
         ],
+      ),
+    );
+  }
+}
+
+class LearnGenerateAnotherButton extends StatelessWidget {
+  const LearnGenerateAnotherButton({
+    super.key,
+    required this.enabled,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final bool enabled;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: enabled ? onTap : null,
+        child: Text(busy ? 'Generating…' : 'Generate another'),
       ),
     );
   }
@@ -237,45 +250,6 @@ class _PackBadge extends StatelessWidget {
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: labelColor,
-                ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GenerateAnotherChip extends StatelessWidget {
-  const _GenerateAnotherChip({
-    required this.enabled,
-    required this.busy,
-    required this.onTap,
-  });
-
-  final bool enabled;
-  final bool busy;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.onSurface.withValues(alpha: enabled ? 0.08 : 0.04),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: scheme.onSurface.withValues(alpha: 0.12)),
-          ),
-          child: Text(
-            busy ? 'Generating…' : 'Generate another',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurface.withValues(alpha: enabled || busy ? 0.8 : 0.35),
                 ),
           ),
         ),

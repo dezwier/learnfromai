@@ -113,11 +113,11 @@ class _LearnSheetState extends State<LearnSheet> {
       return;
     }
     if (existing.packs.isNotEmpty && !existing.incomplete) {
-      _applyContent(existing, selectPack: existing.packs.first.packIndex);
+      _applyContent(existing, selectPack: existing.initialPackIndex());
       return;
     }
     if (existing.packs.isNotEmpty) {
-      _applyContent(existing, selectPack: existing.packs.first.packIndex);
+      _applyContent(existing, selectPack: existing.initialPackIndex());
     } else {
       setState(() {
         _content = existing;
@@ -137,7 +137,7 @@ class _LearnSheetState extends State<LearnSheet> {
       return;
     }
     if (queued.packs.isNotEmpty && !queued.incomplete) {
-      _applyContent(queued, selectPack: queued.packs.first.packIndex);
+      _applyContent(queued, selectPack: queued.initialPackIndex(extraCompleted: _completedPacks));
       return;
     }
     _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
@@ -418,8 +418,10 @@ class _LearnSheetState extends State<LearnSheet> {
     final continueLabel = _step >= _lessonKinds.length - 1 ? 'Done' : 'Continue';
     final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: true);
     final packs = _content?.packs ?? const <TopicPack>[];
-    final canGenerateAnother =
-        !generating && (_content?.allPacksComplete == true) && packs.isNotEmpty;
+    final allUserCompleted = packs.isNotEmpty &&
+        (_content?.allPacksComplete == true) &&
+        packs.every((pack) => _completedPacks.contains(pack.packIndex));
+    final canGenerateAnother = !generating && allUserCompleted;
 
     return OverlayPanel(
       onDismiss: _dismiss,
@@ -459,26 +461,13 @@ class _LearnSheetState extends State<LearnSheet> {
                       height: 1.15,
                     ),
                   ),
-                  if (job?.progressMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      job!.progressMessage!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurface.withValues(alpha: 0.6),
-                          ),
-                    ),
-                  ],
                   if (packs.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     LearnPackBadgeRow(
                       packs: packs,
                       selectedPackIndex: _packIndex,
                       completedPackIndexes: _completedPacks,
-                      canGenerateAnother: canGenerateAnother,
-                      generatingAnother: generating && _generatingAnother,
                       onSelectPack: _selectPack,
-                      onGenerateAnother:
-                          canGenerateAnother ? () => unawaited(_generateAnother()) : null,
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -498,6 +487,14 @@ class _LearnSheetState extends State<LearnSheet> {
                         style: TextStyle(color: scheme.error, height: 1.35),
                       ),
                     ),
+                  if (allUserCompleted || (generating && _generatingAnother)) ...[
+                    LearnGenerateAnotherButton(
+                      enabled: canGenerateAnother,
+                      busy: generating && _generatingAnother,
+                      onTap: canGenerateAnother ? () => unawaited(_generateAnother()) : null,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   LearnBitSection(
                     label: label,
                     loading: !ready && _error == null,

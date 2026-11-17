@@ -70,6 +70,59 @@ def test_post_me_events_records_open_learn_and_check(client, auth, session, user
     assert check2.payload == {"correct": False, "choice_index": 0}
 
 
+def test_post_me_events_keeps_pack_index_and_typed_answers(client, auth, session, user):
+    node = KnowledgeNode(name="LayerNorm", name_key="layernorm", description="Normalize.")
+    session.add(node)
+    session.commit()
+
+    response = client.post(
+        "/api/v1/me/events",
+        headers=auth,
+        json={
+            "events": [
+                {
+                    "node_id": str(node.id),
+                    "kind": "learn",
+                    "payload": {"pack_index": 2},
+                },
+                {
+                    "node_id": str(node.id),
+                    "kind": "check1",
+                    "payload": {"pack_index": 2, "correct": True, "choice_index": 1},
+                },
+                {
+                    "node_id": str(node.id),
+                    "kind": "check2",
+                    "payload": {"pack_index": 2, "correct": False, "answer_bool": False},
+                },
+                {
+                    "node_id": str(node.id),
+                    "kind": "check3",
+                    "payload": {
+                        "pack_index": 2,
+                        "correct": True,
+                        "answer_text": "example",
+                    },
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    session.expire_all()
+    rows = session.exec(
+        select(UserTopicEvent).where(UserTopicEvent.user_id == user.id)
+    ).all()
+    by_kind = {row.kind: row.payload for row in rows}
+    assert by_kind["learn"] == {"pack_index": 2}
+    assert by_kind["check1"] == {"correct": True, "choice_index": 1, "pack_index": 2}
+    assert by_kind["check2"] == {"correct": False, "answer_bool": False, "pack_index": 2}
+    assert by_kind["check3"] == {
+        "correct": True,
+        "answer_text": "example",
+        "pack_index": 2,
+    }
+
+
 def test_post_me_events_requires_open_source(client, auth, session):
     node = KnowledgeNode(name="Attention", name_key="attention", description="Weighting.")
     session.add(node)

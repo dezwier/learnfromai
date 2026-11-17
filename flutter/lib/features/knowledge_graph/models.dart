@@ -184,6 +184,16 @@ class TopicContent {
 
   bool isPackCompleted(int packIndex) => completedPacks.contains(packIndex);
 
+  /// First pack the user has not finished yet; if none, the last pack.
+  int initialPackIndex({Set<int> extraCompleted = const {}}) {
+    if (packs.isEmpty) return 1;
+    final done = {...completedPacks, ...extraCompleted};
+    for (final pack in packs) {
+      if (!done.contains(pack.packIndex)) return pack.packIndex;
+    }
+    return packs.last.packIndex;
+  }
+
   TopicPack? pack(int packIndex) {
     for (final pack in packs) {
       if (pack.packIndex == packIndex) return pack;

@@ -130,7 +130,7 @@ def _normalize_payload(kind: str, raw: Any, *, index: int) -> dict:
         return {"source": source}
 
     if kind not in CHECK_EVENT_KINDS:
-        return payload
+        return _with_optional_pack_index(payload)
 
     if "correct" not in payload:
         raise AppError(
@@ -146,23 +146,73 @@ def _normalize_payload(kind: str, raw: Any, *, index: int) -> dict:
             400,
         )
 
+    out: dict[str, Any] = {"correct": correct}
+    pack_index = _optional_pack_index(payload, index=index)
+    if pack_index is not None:
+        out["pack_index"] = pack_index
+
     choice_index = payload.get("choice_index")
-    if choice_index is None:
+    if choice_index is not None:
+        try:
+            out["choice_index"] = int(choice_index)
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                "INVALID_EVENTS",
+                f"Event {index} choice_index must be an integer",
+                400,
+            ) from exc
+
+    if "answer_bool" in payload:
+        answer_bool = payload["answer_bool"]
+        if not isinstance(answer_bool, bool):
+            raise AppError(
+                "INVALID_EVENTS",
+                f"Event {index} answer_bool must be a boolean",
+                400,
+            )
+        out["answer_bool"] = answer_bool
+
+    if "answer_text" in payload:
+        out["answer_text"] = str(payload.get("answer_text") or "")
+
+    if (
+        "choice_index" not in out
+        and "answer_bool" not in out
+        and "answer_text" not in out
+    ):
         raise AppError(
             "INVALID_EVENTS",
-            f"Event {index} check payload requires choice_index",
+            f"Event {index} check payload requires choice_index, answer_bool, or answer_text",
             400,
         )
+
+    return out
+
+
+def _optional_pack_index(payload: dict, *, index: int) -> int | None:
+    if "pack_index" not in payload or payload.get("pack_index") is None:
+        return None
     try:
-        choice_int = int(choice_index)
+        return int(payload["pack_index"])
     except (TypeError, ValueError) as exc:
         raise AppError(
             "INVALID_EVENTS",
-            f"Event {index} choice_index must be an integer",
+            f"Event {index} pack_index must be an integer",
             400,
         ) from exc
 
-    return {"correct": correct, "choice_index": choice_int}
+
+def _with_optional_pack_index(payload: dict) -> dict:
+    """Keep client pack_index on learn/example (and any other non-check) payloads."""
+    if "pack_index" not in payload or payload.get("pack_index") is None:
+        return dict(payload)
+    try:
+        pack_index = int(payload["pack_index"])
+    except (TypeError, ValueError):
+        return {k: v for k, v in payload.items() if k != "pack_index"}
+    out = dict(payload)
+    out["pack_index"] = pack_index
+    return out
 
 
 def _parse_occurred_at(raw: Any, *, fallback: datetime, index: int) -> datetime:

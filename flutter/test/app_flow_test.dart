@@ -567,7 +567,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('1 learning'), findsWidgets);
     expect(find.textContaining('1 · What is Dinosaurs'), findsWidgets);
-    expect(find.text('Generate another'), findsOneWidget);
+    expect(find.text('Generate another'), findsNothing);
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
     expect(find.textContaining('Which statement best fits'), findsNothing);
 
