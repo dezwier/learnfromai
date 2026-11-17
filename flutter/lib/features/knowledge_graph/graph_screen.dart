@@ -646,8 +646,19 @@ class _GraphScreenState extends State<GraphScreen>
         filename: picked.filename,
         contentType: picked.mimeType,
       );
-      if (!ok || !mounted) return;
-      _syncHighlightedFromLayout(node.id);
+      if (!mounted) return;
+      if (!ok) {
+        final message = graph.error ?? 'Image upload failed';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        return;
+      }
+      final urls = _imageUrlsFromGraph(graph, node.id);
+      setState(
+        () => _highlighted = node.copyWith(
+          imageUrl: urls.$1,
+          imageThumbUrl: urls.$2,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _imageUploading = false);
     }
