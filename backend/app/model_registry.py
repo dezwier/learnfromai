@@ -17,6 +17,7 @@ from app.features.platform.models import (
     LlmUsage,
     WorkerHeartbeat,
 )
+from app.features.user_events.models import UserTopicEvent
 
 
 def register_models() -> None:
@@ -37,4 +38,5 @@ def register_models() -> None:
         KnowledgeRequest,
         KnowledgeRequestNode,
         KnowledgeBit,
+        UserTopicEvent,
     )

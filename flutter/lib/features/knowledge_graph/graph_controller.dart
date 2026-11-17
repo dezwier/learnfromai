@@ -311,6 +311,32 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Fire-and-forget learn/example/check interaction (never blocks UI).
+  Future<void> trackEvent({
+    required String nodeId,
+    required String kind,
+    Map<String, dynamic>? payload,
+    DateTime? occurredAt,
+  }) async {
+    try {
+      await _post(
+        '/me/events',
+        body: {
+          'events': [
+            {
+              'node_id': nodeId,
+              'kind': kind,
+              'occurred_at': (occurredAt ?? DateTime.now().toUtc()).toIso8601String(),
+              if (payload != null) 'payload': payload,
+            },
+          ],
+        },
+      );
+    } catch (_) {
+      // Telemetry must not affect learning UX.
+    }
+  }
+
   /// POST focus; if a job is returned, track it without awaiting completion.
   Future<void> enqueueNeighborhood(String id, {String? title}) async {
     if (jobForNode(id) != null) {

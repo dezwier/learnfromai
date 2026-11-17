@@ -17,6 +17,7 @@ from app.features.knowledge_graph.preferences import neighborhood_counts
 from app.features.platform.jobs import enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
+from app.features.user_events.service import record_focus
 
 
 def focus_or_enqueue(
@@ -79,6 +80,7 @@ def _graph_payload(session: Session, *, user: User, focus, counts: dict[str, int
         acquaintances=0,
     )
     session.add(request)
+    record_focus(session, user=user, node_id=focus.id)
     session.flush()
     payload["request_id"] = str(request.id)
     return payload

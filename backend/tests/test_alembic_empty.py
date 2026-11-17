@@ -44,6 +44,7 @@ def test_alembic_upgrade_on_empty_database():
     assert "knowledge_edges" in tables
     assert "knowledge_requests" in tables
     assert "knowledge_request_nodes" in tables
+    assert "user_topic_events" in tables
     with _engine(database).connect() as connection:
         cols = {
             row[0]

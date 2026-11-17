@@ -41,6 +41,7 @@ from app.features.node_image.upload import upload_node_image
 from app.features.platform.jobs import list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
+from app.features.user_events.service import record_events
 
 router = APIRouter()
 
@@ -85,6 +86,17 @@ class MePatchBody(BaseModel):
     photo_url: str | None = Field(default=None, max_length=2000)
     display_name: str | None = Field(default=None, max_length=200)
     timezone: str | None = Field(default=None, max_length=64)
+
+
+class UserEventItem(BaseModel):
+    node_id: UUID
+    kind: str = Field(min_length=1, max_length=32)
+    occurred_at: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+class UserEventsBody(BaseModel):
+    events: list[UserEventItem] = Field(default_factory=list, max_length=50)
 
 
 @router.post("/auth/firebase")
@@ -154,6 +166,21 @@ def delete_me_photo(
     session.commit()
     session.refresh(user)
     return _user_payload(user)
+
+
+@router.post("/me/events")
+def post_me_events(
+    body: UserEventsBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    items = [item.model_dump(exclude_none=True) for item in body.events]
+    recorded = record_events(session, user=user, items=items)
+    session.commit()
+    return {
+        "recorded": len(recorded),
+        "ids": [str(event.id) for event in recorded],
+    }
 
 
 @router.get("/me/preferences")

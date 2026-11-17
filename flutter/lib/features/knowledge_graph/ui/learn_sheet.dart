@@ -50,6 +50,7 @@ class _LearnSheetState extends State<LearnSheet> {
   var _revealed = false;
   var _step = 0;
   GraphController? _graph;
+  final Set<String> _trackedKinds = {};
 
   @override
   void initState() {
@@ -94,12 +95,14 @@ class _LearnSheetState extends State<LearnSheet> {
         _content = existing;
         _loading = false;
       });
+      _maybeTrackView(graph);
       return;
     }
     setState(() {
       _content = existing;
       _loading = false;
     });
+    _maybeTrackView(graph);
     if (graph.jobForNode(widget.nodeId) != null) {
       _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
       _listen(graph);
@@ -113,11 +116,13 @@ class _LearnSheetState extends State<LearnSheet> {
     }
     if (!queued.incomplete) {
       setState(() => _content = queued);
+      _maybeTrackView(graph);
       return;
     }
     _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
     _listen(graph);
     setState(() => _content = queued);
+    _maybeTrackView(graph);
   }
 
   void _onGraphChanged() {
@@ -147,6 +152,7 @@ class _LearnSheetState extends State<LearnSheet> {
       _selectedChoice = -1;
       _revealed = false;
     });
+    _maybeTrackView(graph);
   }
 
   void _dismiss() {
@@ -160,6 +166,8 @@ class _LearnSheetState extends State<LearnSheet> {
       _selectedChoice = -1;
       _revealed = false;
     });
+    final graph = _graph ?? context.read<GraphController>();
+    _maybeTrackView(graph);
   }
 
   void _goContinue() {
@@ -172,6 +180,35 @@ class _LearnSheetState extends State<LearnSheet> {
       _selectedChoice = -1;
       _revealed = false;
     });
+    final graph = _graph ?? context.read<GraphController>();
+    _maybeTrackView(graph);
+  }
+
+  void _maybeTrackView(GraphController graph) {
+    final kind = _lessonKinds[_step];
+    if (_checkKinds.contains(kind)) return;
+    if (_trackedKinds.contains(kind)) return;
+    if (_content?.bit(kind) == null) return;
+    _trackedKinds.add(kind);
+    unawaited(graph.trackEvent(nodeId: widget.nodeId, kind: kind));
+  }
+
+  void _trackCheckAnswer(GraphController graph, String kind, int choiceIndex) {
+    if (_trackedKinds.contains(kind)) return;
+    final bit = _content?.bit(kind);
+    if (bit == null) return;
+    final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
+    _trackedKinds.add(kind);
+    unawaited(
+      graph.trackEvent(
+        nodeId: widget.nodeId,
+        kind: kind,
+        payload: {
+          'correct': choiceIndex == answerIndex,
+          'choice_index': choiceIndex,
+        },
+      ),
+    );
   }
 
   bool _stepReady({
@@ -283,6 +320,7 @@ class _LearnSheetState extends State<LearnSheet> {
                                 _selectedChoice = index;
                                 _revealed = true;
                               });
+                              _trackCheckAnswer(graph, kind, index);
                             },
                           )
                         : _MarkdownBit(bit: _content?.bit(kind)),
