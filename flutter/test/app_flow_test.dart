@@ -628,24 +628,54 @@ void main() {
     expect(find.byType(TextField), findsNothing);
   });
 
-  testWidgets('tapping back returns to the previous focus', (tester) async {
+  testWidgets('focus trail badges open an earlier topic', (tester) async {
     final graph = GraphController(
-      poster: (path, {body}) async {
-        final id = body is Map ? body['node_id']?.toString() : null;
-        if (id == '3') return _saurischia();
+      loader: (path) async {
+        if (path == '/knowledge/graph/3') return _saurischia();
         return _compact();
       },
-      loader: (path) async => _compact(),
-    )
-      ..categoryGraph = _saurischia()
-      ..focusHistory.addAll(['2', '3']);
+    );
+    await graph.openExisting('2', title: 'Dinosaurs');
+    await graph.openExisting('3', title: 'Saurischia');
+    expect(graph.focusTrail.map((e) => e.id).toList(), ['2', '3']);
+
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
+    expect(find.text('Dinosaurs'), findsWidgets);
+    expect(find.text('Saurischia'), findsWidgets);
 
-    expect(graph.focusId, '3');
-    await tester.tap(find.byTooltip('Previous topic'));
+    await tester.tap(find.text('Dinosaurs').last);
     await tester.pumpAndSettle();
     expect(graph.focusId, '2');
+    expect(graph.focusHistory, ['2']);
+  });
+
+  test('focus trail caps at 10 entries', () async {
+    final graph = GraphController(
+      loader: (path) async {
+        final id = path.split('/').last;
+        return {
+          'focus_node_id': id,
+          'incomplete': false,
+          'nodes': [
+            {
+              'id': id,
+              'title': 'T$id',
+              'depth': 0,
+              'distance': 0,
+              'kind': 'focus',
+            },
+          ],
+          'edges': <Map<String, dynamic>>[],
+        };
+      },
+    );
+    for (var i = 0; i < 12; i++) {
+      await graph.openExisting('$i', title: 'T$i');
+    }
+    expect(graph.focusHistory.length, 10);
+    expect(graph.focusHistory.first, '2');
+    expect(graph.focusHistory.last, '11');
   });
 
   testWidgets('loading slot uses a full-size pulse', (tester) async {

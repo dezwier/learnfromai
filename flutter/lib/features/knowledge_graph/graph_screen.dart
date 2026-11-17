@@ -756,7 +756,6 @@ class _GraphScreenState extends State<GraphScreen>
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
-    final floatBottom = safeBottom + 36 + keyboard;
     final highlight = _highlighted;
     final knownIncomplete =
         highlight == null ? null : _knownIncomplete(highlight.id, graph);
@@ -777,6 +776,15 @@ class _GraphScreenState extends State<GraphScreen>
     final showRelations = highlight != null && !openingRelated;
     final showChrome = !_searchOpen && !overlayOpen;
     final chromeOpaque = showChrome;
+    final trail = graph.focusTrail;
+    // Trail under FABs; search sits just above the row.
+    // On iPhone, nestle into the home-indicator inset so the row sits lower.
+    const trailHeight = 40.0;
+    const trailGap = 6.0;
+    final showTrail = showChrome && trail.isNotEmpty;
+    final trailBottom = keyboard +
+        (safeBottom > 0 ? (safeBottom - 10).clamp(2.0, safeBottom) : 8.0);
+    final floatBottom = trailBottom + (showTrail ? trailHeight + trailGap : 8);
     if (_jobsPanelOpen && !graph.hasActiveJobs) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_jobsPanelOpen) return;
@@ -888,6 +896,35 @@ class _GraphScreenState extends State<GraphScreen>
             ),
           if (showChrome)
             Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: floatBottom + 56,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          scheme.surface.withValues(alpha: 0.94),
+                          scheme.surface.withValues(alpha: 0.72),
+                          scheme.surface.withValues(alpha: 0.28),
+                          scheme.surface.withValues(alpha: 0.0),
+                        ],
+                        stops: const [0.0, 0.35, 0.72, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (showChrome)
+            Positioned(
               left: 16,
               bottom: floatBottom,
               child: IgnorePointer(
@@ -964,21 +1001,6 @@ class _GraphScreenState extends State<GraphScreen>
                         ),
                         const SizedBox(height: 6),
                       ],
-                      if (graph.canGoBack) ...[
-                        FloatingActionButton.small(
-                          heroTag: 'graph-back',
-                          tooltip: 'Previous topic',
-                          backgroundColor: scheme.surfaceContainerHighest,
-                          foregroundColor: scheme.onSurfaceVariant,
-                          elevation: 1.5,
-                          focusElevation: 2,
-                          hoverElevation: 2,
-                          highlightElevation: 2,
-                          onPressed: () => graph.back(),
-                          child: const Icon(Icons.arrow_back, size: 20),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
                       FloatingActionButton.small(
                         heroTag: 'graph-search',
                         tooltip: 'Search',
@@ -992,6 +1014,29 @@ class _GraphScreenState extends State<GraphScreen>
                         child: const Icon(Icons.search, size: 20),
                       ),
                     ],
+                  ),
+                ),
+              ),
+            ),
+          if (showTrail)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: trailBottom,
+              height: trailHeight,
+              child: IgnorePointer(
+                ignoring: !chromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: chromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: _FocusTrailBar(
+                    entries: trail,
+                    currentId: graph.focusId,
+                    onSelect: (entry) {
+                      if (entry.id == graph.focusId) return;
+                      unawaited(graph.openTrailEntry(entry.id));
+                    },
                   ),
                 ),
               ),
@@ -1273,6 +1318,168 @@ class _GraphScreenState extends State<GraphScreen>
       focusId: focus,
       viewport: viewport,
       maxExtended: graph.prefs.extended,
+    );
+  }
+}
+
+class _FocusTrailBar extends StatefulWidget {
+  const _FocusTrailBar({
+    required this.entries,
+    required this.currentId,
+    required this.onSelect,
+  });
+
+  final List<FocusTrailEntry> entries;
+  final String? currentId;
+  final ValueChanged<FocusTrailEntry> onSelect;
+
+  @override
+  State<_FocusTrailBar> createState() => _FocusTrailBarState();
+}
+
+class _FocusTrailBarState extends State<_FocusTrailBar> {
+  final Set<String> _seen = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Cold start: show existing chips without entrance motion.
+    _seen.addAll(widget.entries.map((e) => e.id));
+  }
+
+  @override
+  void didUpdateWidget(covariant _FocusTrailBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextIds = widget.entries.map((e) => e.id).toSet();
+    _seen.removeWhere((id) => !nextIds.contains(id));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _seen.addAll(nextIds);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // reverse + right alignment keeps newest pinned on the right; new chips
+    // widen from the right so the row eases left in the same motion.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          reverse: true,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: constraints.maxWidth - 24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < widget.entries.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  _FocusTrailChipReveal(
+                    key: ValueKey(widget.entries[i].id),
+                    animate: !_seen.contains(widget.entries[i].id),
+                    child: _FocusTrailChip(
+                      entry: widget.entries[i],
+                      current: widget.entries[i].id == widget.currentId,
+                      onTap: () => widget.onSelect(widget.entries[i]),
+                      scheme: scheme,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FocusTrailChipReveal extends StatelessWidget {
+  const _FocusTrailChipReveal({
+    super.key,
+    required this.animate,
+    required this.child,
+  });
+
+  final bool animate;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!animate) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, child) {
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.centerRight,
+            widthFactor: t.clamp(0.001, 1.0),
+            child: Opacity(opacity: t, child: child),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+class _FocusTrailChip extends StatelessWidget {
+  const _FocusTrailChip({
+    required this.entry,
+    required this.current,
+    required this.onTap,
+    required this.scheme,
+  });
+
+  final FocusTrailEntry entry;
+  final bool current;
+  final VoidCallback onTap;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: current
+          ? scheme.primary.withValues(alpha: 0.16)
+          : scheme.surfaceContainerHighest.withValues(alpha: 0.92),
+      elevation: current ? 0 : 0.5,
+      shadowColor: Colors.black26,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: current
+              ? scheme.primary.withValues(alpha: 0.55)
+              : scheme.onSurface.withValues(alpha: 0.08),
+        ),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 148),
+            child: Text(
+              entry.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: 'tt_ramilas',
+                fontSize: 13,
+                fontWeight: current ? FontWeight.w700 : FontWeight.w600,
+                height: 1.1,
+                color: current
+                    ? scheme.primary
+                    : scheme.onSurface.withValues(alpha: 0.78),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

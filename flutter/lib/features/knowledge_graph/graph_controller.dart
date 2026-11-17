@@ -14,6 +14,13 @@ class TopicChoice {
   final String? description;
 }
 
+class FocusTrailEntry {
+  const FocusTrailEntry({required this.id, required this.title});
+
+  final String id;
+  final String title;
+}
+
 /// Backend LLM provider preference: gemini | openai.
 class LlmProviderPref {
   static const gemini = 'gemini';
@@ -228,6 +235,9 @@ class GraphController extends ChangeNotifier {
   List<TopicChoice> candidates = [];
   List<TopicChoice> suggestions = [];
   final List<String> focusHistory = [];
+  /// Titles for [focusHistory] badges (id → label), kept for nodes no longer on canvas.
+  final Map<String, String> _focusTitles = {};
+  static const int maxFocusTrail = 10;
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
   String llmProvider = LlmProviderPref.gemini;
   final List<TrackedJob> trackedJobs = [];
@@ -251,6 +261,43 @@ class GraphController extends ChangeNotifier {
   }
 
   bool get canGoBack => focusHistory.length > 1 && !refreshing;
+
+  /// Oldest → newest focus trail for the bottom breadcrumb (max [maxFocusTrail]).
+  List<FocusTrailEntry> get focusTrail => [
+        for (final id in focusHistory)
+          FocusTrailEntry(
+            id: id,
+            title: _focusTitles[id] ?? _titleForNode(id) ?? 'Topic',
+          ),
+      ];
+
+  void _recordFocus(String id, {String? title}) {
+    final label = title?.trim();
+    if (label != null && label.isNotEmpty) {
+      _focusTitles[id] = label;
+    } else {
+      final known = _titleForNode(id);
+      if (known != null && known.trim().isNotEmpty) {
+        _focusTitles[id] = known.trim();
+      }
+    }
+    if (focusHistory.isNotEmpty && focusHistory.last == id) return;
+    focusHistory.add(id);
+    while (focusHistory.length > maxFocusTrail) {
+      final dropped = focusHistory.removeAt(0);
+      if (!focusHistory.contains(dropped)) _focusTitles.remove(dropped);
+    }
+  }
+
+  /// Jump to a trail entry; drops anything newer so right stays most recent.
+  Future<void> openTrailEntry(String id) async {
+    if (refreshing || loading) return;
+    final idx = focusHistory.lastIndexOf(id);
+    if (idx >= 0 && idx < focusHistory.length - 1) {
+      focusHistory.removeRange(idx + 1, focusHistory.length);
+    }
+    await openExisting(id, title: _focusTitles[id] ?? _titleForNode(id));
+  }
 
   int get activeJobCount => trackedJobs.where((j) => j.isActive).length;
 
@@ -409,9 +456,7 @@ class GraphController extends ChangeNotifier {
         categoryGraph = await _get('/knowledge/graph/$id');
       }
       final openedId = focusId ?? id;
-      if (focusHistory.isEmpty || focusHistory.last != openedId) {
-        focusHistory.add(openedId);
-      }
+      _recordFocus(openedId, title: title ?? _titleForNode(openedId));
     } on ApiException catch (exc) {
       error = exc.message;
     } finally {
@@ -652,9 +697,7 @@ class GraphController extends ChangeNotifier {
         } else {
           categoryGraph = await _get('/knowledge/graph/$id');
         }
-        if (focusHistory.isEmpty || focusHistory.last != (focusId ?? openedId)) {
-          focusHistory.add(focusId ?? openedId);
-        }
+        _recordFocus(focusId ?? openedId, title: title ?? _titleForNode(focusId ?? openedId));
         lastCompletedNodeId = openedId;
         notifyListeners();
         return;
@@ -911,8 +954,11 @@ class GraphController extends ChangeNotifier {
         categoryGraph = payload;
       }
       final id = focusId;
-      if (record && id != null && (focusHistory.isEmpty || focusHistory.last != id)) {
-        focusHistory.add(id);
+      if (record && id != null) {
+        _recordFocus(
+          id,
+          title: body['topic']?.toString() ?? _titleForNode(id),
+        );
       }
     } on ApiException catch (exc) {
       if (exc.status == 409) {
