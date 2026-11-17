@@ -41,6 +41,7 @@ from app.features.node_image.upload import upload_node_image
 from app.features.platform.jobs import list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
+from app.features.user_events.affinity import topic_affinity
 from app.features.user_events.service import record_events
 
 router = APIRouter()
@@ -181,6 +182,15 @@ def post_me_events(
         "recorded": len(recorded),
         "ids": [str(event.id) for event in recorded],
     }
+
+
+@router.get("/me/topic-affinity")
+def get_me_topic_affinity(
+    limit: int = 24,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    return topic_affinity(session, user=user, limit=limit)
 
 
 @router.get("/me/preferences")

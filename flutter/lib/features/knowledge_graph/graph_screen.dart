@@ -802,6 +802,17 @@ class _GraphScreenState extends State<GraphScreen>
     setState(() => _profileOpen = false);
   }
 
+  Future<void> _openTopicFromProfile(String nodeId) async {
+    _closeProfile();
+    final graph = context.read<GraphController>();
+    await graph.openExisting(nodeId);
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId ?? nodeId);
+    _openTopicOverlay(source: 'graph');
+  }
+
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
@@ -1115,7 +1126,10 @@ class _GraphScreenState extends State<GraphScreen>
             ),
           if (_profileOpen)
             Positioned.fill(
-              child: ProfileScreen(onClose: _closeProfile),
+              child: ProfileScreen(
+                onClose: _closeProfile,
+                onOpenTopic: (id) => unawaited(_openTopicFromProfile(id)),
+              ),
             ),
           if (_topicOpen && _highlighted != null)
             Positioned.fill(

@@ -337,6 +337,17 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Profile affinity map: scored topics + edge clusters.
+  Future<Map<String, dynamic>?> fetchTopicAffinity({int limit = 24}) async {
+    try {
+      return await _get('/me/topic-affinity?limit=$limit');
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// POST focus; if a job is returned, track it without awaiting completion.
   Future<void> enqueueNeighborhood(String id, {String? title}) async {
     if (jobForNode(id) != null) {

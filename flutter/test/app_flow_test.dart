@@ -96,7 +96,12 @@ void main() {
   testWidgets('profile hud opens overlay with settings and logout', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
+      loader: (path) async {
+        if (path.startsWith('/me/topic-affinity')) {
+          return {'nodes': [], 'clusters': [], 'edges': []};
+        }
+        return _compact();
+      },
     )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
@@ -105,7 +110,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Logout'), findsOneWidget);
-    expect(find.text('Progress'), findsOneWidget);
+    expect(find.text('Recent study'), findsOneWidget);
+    expect(find.text('Study a few topics to grow your map.'), findsOneWidget);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
@@ -118,7 +124,12 @@ void main() {
   testWidgets('closing profile then opening focus shows topic not profile', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
+      loader: (path) async {
+        if (path.startsWith('/me/topic-affinity')) {
+          return {'nodes': [], 'clusters': [], 'edges': []};
+        }
+        return _compact();
+      },
     )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
@@ -135,7 +146,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Learn'), findsOneWidget);
     expect(find.text('Settings'), findsNothing);
-    expect(find.text('Progress'), findsNothing);
+    expect(find.text('Recent study'), findsNothing);
   });
 
   testWidgets('job queue tracks expands without blocking navigation', (tester) async {

@@ -6,12 +6,18 @@ import '../auth/auth_controller.dart';
 import 'account_settings_sheet.dart';
 import 'overlay_panel_chrome.dart';
 import 'profile_hud.dart';
+import 'ui/topic_affinity_card.dart';
 
-/// Fullscreen profile overlay with settings, logout, and learning placeholders.
+/// Fullscreen profile overlay with settings, logout, and topic affinity.
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.onClose});
+  const ProfileScreen({
+    super.key,
+    required this.onClose,
+    required this.onOpenTopic,
+  });
 
   final VoidCallback onClose;
+  final ValueChanged<String> onOpenTopic;
 
   @override
   Widget build(BuildContext context) {
@@ -110,17 +116,7 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            const StudyCard(
-              eyebrow: 'LEARNING',
-              title: 'Progress',
-              subtitle: 'Mastery streaks and topic completion will show up here.',
-            ),
-            const SizedBox(height: 12),
-            const StudyCard(
-              eyebrow: 'TOPICS',
-              title: 'Recent study',
-              subtitle: 'Recently opened topics will appear here as placeholders for now.',
-            ),
+            TopicAffinityCard(onOpenTopic: onOpenTopic),
             const SizedBox(height: 12),
             const StudyCard(
               eyebrow: 'PRACTICE',
