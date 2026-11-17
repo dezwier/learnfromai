@@ -827,3 +827,46 @@ Color nodeFill(PlacedNode node, ColorScheme scheme) {
 
 Color roleColor(NodeRole role, ColorScheme scheme) => roleFill(role, scheme);
 
+
+/// Parse a knowledge-graph API payload into a [GraphLayout].
+GraphLayout layoutFromPayload(
+  Map<String, dynamic>? payload, {
+  required String? focusId,
+  required Size viewport,
+  int maxExtended = 12,
+}) {
+  if (payload == null) {
+    return GraphLayout(nodes: const [], width: viewport.width, height: viewport.height);
+  }
+  final nodes = [
+    for (final raw in (payload['nodes'] as List?) ?? const [])
+      if (raw is Map)
+        GraphNode(
+          id: raw['id'].toString(),
+          title: raw['title']?.toString() ?? '',
+          depth: (raw['depth'] as num?)?.toInt() ?? 0,
+          distance: (raw['distance'] as num?)?.toInt() ?? 0,
+          kind: raw['kind']?.toString() ?? 'focus',
+          description: raw['description']?.toString(),
+          imageUrl: raw['image_url']?.toString(),
+          imageThumbUrl: raw['image_thumb_url']?.toString(),
+        ),
+  ];
+  final edges = [
+    for (final raw in (payload['edges'] as List?) ?? const [])
+      if (raw is Map)
+        GraphEdge(
+          source: raw['source'].toString(),
+          target: raw['target'].toString(),
+          type: raw['type']?.toString() ?? 'child',
+        ),
+  ];
+  final focus = focusId ?? (nodes.isEmpty ? '' : nodes.first.id);
+  return layoutGraph(
+    nodes,
+    edges,
+    focusId: focus,
+    viewport: viewport,
+    maxExtended: maxExtended,
+  );
+}

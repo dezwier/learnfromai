@@ -34,6 +34,7 @@ from app.features.platform.llm import assert_user_quota, bind_usage_sink, maybe_
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import BUCKETS, parse_uuid
 
+
 def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     """Scenarios: existing focus → under-budget; new topic → retrieve+sameness → under-budget or neighbor."""
     payload = job.payload or {}
