@@ -1,0 +1,15 @@
+---
+description: Keep production Dart/Python files short; extract before growing monoliths
+alwaysApply: true
+---
+
+# File size
+
+- Soft target **~400 lines** for production `.dart` / `.py`.
+- Soft ceiling **~800 lines** only for orchestration (`graph_screen`, `GraphController`). Never grow past that—extract before adding.
+- One primary responsibility / public type cluster per file.
+- New knowledge-graph UI goes under `flutter/lib/features/knowledge_graph/ui/`, not into `graph_screen.dart`.
+- Prefer the `learn_sheet` pattern: small public API, private `_` widgets in the same file, talk to `GraphController` via Provider when possible.
+- Layout/geometry helpers live under `knowledge_graph/layout/`.
+- Backend neighborhood logic lives under `backend/app/features/knowledge_graph/neighborhood/` (re-export public entrypoints from `__init__.py`).
+- Exempt: Alembic migrations, generated code. Tests may exceed 400 for multi-scenario fixtures; prefer helpers/`group()` past ~600.

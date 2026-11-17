@@ -1,4 +1,4 @@
-import 'package:adaptive_mastery/features/knowledge_graph/title_wrap.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/layout/title_wrap.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 

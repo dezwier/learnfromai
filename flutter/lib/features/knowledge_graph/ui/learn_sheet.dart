@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/widgets/pulse_placeholder.dart';
-import '../profile/overlay_panel_chrome.dart';
-import 'graph_controller.dart';
+import '../../../core/widgets/pulse_placeholder.dart';
+import '../../profile/overlay_panel_chrome.dart';
+import '../graph_controller.dart';
 
 const _lessonKinds = ['learn', 'example', 'check1', 'check2', 'check3'];
 const _lessonLabels = ['Learn', 'Example', 'Check 1', 'Check 2', 'Check 3'];

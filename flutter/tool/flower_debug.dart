@@ -1,5 +1,6 @@
+import 'package:adaptive_mastery/features/knowledge_graph/layout/geometry.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/layout/graph_layout.dart';
 import 'package:flutter/material.dart';
-import 'package:adaptive_mastery/features/knowledge_graph/graph_layout.dart';
 
 void main() {
   final path = hexFlowerPath(latticeSize: 40);

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
-import 'package:adaptive_mastery/features/knowledge_graph/graph_layout.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/layout/geometry.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/layout/graph_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

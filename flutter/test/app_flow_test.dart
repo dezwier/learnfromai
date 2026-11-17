@@ -6,7 +6,7 @@ import 'package:adaptive_mastery/core/widgets/pulse_placeholder.dart';
 import 'package:adaptive_mastery/features/auth/auth_controller.dart';
 import 'package:adaptive_mastery/features/auth/auth_gateway.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/graph_controller.dart';
-import 'package:adaptive_mastery/features/knowledge_graph/graph_layout.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/layout/graph_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
