@@ -249,8 +249,8 @@ PlacedNode _scaledAboutCenter(PlacedNode node, double scale) {
 /// Morph [from] → [to]. Shared ids lerp (size / flower / color); leavers shrink
 /// + fade out; arrivals grow from small + fade in.
 GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
-  final raw = t.clamp(0.0, 1.0);
-  final tt = Curves.easeInOutCubic.transform(raw);
+  // [t] is already eased by the animation controller — keep geometry linear in t.
+  final tt = t.clamp(0.0, 1.0);
   final fromById = {for (final n in from.nodes) n.id: n};
   final toById = {for (final n in to.nodes) n.id: n};
   final ids = {...fromById.keys, ...toById.keys};
@@ -262,11 +262,11 @@ GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
       nodes.add(lerpPlacedNode(a, b, tt));
     } else if (a != null) {
       // Leave: shrink slightly and fade.
-      nodes.add(_scaledAboutCenter(a, lerpDouble(1.0, 0.55, tt)!).copyWith(opacity: 1 - tt));
+      nodes.add(_scaledAboutCenter(a, lerpDouble(1.0, 0.62, tt)!).copyWith(opacity: 1 - tt));
     } else if (b != null) {
       // Arrive: grow from small and fade in.
       nodes.add(
-        _scaledAboutCenter(b, lerpDouble(0.45, 1.0, tt)!).copyWith(
+        _scaledAboutCenter(b, lerpDouble(0.55, 1.0, tt)!).copyWith(
           opacity: tt,
           colorFromRole: b.role,
           colorT: 1,
@@ -274,9 +274,10 @@ GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
       );
     }
   }
+  // Hold destination edges once the morph is mostly through (avoids mid-flight snap).
   return GraphLayout(
     nodes: nodes,
-    edges: tt < 0.5 ? from.edges : to.edges,
+    edges: tt < 0.72 ? from.edges : to.edges,
     width: lerpDouble(from.width, to.width, tt)!,
     height: lerpDouble(from.height, to.height, tt)!,
   );

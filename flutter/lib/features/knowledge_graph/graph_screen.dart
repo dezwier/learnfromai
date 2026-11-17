@@ -70,11 +70,11 @@ class _GraphScreenState extends State<GraphScreen>
     WidgetsBinding.instance.addObserver(this);
     _panController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 320),
     )..addListener(_onPanTick);
     _layoutMorph = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 360),
+      duration: const Duration(milliseconds: 480),
     )..addListener(_onLayoutMorphTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
@@ -111,8 +111,9 @@ class _GraphScreenState extends State<GraphScreen>
   static bool _transformNearlyStill(Matrix4 a, Matrix4 b) {
     final ta = a.getTranslation();
     final tb = b.getTranslation();
-    return (ta - tb).length < 0.4 &&
-        (a.getMaxScaleOnAxis() - b.getMaxScaleOnAxis()).abs() < 0.0005;
+    // Looser than a pixel-perfect still check so dwell/morph starts soon after lift.
+    return (ta - tb).length < 1.6 &&
+        (a.getMaxScaleOnAxis() - b.getMaxScaleOnAxis()).abs() < 0.002;
   }
 
   void _cancelDwellAndSettle() {
@@ -126,7 +127,9 @@ class _GraphScreenState extends State<GraphScreen>
     _dwellTimer?.cancel();
     if (_graphGestureActive || _panController.isAnimating) return;
     var previous = _transform.value.clone();
-    _motionSettleTimer = Timer.periodic(const Duration(milliseconds: 40), (timer) {
+    var stillTicks = 0;
+    // First sample quickly so a soft release (little inertia) opens almost immediately.
+    _motionSettleTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -137,9 +140,14 @@ class _GraphScreenState extends State<GraphScreen>
       }
       final now = _transform.value;
       if (_transformNearlyStill(previous, now)) {
-        timer.cancel();
-        _scheduleDwell(_highlighted?.id);
+        stillTicks += 1;
+        // ~32ms of stillness after lift is enough to commit.
+        if (stillTicks >= 2) {
+          timer.cancel();
+          _scheduleDwell(_highlighted?.id);
+        }
       } else {
+        stillTicks = 0;
         previous = now.clone();
         _dwellTimer?.cancel();
       }
@@ -171,7 +179,9 @@ class _GraphScreenState extends State<GraphScreen>
     final to = _morphTo;
     if (from != null && to != null && (_layoutMorph.isAnimating || _layoutMorph.value < 1)) {
       if (_layoutMorph.isCompleted) return settled;
-      return morphGraphLayouts(from, to, _layoutMorph.value);
+      // easeOutCubic: moves early, eases into place (single curve — morphGraphLayouts is linear).
+      final t = Curves.easeOutCubic.transform(_layoutMorph.value);
+      return morphGraphLayouts(from, to, t);
     }
     return settled;
   }
@@ -275,7 +285,7 @@ class _GraphScreenState extends State<GraphScreen>
     final begin = _transform.value.clone();
     _panController.stop();
     _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
-      CurvedAnimation(parent: _panController, curve: Curves.easeInOutCubic),
+      CurvedAnimation(parent: _panController, curve: Curves.easeOutCubic),
     );
     unawaited(_panController.forward(from: 0).then((_) {
       if (!mounted) return;
@@ -302,7 +312,7 @@ class _GraphScreenState extends State<GraphScreen>
     final end = _matrixCentering(scenePoint, viewport, scale: scale);
     _panController.stop();
     _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
-      CurvedAnimation(parent: _panController, curve: Curves.easeInOutCubic),
+      CurvedAnimation(parent: _panController, curve: Curves.easeOutCubic),
     );
     await _panController.forward(from: 0);
     if (!mounted) return;
