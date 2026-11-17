@@ -34,7 +34,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/me/topic-affinity?limit=24` → `{nodes, clusters, edges}` for the profile affinity map
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes?q=` existing-topic autocomplete (no LLM)
-- `GET /api/v1/knowledge/nodes/{node_id}/content` → `{pack_count, packs: [{pack_index, incomplete, title, bits}], incomplete}` (`incomplete` when no packs or any pack incomplete)
+- `GET /api/v1/knowledge/nodes/{node_id}/content` → `{pack_count, packs: [{pack_index, incomplete, title, bits}], completed_packs, incomplete}` (`completed_packs` = pack indexes the user has fully walked; `incomplete` when no packs or any pack incomplete)
 - `POST /api/v1/knowledge/nodes/{node_id}/content` `{expand?: bool, new_pack?: bool}` → content (200); with `expand: true` and missing/incomplete pack → `{job_id, pack_index}` (202); `new_pack: true` only when all packs complete (else 422)
 - `GET /api/v1/knowledge/nodes/{node_id}/image` → `{image_url, incomplete}`
 - `POST /api/v1/knowledge/nodes/{node_id}/image` `{generate?, regenerate?}` → metadata (200) or `{job_id}` (202)

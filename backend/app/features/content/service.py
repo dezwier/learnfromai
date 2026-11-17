@@ -183,10 +183,44 @@ def is_content_complete(
     )
 
 
+def completed_pack_indexes(
+    session: Session,
+    *,
+    user_id: UUID,
+    node_id: UUID,
+) -> list[int]:
+    """Pack indexes where the user has recorded learn+example+check1–3."""
+    from app.features.user_events.models import UserTopicEvent
+
+    rows = list(
+        session.exec(
+            select(UserTopicEvent).where(
+                UserTopicEvent.user_id == user_id,
+                UserTopicEvent.node_id == node_id,
+                col(UserTopicEvent.kind).in_(list(CONTENT_KINDS) + [LEGACY_CHECK_KIND]),
+            )
+        ).all()
+    )
+    by_pack: dict[int, set[str]] = {}
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        try:
+            pack_index = int(payload.get("pack_index") or 1)
+        except (TypeError, ValueError):
+            pack_index = 1
+        kind = "check1" if row.kind == LEGACY_CHECK_KIND else row.kind
+        if kind not in CONTENT_KINDS:
+            continue
+        by_pack.setdefault(pack_index, set()).add(kind)
+    needed = set(CONTENT_KINDS)
+    return sorted(pack for pack, kinds in by_pack.items() if needed <= kinds)
+
+
 def content_for_node(
     session: Session,
     node_id: UUID,
     *,
+    user_id: UUID | None = None,
     band: str = DEFAULT_BAND,
     recipe_version: int = RECIPE_VERSION,
 ) -> dict:
@@ -217,6 +251,11 @@ def content_for_node(
                 "bits": bits,
             }
         )
+    completed = (
+        completed_pack_indexes(session, user_id=user_id, node_id=node_id)
+        if user_id is not None
+        else []
+    )
     return {
         "node_id": str(node_id),
         "band": band,
@@ -225,6 +264,7 @@ def content_for_node(
         "incomplete": not is_content_complete(
             session, node_id, band=band, recipe_version=recipe_version
         ),
+        "completed_packs": completed,
         "packs": packs,
     }
 
@@ -337,11 +377,21 @@ def enqueue_content_expand(
             missing = list(CONTENT_KINDS)
         else:
             return content_for_node(
-                session, node_id, band=band, recipe_version=recipe_version
+                session,
+                node_id,
+                user_id=user.id,
+                band=band,
+                recipe_version=recipe_version,
             ), 200
 
     if not missing:
-        return content_for_node(session, node_id, band=band, recipe_version=recipe_version), 200
+        return content_for_node(
+            session,
+            node_id,
+            user_id=user.id,
+            band=band,
+            recipe_version=recipe_version,
+        ), 200
 
     job = _enqueue(
         session,
@@ -373,7 +423,13 @@ def content_or_expand(
     recipe_version: int = RECIPE_VERSION,
 ) -> tuple[dict, int]:
     if not expand:
-        return content_for_node(session, node_id, band=band, recipe_version=recipe_version), 200
+        return content_for_node(
+            session,
+            node_id,
+            user_id=user.id,
+            band=band,
+            recipe_version=recipe_version,
+        ), 200
     return enqueue_content_expand(
         session,
         user=user,

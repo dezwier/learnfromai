@@ -322,8 +322,7 @@ def get_knowledge_node_content(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    _ = user
-    return content_for_node(session, node_id)
+    return content_for_node(session, node_id, user_id=user.id)
 
 
 @router.post("/knowledge/nodes/{node_id}/content")

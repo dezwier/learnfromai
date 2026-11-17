@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import 'learn_pack_chrome.dart';
 
 String checkTypeOf(TopicBit? bit) {
   final raw = bit?.body['type']?.toString().trim().toLowerCase();
@@ -224,6 +225,9 @@ class _ClozeCheck extends StatelessWidget {
         '';
     final explanation = bit.body['explanation']?.toString().trim();
     final correct = revealed && gradeCloze(bit, controller.text);
+    final dark = scheme.brightness == Brightness.dark;
+    final resultColor =
+        correct ? learnOkColor(scheme.brightness) : learnBadColor(scheme.brightness);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -245,6 +249,20 @@ class _ClozeCheck extends StatelessWidget {
           decoration: InputDecoration(
             hintText: 'Fill in the blank',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: revealed
+                ? OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: resultColor.withValues(alpha: 0.75)),
+                  )
+                : null,
+            disabledBorder: revealed
+                ? OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: resultColor.withValues(alpha: 0.75)),
+                  )
+                : null,
+            filled: revealed,
+            fillColor: revealed ? resultColor.withValues(alpha: dark ? 0.22 : 0.12) : null,
           ),
         ),
         if (!revealed) ...[
@@ -264,7 +282,7 @@ class _ClozeCheck extends StatelessWidget {
                 ? 'Correct'
                 : 'Answer: ${bit.body['answer']?.toString() ?? ''}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: correct ? scheme.primary : scheme.error,
+                  color: resultColor,
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -302,14 +320,20 @@ class _ChoiceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final ok = learnOkColor(scheme.brightness);
+    final bad = learnBadColor(scheme.brightness);
     Color border = scheme.onSurface.withValues(alpha: 0.12);
     Color fill = Colors.transparent;
+    Color? labelColor;
     if (revealed && correct) {
-      border = scheme.primary.withValues(alpha: 0.55);
-      fill = scheme.primary.withValues(alpha: 0.12);
+      border = ok.withValues(alpha: 0.75);
+      fill = ok.withValues(alpha: dark ? 0.22 : 0.14);
+      labelColor = ok;
     } else if (revealed && selected && !correct) {
-      border = scheme.error.withValues(alpha: 0.55);
-      fill = scheme.error.withValues(alpha: 0.10);
+      border = bad.withValues(alpha: 0.75);
+      fill = bad.withValues(alpha: dark ? 0.22 : 0.12);
+      labelColor = bad;
     } else if (selected) {
       border = scheme.primary.withValues(alpha: 0.4);
       fill = scheme.primary.withValues(alpha: 0.06);
@@ -329,7 +353,11 @@ class _ChoiceTile extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.35),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  height: 1.35,
+                  color: labelColor,
+                  fontWeight: labelColor != null ? FontWeight.w600 : null,
+                ),
           ),
         ),
       ),

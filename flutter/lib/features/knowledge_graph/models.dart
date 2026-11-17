@@ -167,6 +167,7 @@ class TopicContent {
     this.band = 'default',
     this.recipeVersion = 1,
     this.packCount = 0,
+    this.completedPacks = const [],
   });
 
   final String nodeId;
@@ -175,9 +176,13 @@ class TopicContent {
   final int recipeVersion;
   final int packCount;
   final List<TopicPack> packs;
+  /// Pack indexes the current user has fully walked (learn → example → checks).
+  final List<int> completedPacks;
 
   bool get allPacksComplete =>
       packs.isNotEmpty && packs.every((pack) => !pack.incomplete);
+
+  bool isPackCompleted(int packIndex) => completedPacks.contains(packIndex);
 
   TopicPack? pack(int packIndex) {
     for (final pack in packs) {
@@ -220,6 +225,7 @@ class TopicContent {
         );
       }
     }
+    final completedRaw = raw['completed_packs'];
     return TopicContent(
       nodeId: raw['node_id']?.toString() ?? '',
       incomplete: raw['incomplete'] == true,
@@ -227,6 +233,11 @@ class TopicContent {
       recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
       packCount: (raw['pack_count'] as num?)?.toInt() ?? packs.length,
       packs: packs,
+      completedPacks: [
+        if (completedRaw is List)
+          for (final row in completedRaw)
+            if (row is num) row.toInt(),
+      ],
     );
   }
 }

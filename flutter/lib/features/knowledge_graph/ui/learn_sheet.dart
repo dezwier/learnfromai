@@ -55,9 +55,24 @@ class _LearnSheetState extends State<LearnSheet> {
   var _generatingAnother = false;
   GraphController? _graph;
   final Set<String> _trackedKinds = {};
+  final Set<int> _completedPacks = {};
   final _clozeController = TextEditingController();
 
   TopicPack? get _activePack => _content?.pack(_packIndex);
+
+  void _mergeCompletedFrom(TopicContent content) {
+    _completedPacks.addAll(content.completedPacks);
+  }
+
+  void _maybeMarkPackCompleted() {
+    final needed = {
+      for (final kind in _lessonKinds) _trackKey(kind),
+    };
+    if (!needed.every(_trackedKinds.contains)) return;
+    if (_completedPacks.add(_packIndex)) {
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -134,6 +149,7 @@ class _LearnSheetState extends State<LearnSheet> {
     final pack = content.pack(selectPack) ?? content.packs.firstOrNull;
     setState(() {
       _content = content;
+      _mergeCompletedFrom(content);
       _loading = false;
       _error = null;
       _packIndex = pack?.packIndex ?? 1;
@@ -176,6 +192,17 @@ class _LearnSheetState extends State<LearnSheet> {
       });
       return;
     }
+    // New pack finished in the background: keep the user's current pack/step.
+    if (_generatingAnother && next.pack(_packIndex) != null) {
+      setState(() {
+        _content = next;
+        _mergeCompletedFrom(next);
+        _loading = false;
+        _error = null;
+        _generatingAnother = false;
+      });
+      return;
+    }
     final prefer = next.packs.isNotEmpty ? next.packs.last.packIndex : _packIndex;
     _applyContent(next, selectPack: prefer);
   }
@@ -198,6 +225,7 @@ class _LearnSheetState extends State<LearnSheet> {
 
   void _goContinue() {
     if (_step >= _lessonKinds.length - 1) {
+      _maybeMarkPackCompleted();
       _dismiss();
       return;
     }
@@ -246,13 +274,21 @@ class _LearnSheetState extends State<LearnSheet> {
       });
       return;
     }
-    if (queued.packs.isNotEmpty && queued.allPacksComplete) {
-      _applyContent(queued, selectPack: queued.packs.last.packIndex);
+    // Job queued: keep existing packs visible/playable while the worker runs.
+    if (graph.jobForNode(widget.nodeId) != null) {
+      _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
+      _listen(graph);
+      setState(() => _generatingAnother = true);
       return;
     }
-    _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
-    _listen(graph);
-    setState(() => _content = queued);
+    // Synchronous complete (rare): refresh packs without wiping the current step.
+    if (queued.packs.isNotEmpty) {
+      setState(() {
+        _content = queued;
+        _mergeCompletedFrom(queued);
+        _generatingAnother = false;
+      });
+    }
   }
 
   String _trackKey(String kind) => '$_packIndex:$kind';
@@ -270,6 +306,7 @@ class _LearnSheetState extends State<LearnSheet> {
         payload: {'pack_index': _packIndex},
       ),
     );
+    _maybeMarkPackCompleted();
   }
 
   void _trackCheckAnswer(
@@ -296,6 +333,7 @@ class _LearnSheetState extends State<LearnSheet> {
         },
       ),
     );
+    _maybeMarkPackCompleted();
   }
 
   void _onSelectMc(GraphController graph, String kind, int choiceIndex) {
@@ -435,6 +473,7 @@ class _LearnSheetState extends State<LearnSheet> {
                     LearnPackBadgeRow(
                       packs: packs,
                       selectedPackIndex: _packIndex,
+                      completedPackIndexes: _completedPacks,
                       canGenerateAnother: canGenerateAnother,
                       generatingAnother: generating && _generatingAnother,
                       onSelectPack: _selectPack,

@@ -806,6 +806,7 @@ Map<String, dynamic> _contentReady() {
     'band': 'default',
     'recipe_version': 1,
     'pack_count': 1,
+    'completed_packs': <int>[],
     'packs': [
       {
         'pack_index': 1,

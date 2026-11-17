@@ -34,6 +34,7 @@ def test_content_get_never_enqueues(client, auth, session):
     assert body["incomplete"] is True
     assert body["pack_count"] == 0
     assert body["packs"] == []
+    assert body["completed_packs"] == []
     assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
 
 
@@ -210,6 +211,51 @@ def test_content_new_pack_after_complete(client, auth, session):
     }
     assert "true_false" in types
     assert "cloze" in types
+
+
+def test_content_reports_completed_packs_for_user(client, auth, session):
+    node = KnowledgeNode(name="Dropout", name_key="dropout", description="Regularization.")
+    session.add(node)
+    session.commit()
+
+    first = client.post(
+        f"/api/v1/knowledge/nodes/{node.id}/content",
+        headers=auth,
+        json={"expand": True},
+    )
+    assert first.status_code == 202
+    _run_queued(session)
+
+    before = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
+    assert before.json()["completed_packs"] == []
+
+    client.post(
+        "/api/v1/me/events",
+        headers=auth,
+        json={
+            "events": [
+                {"node_id": str(node.id), "kind": "learn", "payload": {"pack_index": 1}},
+                {"node_id": str(node.id), "kind": "example", "payload": {"pack_index": 1}},
+                {
+                    "node_id": str(node.id),
+                    "kind": "check1",
+                    "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
+                },
+                {
+                    "node_id": str(node.id),
+                    "kind": "check2",
+                    "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
+                },
+                {
+                    "node_id": str(node.id),
+                    "kind": "check3",
+                    "payload": {"pack_index": 1, "correct": False, "choice_index": 1},
+                },
+            ]
+        },
+    )
+    after = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
+    assert after.json()["completed_packs"] == [1]
 
 
 def test_content_new_pack_rejected_while_incomplete(client, auth, session):
