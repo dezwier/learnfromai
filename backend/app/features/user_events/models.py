@@ -11,9 +11,10 @@ from sqlmodel import Field, SQLModel
 
 from app.core.time import utcnow
 
-EVENT_KINDS = ("focus", "learn", "example", "check1", "check2", "check3")
-CLIENT_EVENT_KINDS = ("learn", "example", "check1", "check2", "check3")
+EVENT_KINDS = ("focus", "open", "learn", "example", "check1", "check2", "check3")
+CLIENT_EVENT_KINDS = ("open", "learn", "example", "check1", "check2", "check3")
 CHECK_EVENT_KINDS = ("check1", "check2", "check3")
+OPEN_SOURCES = ("graph", "search", "list")
 MAX_EVENTS_PER_REQUEST = 50
 
 

@@ -19,7 +19,7 @@ def test_focus_writes_focus_event(client, auth, session):
     assert rows[0].payload == {}
 
 
-def test_post_me_events_records_learn_and_check(client, auth, session, user):
+def test_post_me_events_records_open_learn_and_check(client, auth, session, user):
     node = KnowledgeNode(name="Softmax", name_key="softmax", description="Normalize scores.")
     session.add(node)
     session.commit()
@@ -29,6 +29,11 @@ def test_post_me_events_records_learn_and_check(client, auth, session, user):
         headers=auth,
         json={
             "events": [
+                {
+                    "node_id": str(node.id),
+                    "kind": "open",
+                    "payload": {"source": "search"},
+                },
                 {"node_id": str(node.id), "kind": "learn"},
                 {"node_id": str(node.id), "kind": "example"},
                 {
@@ -46,8 +51,8 @@ def test_post_me_events_records_learn_and_check(client, auth, session, user):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["recorded"] == 4
-    assert len(body["ids"]) == 4
+    assert body["recorded"] == 5
+    assert len(body["ids"]) == 5
 
     session.expire_all()
     rows = session.exec(
@@ -56,11 +61,52 @@ def test_post_me_events_records_learn_and_check(client, auth, session, user):
         .order_by(UserTopicEvent.kind)
     ).all()
     kinds = [row.kind for row in rows]
-    assert kinds == ["check1", "check2", "example", "learn"]
+    assert kinds == ["check1", "check2", "example", "learn", "open"]
+    opened = next(row for row in rows if row.kind == "open")
+    assert opened.payload == {"source": "search"}
     check1 = next(row for row in rows if row.kind == "check1")
     assert check1.payload == {"correct": True, "choice_index": 2}
     check2 = next(row for row in rows if row.kind == "check2")
     assert check2.payload == {"correct": False, "choice_index": 0}
+
+
+def test_post_me_events_requires_open_source(client, auth, session):
+    node = KnowledgeNode(name="Attention", name_key="attention", description="Weighting.")
+    session.add(node)
+    session.commit()
+
+    response = client.post(
+        "/api/v1/me/events",
+        headers=auth,
+        json={"events": [{"node_id": str(node.id), "kind": "open", "payload": {}}]},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_EVENTS"
+
+
+def test_post_me_events_accepts_open_from_list(client, auth, session, user):
+    node = KnowledgeNode(name="QKV", name_key="qkv", description="Query key value.")
+    session.add(node)
+    session.commit()
+
+    response = client.post(
+        "/api/v1/me/events",
+        headers=auth,
+        json={
+            "events": [
+                {
+                    "node_id": str(node.id),
+                    "kind": "open",
+                    "payload": {"source": "list"},
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    session.expire_all()
+    row = session.exec(select(UserTopicEvent).where(UserTopicEvent.user_id == user.id)).one()
+    assert row.kind == "open"
+    assert row.payload == {"source": "list"}
 
 
 def test_post_me_events_rejects_focus_kind(client, auth, session):

@@ -317,9 +317,9 @@ class _GraphScreenState extends State<GraphScreen>
       _dwellTimer?.cancel();
       setState(() {
         _highlighted = node;
-        _topicOpen = true;
         _profileOpen = false;
       });
+      _openTopicOverlay(source: 'graph');
       return;
     }
     _panTargetId = node.id;
@@ -464,6 +464,7 @@ class _GraphScreenState extends State<GraphScreen>
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
     // Title switches immediately; relations stay pulsed until the new focus settles
     // so we don't flash the old neighborhood's edge view mid-load / morph.
+    final wasTopicOpen = _topicOpen;
     _panTargetId = node.id;
     setState(() {
       _highlighted = node;
@@ -479,6 +480,9 @@ class _GraphScreenState extends State<GraphScreen>
         if (graph.focusId == node.id && _transformFocusId == node.id) break;
       }
       _syncHighlightedFromLayout(graph.focusId);
+      if (wasTopicOpen && mounted) {
+        _openTopicOverlay(source: 'list');
+      }
     } finally {
       if (mounted && _openingRelatedId == node.id) {
         setState(() => _openingRelatedId = null);
@@ -703,6 +707,26 @@ class _GraphScreenState extends State<GraphScreen>
     setState(() => _topicOpen = false);
   }
 
+  /// Opens the topic detail overlay and records an `open` interaction.
+  void _openTopicOverlay({required String source}) {
+    final node = _highlighted;
+    if (node == null) return;
+    final graph = context.read<GraphController>();
+    if (!_topicOpen || _profileOpen) {
+      setState(() {
+        _topicOpen = true;
+        _profileOpen = false;
+      });
+    }
+    unawaited(
+      graph.trackEvent(
+        nodeId: node.id,
+        kind: 'open',
+        payload: {'source': source},
+      ),
+    );
+  }
+
   void _openSearch() {
     if (_searchOpen) return;
     setState(() => _searchOpen = true);
@@ -747,12 +771,22 @@ class _GraphScreenState extends State<GraphScreen>
     } else {
       await graph.search(topic);
     }
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId);
+    _openTopicOverlay(source: 'search');
   }
 
   Future<void> _pickSuggestion(GraphController graph, TopicChoice choice) async {
     _search.clear();
     _dismissSearch();
     await graph.openExisting(choice.id);
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _syncHighlightedFromLayout(graph.focusId);
+    _openTopicOverlay(source: 'search');
   }
 
   void _openProfile() {

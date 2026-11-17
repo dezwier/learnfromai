@@ -16,6 +16,7 @@ from app.features.user_events.models import (
     CHECK_EVENT_KINDS,
     CLIENT_EVENT_KINDS,
     MAX_EVENTS_PER_REQUEST,
+    OPEN_SOURCES,
     UserTopicEvent,
 )
 
@@ -41,7 +42,7 @@ def record_events(
     user: User,
     items: list[dict[str, Any]],
 ) -> list[UserTopicEvent]:
-    """Validate and append client-submitted learn/example/check events."""
+    """Validate and append client-submitted open/learn/example/check events."""
     if len(items) > MAX_EVENTS_PER_REQUEST:
         raise AppError(
             "INVALID_EVENTS",
@@ -116,6 +117,17 @@ def _normalize_payload(kind: str, raw: Any, *, index: int) -> dict:
         payload = dict(raw)
     else:
         raise AppError("INVALID_EVENTS", f"Event {index} payload must be an object", 400)
+
+    if kind == "open":
+        source = str(payload.get("source") or "").strip()
+        if source not in OPEN_SOURCES:
+            raise AppError(
+                "INVALID_EVENTS",
+                f"Event {index} open payload requires source",
+                400,
+                {"allowed": list(OPEN_SOURCES)},
+            )
+        return {"source": source}
 
     if kind not in CHECK_EVENT_KINDS:
         return payload
