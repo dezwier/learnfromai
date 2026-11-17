@@ -116,7 +116,7 @@ class _GraphScreenState extends State<GraphScreen>
     _motionSettleTimer?.cancel();
   }
 
-  /// After the finger lifts, wait until inertia dies, then start the dwell timer.
+  /// After the finger lifts, wait until inertia dies, then open the highlight.
   void _armSettleThenDwell() {
     _motionSettleTimer?.cancel();
     _dwellTimer?.cancel();
@@ -357,9 +357,8 @@ class _GraphScreenState extends State<GraphScreen>
       _incompleteByNode[nodeId] = graph.categoryGraph?['incomplete'] == true;
       return;
     }
-    _dwellTimer = Timer(const Duration(milliseconds: 250), () {
-      unawaited(_onDwell(nodeId));
-    });
+    // No intentional pause — fetch/open as soon as the camera has settled.
+    unawaited(_onDwell(nodeId));
   }
 
   Future<void> _onDwell(String nodeId) async {

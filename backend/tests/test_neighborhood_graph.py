@@ -293,6 +293,41 @@ def test_build_subgraph_hides_near_duplicate_neighbors(session, user):
     assert titles == {"Dinosaurs", "Theropods"}
 
 
+def test_build_subgraph_keeps_description_on_focus_only(session, user):
+    from app.features.knowledge_graph.neighborhood import build_subgraph
+
+    focus = KnowledgeNode(
+        name="Dinosaurs",
+        name_key="dinosaurs",
+        description="Extinct reptiles.",
+        image_url="/knowledge/nodes/focus/image/file",
+    )
+    child = KnowledgeNode(
+        name="Theropods",
+        name_key="theropods",
+        description="Bipedal dinosaurs.",
+        image_url="/knowledge/nodes/child/image/file",
+    )
+    session.add_all([focus, child])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=focus.id, relation="child", to_id=child.id),
+            KnowledgeEdge(from_id=child.id, relation="parent", to_id=focus.id),
+        ]
+    )
+    session.commit()
+
+    payload = build_subgraph(session, focus, max_extended=12)
+    by_title = {node["title"]: node for node in payload["nodes"]}
+    assert by_title["Dinosaurs"]["description"] == "Extinct reptiles."
+    assert by_title["Dinosaurs"]["image_url"] == "/knowledge/nodes/focus/image/file"
+    assert by_title["Dinosaurs"]["image_thumb_url"].endswith("?variant=thumb")
+    assert by_title["Theropods"]["description"] is None
+    assert by_title["Theropods"]["image_url"] is None
+    assert by_title["Theropods"]["image_thumb_url"].endswith("?variant=thumb")
+
+
 def test_consolidate_merges_existing_near_duplicates(session, user):
     from app.features.knowledge_graph.neighborhood import consolidate_near_duplicates
 

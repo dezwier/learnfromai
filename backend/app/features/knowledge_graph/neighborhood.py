@@ -864,20 +864,24 @@ def build_subgraph(
             str(node_id),
         )
 
+    # Canvas needs focus description + small thumbs; neighbor descriptions and
+    # full image URLs stay off the wire until that node becomes focus.
     node_payload = []
     for node_id in sorted(ids, key=sort_key):
         node = nodes[node_id]
+        is_focus = node_id == focus.id
+        thumb = (
+            f"/knowledge/nodes/{node.id}/image/file?variant=thumb" if node.image_url else None
+        )
         node_payload.append(
             {
                 "id": str(node.id),
                 "title": node.name,
-                "description": node.description,
-                "image_url": node.image_url,
-                "image_thumb_url": (
-                    f"/knowledge/nodes/{node.id}/image/file?variant=thumb" if node.image_url else None
-                ),
+                "description": node.description if is_focus else None,
+                "image_url": node.image_url if is_focus else None,
+                "image_thumb_url": thumb,
                 "depth": depths.get(node_id, 0),
-                "distance": distances.get(node_id, 0 if node_id == focus.id else 2 if kinds.get(node_id) == "extended" else 1),
+                "distance": distances.get(node_id, 0 if is_focus else 2 if kinds.get(node_id) == "extended" else 1),
                 "kind": kinds.get(node_id, "related"),
             }
         )
