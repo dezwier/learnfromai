@@ -214,5 +214,13 @@ void main() {
     expect(byId['c']!.opacity, lessThan(0.6));
     expect(byId['d']!.opacity, greaterThan(0.4));
     expect(byId['b']!.effectiveFlowerAmount, greaterThan(0.4));
+    // Shared focus↔neighbor blends role colors instead of snapping.
+    expect(byId['b']!.colorFromRole, NodeRole.child);
+    expect(byId['b']!.colorT, closeTo(Curves.easeInOutCubic.transform(0.5), 0.001));
+    expect(byId['a']!.colorFromRole, NodeRole.focus);
+    // Arrivals are still undersized at mid-morph.
+    final dTo = to.nodes.firstWhere((n) => n.id == 'd');
+    expect(byId['d']!.width, lessThan(dTo.width));
+    expect(byId['d']!.height, lessThan(dTo.height));
   });
 }

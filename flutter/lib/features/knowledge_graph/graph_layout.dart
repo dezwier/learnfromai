@@ -74,6 +74,8 @@ class PlacedNode {
     this.viaRole,
     this.opacity = 1,
     this.flowerAmount,
+    this.colorFromRole,
+    this.colorT = 1,
   });
 
   final String id;
@@ -99,6 +101,10 @@ class PlacedNode {
   final double opacity;
   /// 0 = hex tile, 1 = focus flower; null means use [isFlower].
   final double? flowerAmount;
+  /// When set, [nodeFill] lerps from this role’s color toward [role] by [colorT].
+  final NodeRole? colorFromRole;
+  /// 0 = [colorFromRole] fill, 1 = [role] fill.
+  final double colorT;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -128,6 +134,8 @@ class PlacedNode {
     String? imageThumbUrl,
     double? opacity,
     double? flowerAmount,
+    NodeRole? colorFromRole,
+    double? colorT,
   }) {
     return PlacedNode(
       id: id,
@@ -148,6 +156,8 @@ class PlacedNode {
       viaRole: viaRole,
       opacity: opacity ?? this.opacity,
       flowerAmount: flowerAmount ?? this.flowerAmount,
+      colorFromRole: colorFromRole ?? this.colorFromRole,
+      colorT: colorT ?? this.colorT,
     );
   }
 }
@@ -192,17 +202,20 @@ GraphLayout shiftLayoutToAnchor(GraphLayout layout, String anchorId, Offset targ
 PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
   final tt = t.clamp(0.0, 1.0);
   final flower = lerpDouble(a.effectiveFlowerAmount, b.effectiveFlowerAmount, tt)!;
+  // Prefer destination metadata once the tile is mostly the new role, but keep
+  // fill color lerping the whole way via [colorFromRole]/[colorT].
+  final useTo = tt >= 0.5;
   return PlacedNode(
     id: b.id,
-    title: tt < 0.5 ? a.title : b.title,
+    title: useTo ? b.title : a.title,
     depth: b.depth,
     distance: b.distance,
     kind: b.kind,
-    role: tt < 0.5 ? a.role : b.role,
-    description: tt < 0.5 ? a.description : b.description,
-    imageUrl: tt < 0.5 ? a.imageUrl : b.imageUrl,
-    imageThumbUrl: tt < 0.5 ? a.imageThumbUrl : b.imageThumbUrl,
-    viaRole: tt < 0.5 ? a.viaRole : b.viaRole,
+    role: b.role,
+    description: useTo ? b.description : a.description,
+    imageUrl: useTo ? b.imageUrl : a.imageUrl,
+    imageThumbUrl: useTo ? b.imageThumbUrl : a.imageThumbUrl,
+    viaRole: useTo ? b.viaRole : a.viaRole,
     x: lerpDouble(a.x, b.x, tt)!,
     y: lerpDouble(a.y, b.y, tt)!,
     width: lerpDouble(a.width, b.width, tt)!,
@@ -211,12 +224,31 @@ PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
     isFlower: flower >= 0.5,
     opacity: lerpDouble(a.opacity, b.opacity, tt)!,
     flowerAmount: flower,
+    colorFromRole: a.role,
+    colorT: tt,
   );
 }
 
-/// Morph [from] → [to]. Shared ids lerp; leavers fade out; arrivals fade in.
+PlacedNode _scaledAboutCenter(PlacedNode node, double scale) {
+  final s = scale.clamp(0.01, 2.0);
+  final cx = node.center.dx;
+  final cy = node.center.dy;
+  final w = node.width * s;
+  final h = node.height * s;
+  return node.copyWith(
+    width: w,
+    height: h,
+    radius: node.radius * s,
+    x: cx - w / 2,
+    y: cy - h / 2,
+  );
+}
+
+/// Morph [from] → [to]. Shared ids lerp (size / flower / color); leavers shrink
+/// + fade out; arrivals grow from small + fade in.
 GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
-  final tt = Curves.easeInOutCubic.transform(t.clamp(0.0, 1.0));
+  final raw = t.clamp(0.0, 1.0);
+  final tt = Curves.easeInOutCubic.transform(raw);
   final fromById = {for (final n in from.nodes) n.id: n};
   final toById = {for (final n in to.nodes) n.id: n};
   final ids = {...fromById.keys, ...toById.keys};
@@ -227,9 +259,17 @@ GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
     if (a != null && b != null) {
       nodes.add(lerpPlacedNode(a, b, tt));
     } else if (a != null) {
-      nodes.add(a.copyWith(opacity: 1 - tt));
+      // Leave: shrink slightly and fade.
+      nodes.add(_scaledAboutCenter(a, lerpDouble(1.0, 0.55, tt)!).copyWith(opacity: 1 - tt));
     } else if (b != null) {
-      nodes.add(b.copyWith(opacity: tt));
+      // Arrive: grow from small and fade in.
+      nodes.add(
+        _scaledAboutCenter(b, lerpDouble(0.45, 1.0, tt)!).copyWith(
+          opacity: tt,
+          colorFromRole: b.role,
+          colorT: 1,
+        ),
+      );
     }
   }
   return GraphLayout(
@@ -1029,10 +1069,9 @@ Color roleFill(NodeRole role, ColorScheme scheme) {
   };
 }
 
-/// Tile fill: extended neighbors inherit their via-neighbor color, faded toward paper.
-Color nodeFill(PlacedNode node, ColorScheme scheme) {
-  if (node.role != NodeRole.extended) return roleFill(node.role, scheme);
-  final via = node.viaRole;
+Color _fillForRole(NodeRole role, NodeRole? viaRole, ColorScheme scheme) {
+  if (role != NodeRole.extended) return roleFill(role, scheme);
+  final via = viaRole;
   if (via == null || via == NodeRole.extended || via == NodeRole.focus) {
     return roleFill(NodeRole.extended, scheme);
   }
@@ -1041,6 +1080,18 @@ Color nodeFill(PlacedNode node, ColorScheme scheme) {
       ? const Color(0xFF16181C)
       : const Color(0xFFF4F1EA);
   return Color.lerp(base, paper, 0.42)!;
+}
+
+/// Tile fill: extended neighbors inherit their via-neighbor color, faded toward paper.
+/// During morph, [PlacedNode.colorFromRole] / [PlacedNode.colorT] blend gradually.
+Color nodeFill(PlacedNode node, ColorScheme scheme) {
+  final to = _fillForRole(node.role, node.viaRole, scheme);
+  final fromRole = node.colorFromRole;
+  final t = node.colorT.clamp(0.0, 1.0);
+  if (fromRole == null || t >= 1) return to;
+  if (t <= 0) return _fillForRole(fromRole, node.viaRole, scheme);
+  final from = _fillForRole(fromRole, node.viaRole, scheme);
+  return Color.lerp(from, to, t)!;
 }
 
 Color roleColor(NodeRole role, ColorScheme scheme) => roleFill(role, scheme);

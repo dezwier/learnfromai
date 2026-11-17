@@ -70,7 +70,7 @@ class _GraphScreenState extends State<GraphScreen>
     )..addListener(_onPanTick);
     _layoutMorph = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 360),
     )..addListener(_onLayoutMorphTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _resumed) return;
@@ -194,11 +194,10 @@ class _GraphScreenState extends State<GraphScreen>
     final aligned = nextFocus == null
         ? previous
         : shiftLayoutToAnchor(previous, focusId, nextFocus.center);
-    _morphFrom = aligned;
-    _morphTo = next;
-    _settledLayout = next;
     _panController.stop();
     _panAnimation = null;
+    // Pin camera + seed morph at t=0 in one setState so the first painted
+    // frame already matches the screen pin (avoids a one-frame jump).
     if (nextFocus != null) {
       final scale = _transform.value.getMaxScaleOnAxis();
       _transform.value = _matrixPinning(
@@ -207,7 +206,14 @@ class _GraphScreenState extends State<GraphScreen>
         scale: scale,
       );
     }
-    _layoutMorph.forward(from: 0);
+    _layoutMorph.stop();
+    _layoutMorph.value = 0;
+    setState(() {
+      _morphFrom = aligned;
+      _morphTo = next;
+      _settledLayout = next;
+    });
+    _layoutMorph.forward();
   }
 
   void _adoptLayout({
@@ -2277,10 +2283,12 @@ class _NodeCard extends StatelessWidget {
           dark: dark,
           spotlight: spotlight,
           imageBytes: imageBytes,
+          contentOpacity: Curves.easeOut.transform(flower.clamp(0.0, 1.0)),
         );
-        final child = flower <= 0.02
+        // Crossfade the whole range so flowerAmount never pops widgets in/out.
+        final child = flower <= 0
             ? hex
-            : flower >= 0.98
+            : flower >= 1
                 ? bloom
                 : Stack(
                     fit: StackFit.expand,
@@ -2312,6 +2320,7 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
     Uint8List? imageBytes,
+    double contentOpacity = 1,
   }) {
     final description = (node.description ?? '').trim();
     final hasImage = imageBytes != null;
@@ -2321,41 +2330,43 @@ class _NodeCard extends StatelessWidget {
         : scheme.onSurface.withValues(alpha: 0.72);
     return CustomPaint(
       painter: _HexFlowerPainter(color: fill, dark: dark, spotlight: spotlight),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (hasImage) _hexImageFill(imageBytes!, flower: true),
-          if (hasImage)
-            ClipPath(
-              clipper: const _FlowerTapClipper(),
-              child: const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0x00000000),
-                      Color(0x14000000),
-                      Color(0x8A000000),
-                    ],
-                    stops: [0.35, 0.58, 1.0],
+      child: Opacity(
+        opacity: contentOpacity.clamp(0.0, 1.0),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (hasImage) _hexImageFill(imageBytes!, flower: true),
+            if (hasImage)
+              ClipPath(
+                clipper: const _FlowerTapClipper(),
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0x00000000),
+                        Color(0x14000000),
+                        Color(0x8A000000),
+                      ],
+                      stops: [0.35, 0.58, 1.0],
+                    ),
                   ),
                 ),
               ),
-            ),
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: node.radius * 0.62,
-              vertical: node.radius * 0.58,
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final scaler = MediaQuery.textScalerOf(context);
-                final maxW = constraints.maxWidth;
-                final maxH = constraints.maxHeight;
-                if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: node.radius * 0.62,
+                vertical: node.radius * 0.58,
+              ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final scaler = MediaQuery.textScalerOf(context);
+                  final maxW = constraints.maxWidth;
+                  final maxH = constraints.maxHeight;
+                  if (maxW <= 1 || maxH <= 1) return const SizedBox.shrink();
 
-                final hasDesc = description.isNotEmpty;
+                  final hasDesc = description.isNotEmpty;
                 const titleMaxLines = 3;
                 final titleStyleBase = TextStyle(
                   fontFamily: 'tt_ramilas',
@@ -2387,36 +2398,37 @@ class _NodeCard extends StatelessWidget {
                   shadows: hasImage ? _imageBodyShadows : null,
                 );
 
-                return Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        titleLaid.text,
-                        textAlign: TextAlign.center,
-                        softWrap: true,
-                        maxLines: titleMaxLines,
-                        overflow: TextOverflow.ellipsis,
-                        style: titleStyle,
-                      ),
-                      if (hasDesc) ...[
-                        SizedBox(height: gap),
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Text(
-                          description,
+                          titleLaid.text,
                           textAlign: TextAlign.center,
                           softWrap: true,
-                          maxLines: 5,
+                          maxLines: titleMaxLines,
                           overflow: TextOverflow.ellipsis,
-                          style: descStyle,
+                          style: titleStyle,
                         ),
+                        if (hasDesc) ...[
+                          SizedBox(height: gap),
+                          Text(
+                            description,
+                            textAlign: TextAlign.center,
+                            softWrap: true,
+                            maxLines: 5,
+                            overflow: TextOverflow.ellipsis,
+                            style: descStyle,
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                );
-              },
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
