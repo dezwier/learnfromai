@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Native Gemini image model (~$0.034 / 1K square). Imagen predict API is shut down.
     gemini_image_model: str = "gemini-3.1-flash-lite-image"
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5-mini"
     openai_temperature: float = 0.0
     # gpt-image-1 was shut down Oct 2026; flare + low ≈ near €0.05 target.
     openai_image_model: str = "gpt-image-2.5-flare"

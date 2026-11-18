@@ -51,7 +51,7 @@ LLM_PROVIDER=fake .venv/bin/python -m scripts.seed
 A real worker calls Gemini and/or OpenAI depending on each user's **Settings → App → AI provider** switch (default Gemini). Configure both keys on the worker so either side of the switch works:
 
 - `GOOGLE_GEMINI_API_KEY` (+ optional `GEMINI_MODEL`, `GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image`)
-- `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-4o-mini`, `OPENAI_IMAGE_MODEL=gpt-image-2.5-flare`, `OPENAI_IMAGE_QUALITY=low`)
+- `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-5-mini`, `OPENAI_IMAGE_MODEL=gpt-image-2.5-flare`, `OPENAI_IMAGE_QUALITY=low`)
 - `LLM_PROVIDER=gemini` as the server default when a user has not chosen
 
 See [LLM provider setup](#llm-provider-setup) below.
@@ -97,14 +97,14 @@ railway ssh --service api -- python -m scripts.seed
 
 ## LLM provider setup
 
-What the code already does: App settings switch (Gemini / ChatGPT), preference API, OpenAI + Gemini adapters (`gpt-4o-mini` by default), shared topic image generation (`gemini-3.1-flash-lite-image` / `gpt-image-2.5-flare`), shared prompts, and spend capping for both.
+What the code already does: App settings switch (Gemini / ChatGPT), preference API, OpenAI + Gemini adapters (`gpt-5-mini` by default), shared topic image generation (`gemini-3.1-flash-lite-image` / `gpt-image-2.5-flare`), shared prompts, and spend capping for both.
 
 What you need to do:
 
 1. Create an OpenAI API key at https://platform.openai.com/api-keys and add billing/credits.
 2. On the Railway **worker** (and API if you keep envs in sync), set:
    - `OPENAI_API_KEY=sk-...`
-   - `OPENAI_MODEL=gpt-4o-mini` (optional; this is the default)
+   - `OPENAI_MODEL=gpt-5-mini` (optional; this is the default)
    - Keep `GOOGLE_GEMINI_API_KEY` so Gemini still works
    - Optional: `LLM_PROVIDER=gemini` as the default for users who never flipped the switch
 3. Redeploy the worker after env vars change (`make deploy-worker`). Redeploy API/web if this branch is not live yet.

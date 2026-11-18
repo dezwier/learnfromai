@@ -18,6 +18,8 @@ _RATES_USD_PER_M: dict[str, tuple[float, float]] = {
     "gemini-flash-lite-latest": (0.30, 2.50),
     "gemini-flash-latest": (0.30, 2.50),
     # OpenAI
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5-mini-2025-08-07": (0.25, 2.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o-mini-2024-07-18": (0.15, 0.60),
 }

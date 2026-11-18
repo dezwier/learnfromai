@@ -338,4 +338,6 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
     assert "cloze" in prompt
     assert '"pack_index": 2' in prompt
     assert "Do not open example with 'Imagine'" in prompt
-    assert "concrete instance" in prompt
+    assert "concrete learning takeaway" in prompt
+    assert "different concrete takeaway" in prompt
+    assert "test the pack's takeaway" in prompt

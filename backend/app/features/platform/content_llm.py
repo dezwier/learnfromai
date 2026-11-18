@@ -66,32 +66,39 @@ def build_content_prompt(
         "Teach ONLY this topic. Neighbors are out of scope—mention them only as what this topic "
         "is not; never explain how neighbors work. "
         "Do not invent prerequisites. Keep language clear and standalone. "
+        "Each pack must deliver exactly one concrete learning takeaway the learner can state "
+        "in one sentence after finishing—not a vague overview or motivational fluff. "
         f"This is pack_index {pack_index}. "
     ]
     if existing_packs:
         parts.append(
-            "Do not repeat ideas already covered by existing packs on this topic: "
+            "Do not repeat takeaways already covered by existing packs on this topic: "
             + json.dumps(existing_packs)
-            + ". Cover a different facet of the same topic. "
+            + ". Pick a different concrete takeaway within the same topic. "
         )
     if text_needed:
         parts.append(
             "learn and example are objects {title, markdown} with concise Markdown "
             "(a few short paragraphs max). "
-            "learn defines the facet. "
-            "example shares one concrete instance of that learning—something specific that "
-            "happened, was built, observed, or used—not a definition restated. "
+            "learn: teach that one takeaway with a precise claim (what it is / how it works / "
+            "when it applies)—avoid generic intros like 'X is important' or 'X is a topic'. "
+            "example: one concrete instance of that takeaway—something specific that happened, "
+            "was built, observed, or used—not a restated definition. "
+            "Do not open example with 'Imagine', 'Picture', 'Suppose', or similar framing; "
+            "just state the example directly. "
         )
     if checks_needed:
         parts.append(
             "Each of "
             + ", ".join(checks_needed)
-            + " is a standalone check that does not require reading learn/example first. "
+            + " is a standalone check that does not require reading learn/example first, "
+            "but must test the pack's takeaway (not vague topic trivia). "
+            "Prefer checks that discriminate a correct precise claim from plausible near-misses. "
             "Choose a type per check among mc, true_false, cloze (mix types when useful). "
             "mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}. "
             "true_false: {type:'true_false', statement, answer (boolean), explanation}. "
             "cloze: {type:'cloze', prompt (include ___ for the blank), answer, aliases (optional string array), explanation}. "
-            "The three checks must probe different claims (not paraphrases). "
+            "The three checks must probe different aspects of the same takeaway (not paraphrases). "
         )
         if existing_checks:
             parts.append(
@@ -138,9 +145,10 @@ class FakeContentLLM:
             payload["learn"] = {
                 "title": f"What is {topic}?" if pack_index == 1 else f"{topic}: {facet}",
                 "markdown": (
-                    f"**{topic}** is a topic you can learn in short steps ({facet}). "
-                    f"{desc or f'It sits near {neighbors}.'} "
-                    "Focus on the core idea before details."
+                    f"**Takeaway:** {topic} has one clear job you can state in a sentence "
+                    f"({facet}). "
+                    f"{desc or f'It sits near {neighbors}, but those are separate topics.'} "
+                    "Learn that job first; details come later."
                 ),
             }
         if "example" in required:
