@@ -22,6 +22,7 @@ from app.features.platform.neighborhood_llm import (
     _usage,
     resolve_llm_provider,
 )
+from app.features.platform.openai_chat import openai_chat_body, set_openai_max_out
 
 logger = logging.getLogger(__name__)
 
@@ -387,20 +388,21 @@ class OpenAIContentLLM:
         if not self.api_key:
             raise generation_unavailable("OPENAI_API_KEY is not configured", terminal=True)
         url = "https://api.openai.com/v1/chat/completions"
-        max_out = 3072
-        body = {
-            "model": self.model,
-            "temperature": self.temperature,
-            "max_tokens": max_out,
-            "response_format": {"type": "json_object"},
-            "messages": [
+        # Reasoning models spend completion budget on hidden tokens; keep headroom.
+        max_out = 8192
+        body = openai_chat_body(
+            model=self.model,
+            max_out=max_out,
+            temperature=self.temperature,
+            response_format={"type": "json_object"},
+            messages=[
                 {
                     "role": "system",
                     "content": "You return valid JSON objects only. No markdown fences.",
                 },
                 {"role": "user", "content": prompt},
             ],
-        }
+        )
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         last_error: Exception | None = None
@@ -412,7 +414,7 @@ class OpenAIContentLLM:
             if callable(before):
                 before(reserve_usd_for_call(self.model, max_out))
             try:
-                with httpx.Client(timeout=90) as client:
+                with httpx.Client(timeout=120) as client:
                     response = client.post(
                         url,
                         json=body,
@@ -428,6 +430,12 @@ class OpenAIContentLLM:
                         "OpenAI rate or spend limit (429). Stopping to avoid burn.",
                         terminal=True,
                     )
+                if response.status_code >= 400:
+                    logger.info(
+                        "openai content http %s: %s",
+                        response.status_code,
+                        (response.text or "")[:400],
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 usage = self._bill(payload.get("usage"))
@@ -439,8 +447,8 @@ class OpenAIContentLLM:
                 raise
             except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError, ValueError) as exc:
                 last_error = exc
-                max_out = min(4096, 3072 + 512 * attempt)
-                body["max_tokens"] = max_out
+                max_out = min(12288, 8192 + 1024 * attempt)
+                set_openai_max_out(body, max_out)
                 logger.info(
                     "openai content retry %s: %s (%s)",
                     attempt,
