@@ -87,7 +87,8 @@ def build_content_prompt(
             "Each check is one of:\n"
             "- mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}\n"
             "- true_false: {type:'true_false', statement, answer (boolean), explanation}\n"
-            "- cloze: {type:'cloze', prompt (with ___), answer, aliases (optional), explanation}\n"
+            "- cloze: {type:'cloze', prompt (with ___), answer, aliases (optional), explanation}; "
+            "answer and aliases must each be exactly one word or one number (no phrases)\n"
             "Mix types when useful. Wrong answers should be plausible near-misses.\n"
         )
         if existing_checks:
@@ -202,10 +203,10 @@ class FakeContentLLM:
                 },
                 "check2": {
                     "type": "cloze",
-                    "prompt": f"A short concrete scene that shows {topic} in use is called an ___.",
-                    "answer": "example",
-                    "aliases": ["Example", "an example"],
-                    "explanation": "The example step is the concrete scene.",
+                    "prompt": f"A pack about {topic} always includes exactly ___ checks.",
+                    "answer": "3",
+                    "aliases": ["three"],
+                    "explanation": "Each pack has three test bits.",
                 },
                 "check3": {
                     "type": "mc",
@@ -504,6 +505,14 @@ def _normalize_true_false(check: dict, *, kind: str) -> dict:
     }
 
 
+def _is_single_cloze_token(value: str) -> bool:
+    """Cloze answers must be one word or one number (no spaces/phrases)."""
+    text = value.strip()
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    return True
+
+
 def _normalize_cloze(check: dict, *, kind: str) -> dict:
     prompt = str(check.get("prompt") or check.get("question") or "").strip()
     answer = str(check.get("answer") or "").strip()
@@ -511,8 +520,17 @@ def _normalize_cloze(check: dict, *, kind: str) -> dict:
         raise ValueError(f"{kind} is missing prompt")
     if not answer:
         raise ValueError(f"{kind} is missing answer")
+    if not _is_single_cloze_token(answer):
+        raise ValueError(f"{kind} answer must be a single word or number")
     aliases_raw = check.get("aliases") if isinstance(check.get("aliases"), list) else []
-    aliases = [str(item).strip() for item in aliases_raw if str(item).strip()]
+    aliases: list[str] = []
+    for item in aliases_raw:
+        alias = str(item).strip()
+        if not alias:
+            continue
+        if not _is_single_cloze_token(alias):
+            raise ValueError(f"{kind} aliases must each be a single word or number")
+        aliases.append(alias)
     explanation = str(check.get("explanation") or "").strip() or None
     return {
         "type": "cloze",

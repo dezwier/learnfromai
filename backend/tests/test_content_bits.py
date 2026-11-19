@@ -314,6 +314,33 @@ def test_normalize_bits_typed_checks():
     assert normalized["check3"]["aliases"] == ["probs"]
 
 
+def test_normalize_cloze_rejects_multi_word_answer():
+    import pytest
+
+    with pytest.raises(ValueError, match="single word or number"):
+        normalize_bits(
+            {
+                "learn": {"title": "T", "markdown": "Body"},
+                "check1": {
+                    "type": "mc",
+                    "question": "Q?",
+                    "choices": ["A", "B", "C", "D"],
+                    "answer_index": 0,
+                },
+                "check2": {
+                    "type": "true_false",
+                    "statement": "True claim.",
+                    "answer": True,
+                },
+                "check3": {
+                    "type": "cloze",
+                    "prompt": "Fill ___.",
+                    "answer": "two words",
+                },
+            }
+        )
+
+
 def test_build_content_prompt_includes_existing_packs_and_neighbors():
     prompt = build_content_prompt(
         "Softmax",
@@ -341,3 +368,4 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
     assert "Never mention neighbors, other packs" in prompt
     assert "worth knowing" in prompt
     assert "genuinely useful" in prompt
+    assert "exactly one word or one number" in prompt
