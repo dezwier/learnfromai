@@ -176,7 +176,7 @@ class TopicContent {
   final int recipeVersion;
   final int packCount;
   final List<TopicPack> packs;
-  /// Pack indexes the current user has fully walked (learn → example → checks).
+  /// Pack indexes the current user has fully walked (learn → three checks).
   final List<int> completedPacks;
 
   bool get allPacksComplete =>

@@ -13,11 +13,12 @@ from app.core.time import utcnow
 
 RECIPE_VERSION = 1
 DEFAULT_BAND = "default"
-# check1 is stored as "check1"; legacy rows may still use kind "check".
-CONTENT_KINDS = ("learn", "example", "check1", "check2", "check3")
+# One pack = learn + three checks. Legacy rows may still use kind "example" or "check".
+CONTENT_KINDS = ("learn", "check1", "check2", "check3")
 CHECK_KINDS = ("check1", "check2", "check3")
 CHECK_TYPES = ("mc", "true_false", "cloze")
 LEGACY_CHECK_KIND = "check"
+LEGACY_EXAMPLE_KIND = "example"
 
 
 class KnowledgeBit(SQLModel, table=True):

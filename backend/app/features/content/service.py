@@ -189,7 +189,7 @@ def completed_pack_indexes(
     user_id: UUID,
     node_id: UUID,
 ) -> list[int]:
-    """Pack indexes where the user has recorded learn+example+check1–3."""
+    """Pack indexes where the user has recorded learn+check1–3."""
     from app.features.user_events.models import UserTopicEvent
 
     rows = list(

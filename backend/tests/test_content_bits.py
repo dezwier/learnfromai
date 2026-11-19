@@ -66,7 +66,7 @@ def test_content_expand_generates_five_bits(client, auth, session):
     pack = body["packs"][0]
     assert pack["pack_index"] == 1
     assert pack["incomplete"] is False
-    assert _kinds(pack) == {"learn", "example", "check1", "check2", "check3"}
+    assert _kinds(pack) == {"learn", "check1", "check2", "check3"}
     for kind in ("check1", "check2", "check3"):
         check = next(bit for bit in pack["bits"] if bit["kind"] == kind)
         assert check["body"]["type"] == "mc"
@@ -169,7 +169,7 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
     body = ready.json()
     assert body["incomplete"] is False
     pack = body["packs"][0]
-    assert _kinds(pack) == {"learn", "example", "check1", "check2", "check3"}
+    assert {"learn", "check1", "check2", "check3"} <= _kinds(pack)
     check1 = next(bit for bit in pack["bits"] if bit["kind"] == "check1")
     assert check1["body"]["question"] == "Which fits Gradient?"
 
@@ -235,7 +235,6 @@ def test_content_reports_completed_packs_for_user(client, auth, session):
         json={
             "events": [
                 {"node_id": str(node.id), "kind": "learn", "payload": {"pack_index": 1}},
-                {"node_id": str(node.id), "kind": "example", "payload": {"pack_index": 1}},
                 {
                     "node_id": str(node.id),
                     "kind": "check1",
@@ -285,7 +284,6 @@ def test_normalize_bits_typed_checks():
     normalized = normalize_bits(
         {
             "learn": {"title": "T", "markdown": "Body"},
-            "example": {"title": "E", "markdown": "Scene"},
             "check1": {
                 "type": "mc",
                 "question": "Q?",
@@ -308,6 +306,7 @@ def test_normalize_bits_typed_checks():
             },
         }
     )
+    assert normalized["learn"]["markdown"] == "Body"
     assert normalized["check1"]["type"] == "mc"
     assert normalized["check2"]["type"] == "true_false"
     assert normalized["check2"]["answer"] is True
@@ -320,7 +319,7 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
         "Softmax",
         "Normalize scores",
         ["Attention", "Logits"],
-        kinds=["learn", "example", "check1", "check2", "check3"],
+        kinds=["learn", "check1", "check2", "check3"],
         existing_packs=[
             {
                 "pack_index": 1,
@@ -331,13 +330,14 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
         ],
         pack_index=2,
     )
-    assert "existing packs" in prompt
+    assert "atomic learning pack" in prompt
     assert "What is Softmax?" in prompt
     assert "Attention" in prompt
     assert "true_false" in prompt
     assert "cloze" in prompt
     assert '"pack_index": 2' in prompt
-    assert "Do not open example with 'Imagine'" in prompt
-    assert "concrete learning takeaway" in prompt
-    assert "different concrete takeaway" in prompt
-    assert "test the pack's takeaway" in prompt
+    assert "Do not overlap other packs" in prompt
+    assert "Do not teach neighboring topics" in prompt
+    assert "Never mention neighbors, other packs" in prompt
+    assert "worth knowing" in prompt
+    assert "genuinely useful" in prompt

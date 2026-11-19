@@ -9,8 +9,8 @@ import '../models.dart';
 import 'learn_check_bits.dart';
 import 'learn_pack_chrome.dart';
 
-const _lessonKinds = ['learn', 'example', 'check1', 'check2', 'check3'];
-const _lessonLabels = ['Learn', 'Example', 'Check 1', 'Check 2', 'Check 3'];
+const _lessonKinds = ['learn', 'check1', 'check2', 'check3'];
+const _lessonLabels = ['Learn', 'Check 1', 'Check 2', 'Check 3'];
 const _checkKinds = {'check1', 'check2', 'check3'};
 
 Future<void> showLearnSheet(

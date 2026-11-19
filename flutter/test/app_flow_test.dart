@@ -573,11 +573,6 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Example'), findsWidgets);
-    expect(find.textContaining('Dinosaurs in practice'), findsWidgets);
-
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
     expect(find.text('Check 1'), findsWidgets);
     expect(find.textContaining('Which statement best fits'), findsWidgets);
     expect(find.widgetWithText(FilledButton, 'Continue'), findsOneWidget);
@@ -823,19 +818,9 @@ Map<String, dynamic> _contentReady() {
               'markdown': '**Dinosaurs** are extinct reptiles.',
             },
           },
-          {
-            'id': 'b2',
-            'kind': 'example',
-            'pack_index': 1,
-            'position': 1,
-            'body': {
-              'title': 'Dinosaurs in practice',
-              'markdown': 'Explain fossils to a friend.',
-            },
-          },
-          check('b3', 'check1', 2, 'Which statement best fits Dinosaurs?'),
-          check('b4', 'check2', 3, 'What is a useful next step when learning Dinosaurs?'),
-          check('b5', 'check3', 4, 'Which claim about Dinosaurs is weakest?'),
+          check('b3', 'check1', 1, 'Which statement best fits Dinosaurs?'),
+          check('b4', 'check2', 2, 'What is a useful next step when learning Dinosaurs?'),
+          check('b5', 'check3', 3, 'Which claim about Dinosaurs is weakest?'),
         ],
       },
     ],

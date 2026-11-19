@@ -1,4 +1,4 @@
-"""Worker: generate shared learn / example / check bits for one pack."""
+"""Worker: generate shared learn + check bits for one pack."""
 
 from __future__ import annotations
 

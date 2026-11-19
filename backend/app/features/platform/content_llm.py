@@ -26,7 +26,7 @@ from app.features.platform.openai_chat import openai_chat_body, set_openai_max_o
 
 logger = logging.getLogger(__name__)
 
-PROMPT_CONTENT = "content_bits_v3"
+PROMPT_CONTENT = "content_bits_v4"
 
 
 class ContentLLM(Protocol):
@@ -59,61 +59,61 @@ def build_content_prompt(
     if not required:
         required = list(CONTENT_KINDS)
     checks_needed = [k for k in required if k in CHECK_KINDS]
-    text_needed = [k for k in required if k in ("learn", "example")]
+    need_learn = "learn" in required
+
     parts = [
-        "Create one atomic learning pack for a single topic. Return JSON only with these keys: "
+        f"Write one atomic learning pack about {name}. "
+        "Return JSON only with keys: "
         + ", ".join(required)
-        + ". "
-        "Teach ONLY this topic. Neighbors are out of scope—mention them only as what this topic "
-        "is not; never explain how neighbors work. "
-        "Do not invent prerequisites. Keep language clear and standalone. "
-        "Each pack must deliver exactly one concrete learning takeaway the learner can state "
-        "in one sentence after finishing—not a vague overview or motivational fluff. "
-        f"This is pack_index {pack_index}. "
+        + ".\n\n"
+        "Pack shape:\n"
+        "- learn: one short, standalone learning bit — atomic, concrete, worth knowing\n"
+        "- three tests (check1–check3): genuinely useful checks of that same bit\n\n"
+        "Rules:\n"
+        "- Stay on this topic only.\n"
+        "- Do not teach neighboring topics.\n"
+        "- Do not overlap other packs already written for this topic.\n"
+        "- Never mention neighbors, other packs, or these rules in the learner-facing text.\n"
+        "- Learning bit must stand alone (no “as above”, no fluff, no generic intro).\n"
+        "- Tests must stand alone and be worth asking — precise, not trivia or paraphrases of each other.\n"
     ]
-    if existing_packs:
+    if need_learn:
         parts.append(
-            "Do not repeat takeaways already covered by existing packs on this topic: "
-            + json.dumps(existing_packs)
-            + ". Pick a different concrete takeaway within the same topic. "
-        )
-    if text_needed:
-        parts.append(
-            "learn and example are objects {title, markdown} with concise Markdown "
-            "(a few short paragraphs max). "
-            "learn: teach that one takeaway with a precise claim (what it is / how it works / "
-            "when it applies)—avoid generic intros like 'X is important' or 'X is a topic'. "
-            "example: one concrete instance of that takeaway—something specific that happened, "
-            "was built, observed, or used—not a restated definition. "
-            "Do not open example with 'Imagine', 'Picture', 'Suppose', or similar framing; "
-            "just state the example directly. "
+            "learn = {title, markdown}. A few short paragraphs of Markdown max. "
+            "Make it interesting: a sharp fact, mechanism, or distinction someone is glad they learned.\n"
         )
     if checks_needed:
         parts.append(
-            "Each of "
-            + ", ".join(checks_needed)
-            + " is a standalone check that does not require reading learn/example first, "
-            "but must test the pack's takeaway (not vague topic trivia). "
-            "Prefer checks that discriminate a correct precise claim from plausible near-misses. "
-            "Choose a type per check among mc, true_false, cloze (mix types when useful). "
-            "mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}. "
-            "true_false: {type:'true_false', statement, answer (boolean), explanation}. "
-            "cloze: {type:'cloze', prompt (include ___ for the blank), answer, aliases (optional string array), explanation}. "
-            "The three checks must probe different aspects of the same takeaway (not paraphrases). "
+            "Each check is one of:\n"
+            "- mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}\n"
+            "- true_false: {type:'true_false', statement, answer (boolean), explanation}\n"
+            "- cloze: {type:'cloze', prompt (with ___), answer, aliases (optional), explanation}\n"
+            "Mix types when useful. Wrong answers should be plausible near-misses.\n"
         )
         if existing_checks:
             parts.append(
-                "Existing checks in this pack to avoid duplicating: "
+                "Avoid duplicating these existing checks in this pack: "
                 + json.dumps(existing_checks)
-                + ". "
+                + "\n"
             )
-    parts.append("\n")
+    if existing_packs:
+        parts.append(
+            "Other packs on this topic (do not repeat): "
+            + json.dumps(existing_packs)
+            + "\n"
+        )
+    if neighbor_titles:
+        parts.append(
+            "Neighbor topics (do not teach): "
+            + json.dumps(neighbor_titles[:12])
+            + "\n"
+        )
     parts.append(
-        json.dumps(
+        "\n"
+        + json.dumps(
             {
                 "topic": name,
                 "description": description or "",
-                "neighbors": neighbor_titles[:12],
                 "pack_index": pack_index,
                 "required_keys": required,
             }
@@ -146,19 +146,9 @@ class FakeContentLLM:
             payload["learn"] = {
                 "title": f"What is {topic}?" if pack_index == 1 else f"{topic}: {facet}",
                 "markdown": (
-                    f"**Takeaway:** {topic} has one clear job you can state in a sentence "
-                    f"({facet}). "
-                    f"{desc or f'It sits near {neighbors}, but those are separate topics.'} "
-                    "Learn that job first; details come later."
-                ),
-            }
-        if "example" in required:
-            payload["example"] = {
-                "title": f"{topic} in practice",
-                "markdown": (
-                    f"A field guide uses **{topic}** ({facet}) when labeling a specimen: "
-                    f"the entry starts from the plain meaning"
-                    f"{f' ({desc})' if desc else ''}, then names one concrete place it shows up."
+                    f"**{topic}** ({facet}): "
+                    f"{desc or 'One precise idea you can use right away.'} "
+                    f"Hold onto that single idea before branching toward {neighbors}."
                 ),
             }
         if pack_index == 1:
@@ -556,20 +546,18 @@ def _normalize_check(raw: object, *, kind: str) -> dict:
 
 
 def normalize_bits(raw: dict, *, required_kinds: list[str] | None = None) -> dict:
-    """Validate and normalize requested learn / example / check bodies."""
+    """Validate and normalize requested learn / check bodies."""
     if not isinstance(raw, dict):
         raise ValueError("Content JSON root must be an object")
     required = [k for k in (required_kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
     out: dict[str, dict] = {}
-    for kind in ("learn", "example"):
-        if kind not in required:
-            continue
-        row = raw.get(kind) if isinstance(raw.get(kind), dict) else {}
+    if "learn" in required:
+        row = raw.get("learn") if isinstance(raw.get("learn"), dict) else {}
         title = str(row.get("title") or "").strip() or None
         markdown = str(row.get("markdown") or row.get("text") or "").strip()
         if not markdown:
-            raise ValueError(f"Content bit {kind!r} is missing markdown")
-        out[kind] = {"title": title, "markdown": markdown}
+            raise ValueError("Content bit 'learn' is missing markdown")
+        out["learn"] = {"title": title, "markdown": markdown}
     # Accept legacy "check" as check1 when generating check1.
     if "check1" in required and "check1" not in raw and isinstance(raw.get("check"), dict):
         raw = {**raw, "check1": raw["check"]}
