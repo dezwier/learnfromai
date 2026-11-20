@@ -11,6 +11,8 @@ from app.core.time import utcnow
 from app.features.content.models import DEFAULT_BAND, RECIPE_VERSION
 from app.features.knowledge_graph.preferences import min_per_bucket
 from app.features.platform.jobs import enqueue
+from app.features.platform.models import GenerationJob
+from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.ranking.affinity import weights_snapshot
 from app.features.ranking.job_scores import learn_job_scores, neighbor_job_scores
 from app.features.ranking.models import CronRun
@@ -80,17 +82,43 @@ def latest_cron_run(session: Session) -> CronRun | None:
     return session.exec(select(CronRun).order_by(col(CronRun.started_at).desc())).first()
 
 
-def cron_run_payload(run: CronRun) -> dict:
+def cron_run_payload(session: Session, run: CronRun) -> dict:
     return {
         "id": str(run.id),
         "status": run.status,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "neighbor_jobs": run.neighbor_jobs or [],
+        "neighbor_jobs": _enrich_neighbor_jobs(session, run.neighbor_jobs or []),
         "learn_jobs": run.learn_jobs or [],
         "weights_snapshot": run.weights_snapshot or {},
         "error": run.error,
     }
+
+
+def _enrich_neighbor_jobs(session: Session, rows: list) -> list[dict]:
+    """Attach neighbors_added from finished expand jobs when available."""
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        job_id = parse_uuid(item.get("job_id"))
+        if job_id is None:
+            out.append(item)
+            continue
+        job = session.get(GenerationJob, job_id)
+        if job is None:
+            out.append(item)
+            continue
+        item["job_state"] = job.state
+        result = job.result if isinstance(job.result, dict) else {}
+        if "neighbors_added" in result:
+            try:
+                item["neighbors_added"] = int(result["neighbors_added"])
+            except (TypeError, ValueError):
+                pass
+        out.append(item)
+    return out
 
 
 def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):

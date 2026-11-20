@@ -216,7 +216,7 @@ def get_latest_cron_run(
     run = latest_cron_run(session)
     if run is None:
         return {"run": None}
-    return {"run": cron_run_payload(run)}
+    return {"run": cron_run_payload(session, run)}
 
 
 @router.get("/me/preferences")

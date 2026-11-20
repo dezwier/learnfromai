@@ -105,7 +105,7 @@ def test_cron_enqueues_and_persists(session, user):
     assert "expand_neighborhood" in types
     assert "expand_content" in types
 
-    payload = cron_run_payload(run)
+    payload = cron_run_payload(session, run)
     assert payload["status"] == "succeeded"
     assert payload["neighbor_jobs"]
 

@@ -130,16 +130,25 @@ class _CronRunSummary {
           _CronJobLine(
             name: row['name']?.toString() ?? 'Topic',
             packIndex: pack ? (row['pack_index'] as num?)?.toInt() : null,
+            neighborsAdded: pack ? null : (row['neighbors_added'] as num?)?.toInt(),
+            jobState: row['job_state']?.toString(),
           ),
     ];
   }
 }
 
 class _CronJobLine {
-  const _CronJobLine({required this.name, this.packIndex});
+  const _CronJobLine({
+    required this.name,
+    this.packIndex,
+    this.neighborsAdded,
+    this.jobState,
+  });
 
   final String name;
   final int? packIndex;
+  final int? neighborsAdded;
+  final String? jobState;
 }
 
 class _CronRunBody extends StatelessWidget {
@@ -164,7 +173,10 @@ class _CronRunBody extends StatelessWidget {
           Text('None', style: SettingsFormStyles.finePrintStyle(context))
         else
           for (final job in run.neighborJobs.take(8))
-            Text('· ${job.name}', style: theme.textTheme.bodySmall),
+            Text(
+              '· ${job.name}${_expandedSuffix(job)}',
+              style: theme.textTheme.bodySmall,
+            ),
         const SizedBox(height: 8),
         Text('Packs', style: theme.textTheme.labelLarge),
         if (run.learnJobs.isEmpty)
@@ -180,4 +192,15 @@ class _CronRunBody extends StatelessWidget {
   }
 
   static String _two(int n) => n.toString().padLeft(2, '0');
+
+  static String _expandedSuffix(_CronJobLine job) {
+    if (job.neighborsAdded != null) {
+      final n = job.neighborsAdded!;
+      return n == 1 ? ' · wrote 1' : ' · wrote $n';
+    }
+    final state = job.jobState;
+    if (state == 'queued' || state == 'running') return ' · pending';
+    if (state == 'failed') return ' · failed';
+    return '';
+  }
 }

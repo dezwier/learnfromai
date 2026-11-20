@@ -117,14 +117,24 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     session.commit()
 
     # Under-budget check (scenarios 4 / 5 complete → Done).
+    have_before = relation_counts(session, focus.id)
+    neighbors_before = sum(have_before.get(bucket, 0) for bucket in BUCKET_RELATION)
+
     if is_complete(session, focus.id, counts):
         set_progress(session, job, stage="done", message="Neighborhood already complete", fraction=1.0)
         request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
         session.commit()
-        return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": True}
+        return {
+            "focus_id": str(focus.id),
+            "request_id": str(request.id),
+            "skipped": True,
+            "neighbors_before": neighbors_before,
+            "neighbors_added": 0,
+            "neighbor_count": neighbors_before,
+        }
 
-    have = relation_counts(session, focus.id)
-    existing_total = sum(have.get(bucket, 0) for bucket in BUCKET_RELATION)
+    have = have_before
+    existing_total = neighbors_before
     need = max(0, total - existing_total)
     exclude_titles = _direct_neighbor_titles(session, focus.id)
     prefer_buckets = [
@@ -181,7 +191,17 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     request = _persist_request(session, user_id=user_id, focus=focus, counts=counts, job_id=job.id)
     set_progress(session, job, stage="done", message="Neighborhood ready", fraction=1.0)
     session.commit()
-    return {"focus_id": str(focus.id), "request_id": str(request.id), "skipped": False}
+    neighbors_added = sum(len(ids) for ids in linked.values())
+    have_after = relation_counts(session, focus.id)
+    neighbors_after = sum(have_after.get(bucket, 0) for bucket in BUCKET_RELATION)
+    return {
+        "focus_id": str(focus.id),
+        "request_id": str(request.id),
+        "skipped": False,
+        "neighbors_before": neighbors_before,
+        "neighbors_added": neighbors_added,
+        "neighbor_count": neighbors_after,
+    }
 
 
 def _direct_neighbor_titles(session: Session, focus_id: UUID) -> list[str]:
