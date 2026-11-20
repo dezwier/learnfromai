@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     )
     # Fraction of each direct neighbor's focus/open engagement that spills into this tile.
     affinity_w_neighbor: float = Field(
-        default=0.1,
+        default=0.5,
         validation_alias=_env("affinity_w_neighbor", "AFFINITY_W_NEIGHBOR"),
     )
     affinity_half_life_days: float = Field(
