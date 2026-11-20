@@ -459,6 +459,35 @@ void main() {
     expect(graph.jobForNode('2')?.jobId, 'job-content-2');
   });
 
+  test('enqueueContentForTrack requests new_pack when packs are complete', () async {
+    Map<String, dynamic>? lastBody;
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        lastBody = body is Map ? Map<String, dynamic>.from(body) : null;
+        return {
+          'status': 'queued',
+          'job_id': 'job-content-3',
+          'focus_node_id': '2',
+          'pack_index': 2,
+          'progress': {'message': 'Writing learning pack 2…'},
+        };
+      },
+      loader: (path) async {
+        if (path == '/knowledge/nodes/2/content') return _contentReady();
+        return _compact();
+      },
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          },
+    );
+    await graph.enqueueContentForTrack('2', title: 'Dinosaurs');
+    expect(lastBody?['expand'], isTrue);
+    expect(lastBody?['new_pack'], isTrue);
+    expect(graph.jobForNode('2', type: 'expand_content')?.jobId, 'job-content-3');
+  });
+
   test('enqueueContent while image job active still posts', () async {
     final posts = <String>[];
     final graph = GraphController(
@@ -819,8 +848,8 @@ void main() {
     await tester.tap(find.textContaining('Lizard-hipped'));
     await tester.pumpAndSettle();
     expect(graph.focusId, '3');
-    expect(find.byType(LearningTrackSheet), findsOneWidget);
-    // openExisting uses GET only; search may post learn `open` telemetry, not a focus create.
+    // Search focuses the hit on the canvas only — does not open the learning track.
+    expect(find.byType(LearningTrackSheet), findsNothing);
     final focusCreates = posts.where((body) {
       if (body is! Map) return false;
       return body.containsKey('topic') || body['expand'] == true;

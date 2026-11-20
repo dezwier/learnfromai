@@ -403,6 +403,22 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Learning-track generate: fill an incomplete pack, else create the next one.
+  ///
+  /// Plain [enqueueContent] returns 200 when packs are already content-complete,
+  /// which loops forever with learning-next `generate` after the user finishes them.
+  Future<TopicContent?> enqueueContentForTrack(String id, {String? title}) async {
+    if (isJobTypeActive(id, 'expand_content')) {
+      _ensurePoller();
+      return fetchContent(id);
+    }
+    final existing = await fetchContent(id);
+    final packs = existing?.packs ?? const <TopicPack>[];
+    final hasIncomplete = packs.any((pack) => pack.incomplete);
+    final newPack = packs.isNotEmpty && !hasIncomplete;
+    return enqueueContent(id, title: title, newPack: newPack);
+  }
+
   /// Fire-and-forget learn/example/check interaction (never blocks UI).
   Future<void> trackEvent({
     required String nodeId,

@@ -51,7 +51,7 @@ class LearningTrackSupport {
 
     // No unlearned pack left — start generating while the user finishes this card.
     final title = next.title.isEmpty ? 'Topic' : next.title;
-    await _graph.enqueueContent(next.nodeId, title: title);
+    await _graph.enqueueContentForTrack(next.nodeId, title: title);
     if (gen != _prefetchGen) return;
 
     final ready = await _awaitGeneratedPack(

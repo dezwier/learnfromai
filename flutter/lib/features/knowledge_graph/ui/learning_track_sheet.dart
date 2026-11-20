@@ -169,15 +169,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _error = null;
     });
     unawaited(_setCardImage(LearningNext(status: 'generate', nodeId: nodeId, title: title)));
-    final queued = await graph.enqueueContent(nodeId, title: title);
+    final queued = await graph.enqueueContentForTrack(nodeId, title: title);
     if (!mounted) return;
-    if (queued == null && graph.jobForNode(nodeId, type: 'expand_content') == null) {
-      setState(() {
-        _loading = false;
-        _error = graph.error ?? 'Could not start content generation';
-      });
-      return;
-    }
     final job = graph.jobForNode(nodeId, type: 'expand_content');
     if (job != null) {
       _watchedJobId = job.jobId;
@@ -185,8 +178,26 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       setState(() {});
       return;
     }
-    // Content returned inline — pick next again.
-    await _loadNext(nodeId, titleHint: title);
+    if (queued == null) {
+      setState(() {
+        _generateNodeId = null;
+        _loading = false;
+        _error = graph.error ?? 'Could not start content generation';
+      });
+      return;
+    }
+    // 200 with existing content — try once more; do not loop generate forever.
+    final next = await graph.fetchLearningNext(nodeId);
+    if (!mounted) return;
+    if (next != null && next.isReady) {
+      _applyReady(graph, next);
+      return;
+    }
+    setState(() {
+      _generateNodeId = null;
+      _loading = false;
+      _error = 'No new learning pack could be started for $title';
+    });
   }
 
   void _applyReady(GraphController graph, LearningNext next, {bool trackOpen = false}) {
@@ -249,9 +260,21 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       setState(() {});
       return;
     }
-    if (_watchedJobId == null && graph.lastCompletedNodeId != genId) return;
+    final watched = _watchedJobId;
+    final completedHere =
+        graph.lastCompletedNodeId == genId && graph.lastCompletedJobType == 'expand_content';
+    if (watched == null && !completedHere) return;
     _stopListening();
     _watchedJobId = null;
+    // Failed jobs clear the tracker without setting lastCompleted*.
+    if (!completedHere) {
+      setState(() {
+        _generateNodeId = null;
+        _loading = false;
+        _error = graph.error ?? 'Content generation failed';
+      });
+      return;
+    }
     unawaited(_loadNext(genId, titleHint: _topicTitle));
   }
 

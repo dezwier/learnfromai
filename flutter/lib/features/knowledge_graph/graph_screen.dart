@@ -586,7 +586,7 @@ class _GraphScreenState extends State<GraphScreen>
     return null;
   }
 
-  /// Focus/search: start the organic learning track seeded on this topic.
+  /// Focus-tile tap: start the organic learning track seeded on this topic.
   Future<void> _openFocusPrimary(PlacedNode node, {required String source}) async {
     await _openLearningTrack(node, source: source);
   }
@@ -982,10 +982,6 @@ class _GraphScreenState extends State<GraphScreen>
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _syncHighlightedFromLayout(graph.focusId);
-    final node = _highlighted;
-    if (node != null) {
-      unawaited(_openFocusPrimary(node, source: 'search'));
-    }
   }
 
   Future<void> _pickSuggestion(GraphController graph, TopicChoice choice) async {
@@ -996,10 +992,6 @@ class _GraphScreenState extends State<GraphScreen>
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _syncHighlightedFromLayout(graph.focusId);
-    final node = _highlighted;
-    if (node != null) {
-      unawaited(_openFocusPrimary(node, source: 'search'));
-    }
   }
 
   void _openProfile() {
