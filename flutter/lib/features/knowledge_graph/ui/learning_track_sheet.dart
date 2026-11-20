@@ -322,7 +322,17 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _cardImageUrl = null;
     });
 
-    // Prefer the card prefetched while the user was on the previous one.
+    // If prefetch already kicked off generation, show that while we wait.
+    final peek = support.prefetched;
+    if (peek != null && peek.needsGenerate) {
+      setState(() {
+        _generateNodeId = peek.nodeId;
+        _nodeId = peek.nodeId;
+        if (peek.title.trim().isNotEmpty) _topicTitle = peek.title;
+      });
+    }
+
+    // Prefer the card prefetched (and possibly generated) while on the previous one.
     await support.awaitPrefetch();
     if (!mounted) return;
     final prefetched = support.prefetched;

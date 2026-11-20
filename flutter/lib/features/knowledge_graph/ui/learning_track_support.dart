@@ -27,20 +27,78 @@ class LearningTrackSupport {
     if (seedId.isEmpty || packIndex == null || packIndex < 1) return;
     final gen = ++_prefetchGen;
     prefetched = null;
-    prefetchInFlight = _graph
-        .fetchLearningNext(
+    prefetchInFlight = _prefetchBody(
+      gen: gen,
+      seedId: seedId,
+      excludePackIndex: packIndex,
+    );
+  }
+
+  Future<void> _prefetchBody({
+    required int gen,
+    required String seedId,
+    required int excludePackIndex,
+  }) async {
+    final next = await _graph.fetchLearningNext(
+      seedId,
+      excludeNodeId: seedId,
+      excludePackIndex: excludePackIndex,
+    );
+    if (gen != _prefetchGen) return;
+    prefetched = next;
+    _warmImage(next);
+    if (next == null || !next.needsGenerate) return;
+
+    // No unlearned pack left — start generating while the user finishes this card.
+    final title = next.title.isEmpty ? 'Topic' : next.title;
+    await _graph.enqueueContent(next.nodeId, title: title);
+    if (gen != _prefetchGen) return;
+
+    final ready = await _awaitGeneratedPack(
+      gen: gen,
+      nodeId: next.nodeId,
+      seedId: seedId,
+      excludePackIndex: excludePackIndex,
+    );
+    if (gen != _prefetchGen || ready == null) return;
+    prefetched = ready;
+    _warmImage(ready);
+  }
+
+  void _warmImage(LearningNext? next) {
+    final url = next?.bestImageUrl;
+    if (url != null) {
+      unawaited(_graph.fetchImageBytes(url, notify: false));
+    }
+  }
+
+  /// Wait for the content job, then re-fetch the next pack (excluding the on-screen one).
+  Future<LearningNext?> _awaitGeneratedPack({
+    required int gen,
+    required String nodeId,
+    required String seedId,
+    required int excludePackIndex,
+  }) async {
+    var sawJob = _graph.isJobTypeActive(nodeId, 'expand_content');
+    for (var i = 0; i < 180; i++) {
+      if (gen != _prefetchGen) return null;
+      final active = _graph.isJobTypeActive(nodeId, 'expand_content');
+      if (active) {
+        sawJob = true;
+      } else {
+        final again = await _graph.fetchLearningNext(
           seedId,
           excludeNodeId: seedId,
-          excludePackIndex: packIndex,
-        )
-        .then((next) {
-      if (gen != _prefetchGen) return;
-      prefetched = next;
-      final url = next?.bestImageUrl;
-      if (url != null) {
-        unawaited(_graph.fetchImageBytes(url, notify: false));
+          excludePackIndex: excludePackIndex,
+        );
+        if (gen != _prefetchGen) return null;
+        if (again != null && again.isReady) return again;
+        // Finished a job (or never needed one) but still no pack — stop.
+        if (sawJob || i > 0) return again;
       }
-    });
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return prefetched;
   }
 
   Future<void> awaitPrefetch() async {
