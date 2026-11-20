@@ -143,26 +143,40 @@ class _OverlayPanelState extends State<OverlayPanel>
         const Positioned.fill(
           child: ColoredBox(color: Color(0x00000000)),
         ),
+        // Soft scrim only — avoid Material elevation, which casts a harsh
+        // moving shadow/glare against the graph while the panel slides.
         if (progress > 0)
           Positioned.fill(
             child: IgnorePointer(
               child: ColoredBox(
-                color: Colors.black.withValues(alpha: 0.18 * (1 - progress)),
+                color: Colors.black.withValues(alpha: 0.12 * (1 - progress)),
               ),
             ),
           ),
         // Panel slides; gesture layer stays fixed on screen so the drag never drops.
+        // Clip so rotated/scaled children (testing backdrop) can't bleed past the edge.
         Transform.translate(
           offset: Offset(_dragPx, 0),
           child: Material(
             color: scheme.surface,
-            elevation: progress > 0 ? 12 : 0,
-            shadowColor: Colors.black.withValues(alpha: 0.4),
+            elevation: 0,
+            clipBehavior: Clip.hardEdge,
             child: Stack(
               fit: StackFit.expand,
+              clipBehavior: Clip.hardEdge,
               children: [
                 Positioned.fill(child: widget.child),
                 if (widget.bottom != null) widget.bottom!,
+                if (progress > 0)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 0.08 * (1 - progress)),
+                    ),
+                  ),
                 Positioned(
                   top: top + OverlayPanel.closeInset,
                   right: OverlayPanel.closeInset + 2,

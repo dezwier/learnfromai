@@ -19,6 +19,8 @@ class TurnableYAxisCard extends StatefulWidget {
     this.dismissKeyboardOnInteraction = false,
     this.prelayoutFacesForHeight = true,
     this.onPhysicalBackFaceVisibleChanged,
+    this.initialBackFaceVisible = false,
+    this.interactionEnabled = true,
   });
 
   final Widget front;
@@ -34,6 +36,12 @@ class TurnableYAxisCard extends StatefulWidget {
   final bool dismissKeyboardOnInteraction;
   final bool prelayoutFacesForHeight;
   final ValueChanged<bool>? onPhysicalBackFaceVisibleChanged;
+
+  /// Start showing the back face (π radians) instead of the front.
+  final bool initialBackFaceVisible;
+
+  /// When false, tap/drag flips are ignored (child interactions still work).
+  final bool interactionEnabled;
 
   @override
   State<TurnableYAxisCard> createState() => _TurnableYAxisCardState();
@@ -91,32 +99,39 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
     }
   }
 
+  double get _restAngle =>
+      widget.initialBackFaceVisible ? _halfTurnRadians : 0;
+
   @override
   void initState() {
     super.initState();
     _flipController = AnimationController.unbounded(
       vsync: this,
-      value: 0,
+      value: _restAngle,
       duration: const Duration(milliseconds: 260),
     )..addListener(() {
         if (!mounted) return;
         _reportPhysicalBackFaceVisibleEdges();
         setState(() {});
       });
+    _lastTapTargetAngle = _restAngle;
+    _reportedPhysicalBackFaceVisible = widget.initialBackFaceVisible;
   }
 
   @override
   void didUpdateWidget(covariant TurnableYAxisCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.resetIdentity != oldWidget.resetIdentity) {
-      _flipController.value = 0;
-      _lastTapTargetAngle = 0;
-      _reportedPhysicalBackFaceVisible = false;
+    if (widget.resetIdentity != oldWidget.resetIdentity ||
+        widget.initialBackFaceVisible != oldWidget.initialBackFaceVisible) {
+      _flipController.value = _restAngle;
+      _lastTapTargetAngle = _restAngle;
+      _reportedPhysicalBackFaceVisible = widget.initialBackFaceVisible;
       final cb = widget.onPhysicalBackFaceVisibleChanged;
       if (cb != null) {
+        final arg = widget.initialBackFaceVisible;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          cb(false);
+          cb(arg);
         });
       }
     }
@@ -142,6 +157,7 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
   }
 
   void _onHorizontalDragStart(DragStartDetails details) {
+    if (!widget.interactionEnabled) return;
     _flipController.stop();
     _lastTapTargetAngle =
         (_rotationAngle / _halfTurnRadians).roundToDouble() * _halfTurnRadians;
@@ -149,6 +165,7 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (!widget.interactionEnabled) return;
     final width = _cardWidth <= 0 ? 1 : _cardWidth;
     final dx = details.primaryDelta ?? 0;
     if (dx == 0) return;
@@ -157,6 +174,10 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
+    if (!widget.interactionEnabled) {
+      _isDraggingHorizontally = false;
+      return;
+    }
     _isDraggingHorizontally = false;
     final width = _cardWidth <= 0 ? 1 : _cardWidth;
     final vx = details.velocity.pixelsPerSecond.dx;
@@ -176,6 +197,7 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
 
   void _onHorizontalDragCancel() {
     _isDraggingHorizontally = false;
+    if (!widget.interactionEnabled) return;
     final target =
         (_rotationAngle / _halfTurnRadians).roundToDouble() * _halfTurnRadians;
     _lastTapTargetAngle = target;
@@ -194,6 +216,7 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
   }
 
   void _flipByOneFace({required bool turnLeft}) {
+    if (!widget.interactionEnabled) return;
     final baseAngle =
         _flipController.isAnimating ? _lastTapTargetAngle : _rotationAngle;
     final snappedBase =
@@ -302,19 +325,21 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
       },
     );
 
-    final wrappedCard = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: (details) {
-        final tapX = details.localPosition.dx;
-        final isLeftHalf = tapX <= (_cardWidth / 2);
-        _flipByOneFace(turnLeft: isLeftHalf);
-      },
-      onHorizontalDragStart: _onHorizontalDragStart,
-      onHorizontalDragUpdate: _onHorizontalDragUpdate,
-      onHorizontalDragEnd: _onHorizontalDragEnd,
-      onHorizontalDragCancel: _onHorizontalDragCancel,
-      child: cardContent,
-    );
+    final wrappedCard = widget.interactionEnabled
+        ? GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (details) {
+              final tapX = details.localPosition.dx;
+              final isLeftHalf = tapX <= (_cardWidth / 2);
+              _flipByOneFace(turnLeft: isLeftHalf);
+            },
+            onHorizontalDragStart: _onHorizontalDragStart,
+            onHorizontalDragUpdate: _onHorizontalDragUpdate,
+            onHorizontalDragEnd: _onHorizontalDragEnd,
+            onHorizontalDragCancel: _onHorizontalDragCancel,
+            child: cardContent,
+          )
+        : cardContent;
 
     return Padding(
       padding: widget.outerPadding,

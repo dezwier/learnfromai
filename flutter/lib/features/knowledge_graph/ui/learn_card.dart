@@ -40,6 +40,7 @@ class LearnFlipCard extends StatefulWidget {
     this.cachedBytes,
     this.imageLoading = false,
     this.completed = false,
+    this.startOnCheck = false,
   });
 
   final LearnDeckEntry entry;
@@ -47,6 +48,9 @@ class LearnFlipCard extends StatefulWidget {
   final Uint8List? cachedBytes;
   final bool imageLoading;
   final bool completed;
+
+  /// Testing track: open on the quiz face; flip to learn only after answering.
+  final bool startOnCheck;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
   final VoidCallback onShown;
   final void Function({
@@ -243,6 +247,8 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                 dismissKeyboardOnInteraction: true,
                 prelayoutFacesForHeight: false,
                 fixedFaceHeight: cardH,
+                initialBackFaceVisible: widget.startOnCheck,
+                interactionEnabled: !widget.startOnCheck || _revealed,
                 front: _LearnCardFace(
                   imageUrl: widget.imageUrl,
                   cachedBytes: widget.cachedBytes,

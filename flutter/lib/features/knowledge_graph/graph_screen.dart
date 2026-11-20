@@ -44,6 +44,7 @@ class _GraphScreenState extends State<GraphScreen>
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
+  var _testingOpen = false;
   var _learnOpen = false;
   var _jobsPanelOpen = false;
   var _imageUploading = false;
@@ -611,18 +612,18 @@ class _GraphScreenState extends State<GraphScreen>
     }
   }
 
-  Future<void> _openTestingTrack() async {
-    if (!_learnOpen || _jobsPanelOpen) {
-      setState(() {
-        _learnOpen = true;
-        _jobsPanelOpen = false;
-      });
-    }
-    try {
-      await showTestingTrack(context);
-    } finally {
-      if (mounted && _learnOpen) setState(() => _learnOpen = false);
-    }
+  void _openTestingTrack() {
+    _dismissSearch();
+    setState(() {
+      _testingOpen = true;
+      _profileOpen = false;
+      _jobsPanelOpen = false;
+    });
+  }
+
+  void _closeTestingTrack() {
+    if (!_testingOpen) return;
+    setState(() => _testingOpen = false);
   }
 
   /// Multi-pack review deck for one topic (action drawer → Show atomic learning).
@@ -1011,7 +1012,10 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _openProfile() {
     _dismissSearch();
-    setState(() => _profileOpen = true);
+    setState(() {
+      _profileOpen = true;
+      _testingOpen = false;
+    });
   }
 
   void _closeProfile() {
@@ -1052,7 +1056,7 @@ class _GraphScreenState extends State<GraphScreen>
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
     final highlight = _highlighted;
-    final overlayOpen = _profileOpen || _learnOpen;
+    final overlayOpen = _profileOpen || _testingOpen || _learnOpen;
     final openingRelated =
         _openingRelatedId != null && _openingRelatedId == highlight?.id;
     final canGoToHighlight = !_searchOpen &&
@@ -1061,7 +1065,7 @@ class _GraphScreenState extends State<GraphScreen>
         highlight.id != graph.focusId &&
         !openingRelated;
     // Keep chrome mounted while learn cards are open so HUD can fade out/in.
-    final showChrome = !_searchOpen && !_profileOpen;
+    final showChrome = !_searchOpen && !_profileOpen && !_testingOpen;
     final chromeOpaque = showChrome && !_learnOpen;
     final liveTrail = graph.focusTrail;
     // Hold the previous trail until morph begins (avoids a pop on the fetch frame).
@@ -1288,7 +1292,7 @@ class _GraphScreenState extends State<GraphScreen>
                         focusElevation: 2,
                         hoverElevation: 2,
                         highlightElevation: 2,
-                        onPressed: () => unawaited(_openTestingTrack()),
+                        onPressed: _openTestingTrack,
                         child: const Icon(Icons.style_outlined, size: 20),
                       ),
                       const SizedBox(height: 6),
@@ -1352,6 +1356,10 @@ class _GraphScreenState extends State<GraphScreen>
                 onClose: _closeProfile,
                 onOpenTopic: (id) => unawaited(_openTopicFromProfile(id)),
               ),
+            ),
+          if (_testingOpen)
+            Positioned.fill(
+              child: TestingTrackSheet(onClose: _closeTestingTrack),
             ),
         ],
       ),
