@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     openai_image_size: str = "1024x1024"
     cors_origins: str = "http://localhost:8080"
     sentry_dsn: str = ""
-    llm_daily_tokens_user_limit: int = 200_000
+    llm_daily_tokens_user_limit: int = 1_000_000
     # Hard global daily cap from recorded LLM usage × published rates (≈€3 ≈ $3).
     llm_daily_spend_eur_limit: float = 3.0
     # USD per EUR for the cap (1.0 ≈ treat €1 as $1; raise to stop earlier).
