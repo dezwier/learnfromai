@@ -76,8 +76,8 @@ class Settings(BaseSettings):
     rank_w_new: float = 2.0
     rank_half_life_days: float = 14.0
     # Heavier penalties: prefer tiles with few neighbors / few packs.
-    rank_w_neighbor_penalty: float = 1.0
-    rank_w_pack_penalty: float = 2.0
+    rank_w_neighbor_penalty: float = 3.0
+    rank_w_pack_penalty: float = 4.0
     # Learning track: P(stay on seed topic when it still has unlearned packs).
     learn_track_exploit_p: float = 0.7
     cron_neighbor_jobs_per_day: int = 5
