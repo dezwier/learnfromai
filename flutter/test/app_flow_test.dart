@@ -7,6 +7,8 @@ import 'package:adaptive_mastery/features/auth/auth_controller.dart';
 import 'package:adaptive_mastery/features/auth/auth_gateway.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/graph_controller.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/layout/graph_layout.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/ui/learn_sheet.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/ui/turnable_y_axis_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -86,11 +88,11 @@ void main() {
     expect(find.text('Ada'), findsOneWidget);
     expect(find.text('0 / 100 XP'), findsOneWidget);
 
-    // Focus tile opens a fullscreen topic overlay (no bottom drawer).
+    // Focus tile opens learning cards directly (no title/close chrome).
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Close'), findsOneWidget);
-    expect(find.byTooltip('Learn'), findsOneWidget);
+    expect(find.byType(LearnSheet), findsOneWidget);
+    expect(find.byTooltip('Close'), findsNothing);
   });
 
   testWidgets('profile hud opens overlay with settings and logout', (tester) async {
@@ -121,12 +123,15 @@ void main() {
     expect(find.text('Neighborhood size'), findsOneWidget);
   });
 
-  testWidgets('closing profile then opening focus shows topic not profile', (tester) async {
+  testWidgets('closing profile then opening focus shows learn cards not profile', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
       loader: (path) async {
         if (path.startsWith('/me/topic-affinity')) {
           return {'nodes': [], 'clusters': [], 'edges': []};
+        }
+        if (path == '/knowledge/nodes/2/content') {
+          return _contentReady();
         }
         return _compact();
       },
@@ -144,7 +149,8 @@ void main() {
 
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Learn'), findsOneWidget);
+    expect(find.byType(LearnSheet), findsOneWidget);
+    expect(find.textContaining('What is Dinosaurs'), findsWidgets);
     expect(find.text('Settings'), findsNothing);
     expect(find.text('Learning about'), findsNothing);
   });
@@ -452,16 +458,19 @@ void main() {
     expect(focus['image_url'], '/knowledge/nodes/2/image/file');
   });
 
-  testWidgets('topic screen shows Add image button', (tester) async {
+  testWidgets('long-press opens image action from topic sheet', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => {},
       loader: (path) async => _compact(),
     )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    await tester.longPress(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Add image'), findsOneWidget);
+    expect(find.text('Image'), findsOneWidget);
+    await tester.tap(find.text('Image'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Generate with AI'), findsOneWidget);
     graph.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -551,46 +560,50 @@ void main() {
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
 
-    // Tap focus tile → topic overlay, then Learn lesson cycle.
+    // Tap focus tile → learning flip cards directly.
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Learn'), findsWidgets);
-    await tester.tap(find.byTooltip('Learn').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.text('Learn'), findsWidgets);
+    expect(find.byType(LearnSheet), findsOneWidget);
     expect(find.byType(PulsePlaceholder), findsWidgets);
-    expect(find.byTooltip('Close'), findsWidgets);
 
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
-    expect(find.textContaining('1 learning'), findsWidgets);
-    expect(find.textContaining('1 · What is Dinosaurs'), findsWidgets);
-    expect(find.text('Generate another'), findsNothing);
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
-    expect(find.textContaining('Which statement best fits'), findsNothing);
+    expect(find.textContaining('extinct reptiles'), findsWidgets);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
-    expect(find.text('Check 1'), findsWidgets);
-    expect(find.textContaining('Which statement best fits'), findsWidgets);
-    expect(find.widgetWithText(FilledButton, 'Continue'), findsOneWidget);
+    // Flip the card to reveal the randomly chosen quiz on the back.
+    await tester.tap(find.byType(TurnableYAxisCard));
+    await tester.pump(); // start spring
+    await tester.pump(const Duration(milliseconds: 400));
+    final quizVisible = find.textContaining('Which statement best fits').evaluate().isNotEmpty ||
+        find.textContaining('useful next step').evaluate().isNotEmpty ||
+        find.textContaining('claim about Dinosaurs is weakest').evaluate().isNotEmpty;
+    expect(quizVisible, isTrue);
+    expect(find.textContaining('Dinosaurs are a learning topic'), findsWidgets);
+  });
 
-    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+  testWidgets('long-press focus tile shows topic action sheet', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => _compact(),
+      loader: (path) async => _compact(),
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
-    expect(find.text('Check 2'), findsWidgets);
-    expect(find.textContaining('useful next step'), findsWidgets);
 
-    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+    await tester.longPress(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    expect(find.text('Image'), findsOneWidget);
+    expect(find.text('Edit'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+    expect(find.text('Show relationships'), findsOneWidget);
+    expect(find.text('Generate new learning pack'), findsOneWidget);
+
+    await tester.tap(find.text('Show relationships'));
     await tester.pumpAndSettle();
-    expect(find.text('Check 3'), findsWidgets);
-    expect(find.textContaining('claim about Dinosaurs is weakest'), findsWidgets);
-    expect(find.widgetWithText(FilledButton, 'Done'), findsOneWidget);
+    expect(find.text('Relationships'), findsOneWidget);
+    expect(find.textContaining('Saurischia'), findsWidgets);
   });
 
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
@@ -664,7 +677,12 @@ void main() {
     await tester.tap(find.textContaining('Lizard-hipped'));
     await tester.pumpAndSettle();
     expect(graph.focusId, '3');
-    expect(posts, isEmpty);
+    // openExisting uses GET only; search may post learn `open` telemetry, not a focus create.
+    final focusCreates = posts.where((body) {
+      if (body is! Map) return false;
+      return body.containsKey('topic') || body['expand'] == true;
+    });
+    expect(focusCreates, isEmpty);
     expect(find.byType(TextField), findsNothing);
   });
 
@@ -677,7 +695,9 @@ void main() {
     );
     await graph.openExisting('2', title: 'Dinosaurs');
     await graph.openExisting('3', title: 'Saurischia');
-    expect(graph.focusTrail.map((e) => e.id).toList(), ['2', '3']);
+    expect(graph.focusHistory, ['2', '3']);
+    // Trail badges exclude the current focus.
+    expect(graph.focusTrail.map((e) => e.id).toList(), ['2']);
 
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();

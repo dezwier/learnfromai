@@ -16,7 +16,7 @@ import 'ui/graph_view.dart';
 import 'ui/jobs_chrome.dart';
 import 'ui/learn_sheet.dart';
 import 'ui/search_bar.dart';
-import 'ui/topic_detail.dart';
+import 'ui/topic_relations_sheet.dart';
 
 class GraphScreen extends StatefulWidget {
   const GraphScreen({super.key});
@@ -42,7 +42,7 @@ class _GraphScreenState extends State<GraphScreen>
   var _resumed = false;
   var _searchOpen = false;
   var _profileOpen = false;
-  var _topicOpen = false;
+  var _learnOpen = false;
   var _jobsPanelOpen = false;
   var _imageUploading = false;
   PlacedNode? _highlighted;
@@ -322,14 +322,14 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _selectNode(PlacedNode node) {
     final graph = context.read<GraphController>();
-    // Focus tile: open the topic overlay (no bottom drawer).
+    // Focus tile: open learning cards directly.
     if (node.id == graph.focusId) {
       _dwellTimer?.cancel();
       setState(() {
         _highlighted = node;
         _profileOpen = false;
       });
-      _openTopicOverlay(source: 'graph');
+      unawaited(_openLearn(node, source: 'graph'));
       return;
     }
     _panTargetId = node.id;
@@ -350,9 +350,8 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _onHighlightFromCenter(PlacedNode? node) {
     if (!mounted) return;
-    // Topic overlay / relation-open owns the selection — don't thrash it
-    // from camera morph / recenter.
-    if (_openingRelatedId != null || _topicOpen) return;
+    // Relation-open owns the selection — don't thrash it from camera morph / recenter.
+    if (_openingRelatedId != null) return;
     final pin = _panTargetId;
     // Keep the pan pin until the animation finishes — do not clear on first match.
     if (pin != null && node?.id != pin) return;
@@ -472,9 +471,6 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _openRelatedTopic(GraphController graph, PlacedNode node) async {
-    // Title switches immediately; relations stay pulsed until the new focus settles
-    // so we don't flash the old neighborhood's edge view mid-load / morph.
-    final wasTopicOpen = _topicOpen;
     _panTargetId = node.id;
     setState(() {
       _highlighted = node;
@@ -490,9 +486,6 @@ class _GraphScreenState extends State<GraphScreen>
         if (graph.focusId == node.id && _transformFocusId == node.id) break;
       }
       _syncHighlightedFromLayout(graph.focusId);
-      if (wasTopicOpen && mounted) {
-        _openTopicOverlay(source: 'list');
-      }
     } finally {
       if (mounted && _openingRelatedId == node.id) {
         setState(() => _openingRelatedId = null);
@@ -592,8 +585,121 @@ class _GraphScreenState extends State<GraphScreen>
     return null;
   }
 
-  Future<void> _openLearn(PlacedNode node) async {
-    await showLearnSheet(context, nodeId: node.id, title: node.title);
+  Future<void> _openLearn(PlacedNode node, {required String source}) async {
+    final graph = context.read<GraphController>();
+    unawaited(
+      graph.trackEvent(
+        nodeId: node.id,
+        kind: 'open',
+        payload: {'source': source},
+      ),
+    );
+    if (!_learnOpen || _jobsPanelOpen) {
+      setState(() {
+        _learnOpen = true;
+        _jobsPanelOpen = false;
+      });
+    }
+    try {
+      await showLearnSheet(context, nodeId: node.id, title: node.title);
+    } finally {
+      if (mounted && _learnOpen) setState(() => _learnOpen = false);
+    }
+  }
+
+  Future<void> _onLongPressNode(PlacedNode node) async {
+    _dwellTimer?.cancel();
+    final graph = context.read<GraphController>();
+    setState(() {
+      _highlighted = node;
+      _profileOpen = false;
+    });
+    // Settle focus on the pressed tile before management actions when needed.
+    if (node.id != graph.focusId) {
+      await graph.openExisting(node.id, title: node.title);
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      _syncHighlightedFromLayout(graph.focusId);
+    }
+    if (!mounted) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('Image'),
+                onTap: () => Navigator.pop(context, 'image'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () => Navigator.pop(context, 'edit'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Delete'),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.hub_outlined),
+                title: const Text('Show relationships'),
+                onTap: () => Navigator.pop(context, 'relations'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: const Text('Generate new learning pack'),
+                enabled: graph.jobForNode(node.id) == null,
+                onTap: () => Navigator.pop(context, 'new_pack'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || choice == null) return;
+    final g = context.read<GraphController>();
+    switch (choice) {
+      case 'image':
+        await _chooseImageAction(g);
+      case 'edit':
+        await _editHighlighted(g);
+      case 'delete':
+        await _confirmDeleteHighlighted(g);
+      case 'relations':
+        final target = _highlighted;
+        if (target == null) return;
+        await showTopicRelationsSheet(
+          context,
+          node: target,
+          layout: _settledLayout,
+          focusId: g.focusId,
+          onOpenRelated: (related) => unawaited(_openRelatedTopic(g, related)),
+        );
+      case 'new_pack':
+        await _generateNewLearningPack(g);
+    }
+  }
+
+  Future<void> _generateNewLearningPack(GraphController graph) async {
+    final node = _highlighted;
+    if (node == null) return;
+    if (graph.jobForNode(node.id) != null) return;
+    final queued = await graph.enqueueContent(
+      node.id,
+      title: node.title,
+      newPack: true,
+    );
+    if (!mounted) return;
+    if (queued == null) {
+      final message = graph.error ?? 'Could not start content generation';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   Future<void> _editHighlighted(GraphController graph) async {
@@ -756,35 +862,7 @@ class _GraphScreenState extends State<GraphScreen>
     if (confirmed != true || !mounted) return;
     final ok = await graph.deleteNode(node.id);
     if (!ok || !mounted) return;
-    setState(() {
-      _highlighted = null;
-      _topicOpen = false;
-    });
-  }
-
-  void _closeTopic() {
-    if (!_topicOpen) return;
-    setState(() => _topicOpen = false);
-  }
-
-  /// Opens the topic detail overlay and records an `open` interaction.
-  void _openTopicOverlay({required String source}) {
-    final node = _highlighted;
-    if (node == null) return;
-    final graph = context.read<GraphController>();
-    if (!_topicOpen || _profileOpen) {
-      setState(() {
-        _topicOpen = true;
-        _profileOpen = false;
-      });
-    }
-    unawaited(
-      graph.trackEvent(
-        nodeId: node.id,
-        kind: 'open',
-        payload: {'source': source},
-      ),
-    );
+    setState(() => _highlighted = null);
   }
 
   void _openSearch() {
@@ -835,7 +913,10 @@ class _GraphScreenState extends State<GraphScreen>
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _syncHighlightedFromLayout(graph.focusId);
-    _openTopicOverlay(source: 'search');
+    final node = _highlighted;
+    if (node != null) {
+      unawaited(_openLearn(node, source: 'search'));
+    }
   }
 
   Future<void> _pickSuggestion(GraphController graph, TopicChoice choice) async {
@@ -846,15 +927,15 @@ class _GraphScreenState extends State<GraphScreen>
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     _syncHighlightedFromLayout(graph.focusId);
-    _openTopicOverlay(source: 'search');
+    final node = _highlighted;
+    if (node != null) {
+      unawaited(_openLearn(node, source: 'search'));
+    }
   }
 
   void _openProfile() {
     _dismissSearch();
-    setState(() {
-      _topicOpen = false;
-      _profileOpen = true;
-    });
+    setState(() => _profileOpen = true);
   }
 
   void _closeProfile() {
@@ -897,7 +978,7 @@ class _GraphScreenState extends State<GraphScreen>
     final highlight = _highlighted;
     final knownIncomplete =
         highlight == null ? null : _knownIncomplete(highlight.id, graph);
-    final overlayOpen = _profileOpen || _topicOpen;
+    final overlayOpen = _profileOpen || _learnOpen;
     final canRequestNeighbors = !_searchOpen &&
         !overlayOpen &&
         highlight != null &&
@@ -910,10 +991,9 @@ class _GraphScreenState extends State<GraphScreen>
         highlight != null &&
         highlight.id != graph.focusId &&
         !openingRelated;
-    // Hide stale/partial relation lists while a topic hop is in flight.
-    final showRelations = highlight != null && !openingRelated;
-    final showChrome = !_searchOpen && !overlayOpen;
-    final chromeOpaque = showChrome;
+    // Keep chrome mounted while learn cards are open so HUD can fade out/in.
+    final showChrome = !_searchOpen && !_profileOpen;
+    final chromeOpaque = showChrome && !_learnOpen;
     final liveTrail = graph.focusTrail;
     // Hold the previous trail until morph begins (avoids a pop on the fetch frame).
     final trail = (_pendingFocusMorph && _trailShown.isNotEmpty) ? _trailShown : liveTrail;
@@ -947,7 +1027,7 @@ class _GraphScreenState extends State<GraphScreen>
         children: [
           Column(
             children: [
-              if (graph.error != null && !_topicOpen)
+              if (graph.error != null && !_profileOpen)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: StudyCard(
@@ -1205,49 +1285,6 @@ class _GraphScreenState extends State<GraphScreen>
                 onOpenTopic: (id) => unawaited(_openTopicFromProfile(id)),
               ),
             ),
-          if (_topicOpen && _highlighted != null)
-            Positioned.fill(
-              child: TopicDetailScreen(
-                node: _highlighted!,
-                // Settled layout only — morphing display layout thrash-rebuilds relations.
-                layout: _settledLayout,
-                focusId: graph.focusId,
-                busy: graph.jobForNode(_highlighted!.id) != null || _imageUploading,
-                progressMessage: _imageUploading
-                    ? 'Uploading topic image…'
-                    : graph.jobForNode(_highlighted!.id)?.progressMessage,
-                imageGenerating: _imageUploading ||
-                    graph.jobForNode(_highlighted!.id)?.type == 'generate_image',
-                relationsPending: openingRelated,
-                showRelations: showRelations,
-                canRequestNeighbors:
-                    knownIncomplete == true &&
-                    graph.jobForNode(_highlighted!.id) == null &&
-                    !openingRelated &&
-                    !_imageUploading,
-                canViewInGraph:
-                    _highlighted!.id != graph.focusId && !openingRelated,
-                canEditImage:
-                    graph.jobForNode(_highlighted!.id) == null && !_imageUploading,
-                onClose: _closeTopic,
-                onRequestNeighbors: () => unawaited(_requestNeighbors(graph)),
-                onViewInGraph: () {
-                  _closeTopic();
-                  unawaited(_goToHighlighted(graph));
-                },
-                onLearn: () {
-                  final node = _highlighted;
-                  if (node == null) return;
-                  unawaited(_openLearn(node));
-                },
-                onImageAction: () => unawaited(_chooseImageAction(graph)),
-                onEdit: () => _editHighlighted(graph),
-                onDelete: () => _confirmDeleteHighlighted(graph),
-                onOpenRelated: (node) => unawaited(_openRelatedTopic(graph, node)),
-                loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
-                cachedImageBytes: graph.cachedImageBytes,
-              ),
-            ),
         ],
       ),
     );
@@ -1420,6 +1457,7 @@ class _GraphScreenState extends State<GraphScreen>
               transform: _transform,
               viewport: viewport,
               onSelect: _selectNode,
+              onLongPress: (node) => unawaited(_onLongPressNode(node)),
               onHighlight: _onHighlightFromCenter,
               imageBytesFor: graph.cachedImageBytes,
             ),

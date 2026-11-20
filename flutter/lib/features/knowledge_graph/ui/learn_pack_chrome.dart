@@ -125,30 +125,6 @@ class _LearnPackBadgeRowState extends State<LearnPackBadgeRow> {
   }
 }
 
-class LearnGenerateAnotherButton extends StatelessWidget {
-  const LearnGenerateAnotherButton({
-    super.key,
-    required this.enabled,
-    required this.busy,
-    required this.onTap,
-  });
-
-  final bool enabled;
-  final bool busy;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: enabled ? onTap : null,
-        child: Text(busy ? 'Generating…' : 'Generate another atomic pack'),
-      ),
-    );
-  }
-}
-
 class LearnStepDots extends StatelessWidget {
   const LearnStepDots({super.key, required this.step, required this.total});
 

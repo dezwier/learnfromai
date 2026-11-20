@@ -18,6 +18,7 @@ class GraphView extends StatefulWidget {
     required this.onSelect,
     required this.onHighlight,
     required this.imageBytesFor,
+    this.onLongPress,
     this.morphing = false,
   });
 
@@ -30,6 +31,7 @@ class GraphView extends StatefulWidget {
   final Size viewport;
   final ValueChanged<PlacedNode> onSelect;
   final ValueChanged<PlacedNode?> onHighlight;
+  final ValueChanged<PlacedNode>? onLongPress;
   final Uint8List? Function(String? imageUrl) imageBytesFor;
 
   @override
@@ -118,6 +120,9 @@ class _GraphViewState extends State<GraphView> {
                       centerHighlight:
                           !widget.morphing && node.id == (widget.highlightId ?? _centerId),
                       onTap: () => widget.onSelect(node),
+                      onLongPress: widget.onLongPress == null
+                          ? null
+                          : () => widget.onLongPress!(node),
                       imageBytes: widget.imageBytesFor(
                         (node.imageThumbUrl?.trim().isNotEmpty == true)
                             ? node.imageThumbUrl
@@ -200,6 +205,7 @@ class _NodeCard extends StatelessWidget {
     required this.pending,
     required this.centerHighlight,
     required this.onTap,
+    this.onLongPress,
     this.imageBytes,
   });
 
@@ -208,6 +214,7 @@ class _NodeCard extends StatelessWidget {
   final bool pending;
   final bool centerHighlight;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final Uint8List? imageBytes;
 
   @override
@@ -262,6 +269,7 @@ class _NodeCard extends StatelessWidget {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTap,
+            onLongPress: onLongPress,
             child: Transform.scale(
               scale: scale,
               child: child,

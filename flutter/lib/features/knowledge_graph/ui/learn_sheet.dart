@@ -1,17 +1,21 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../profile/overlay_panel_chrome.dart';
+import '../../../core/widgets/pulse_placeholder.dart';
+import '../../profile/profile_hud.dart';
 import '../graph_controller.dart';
 import '../models.dart';
-import 'learn_check_bits.dart';
-import 'learn_pack_chrome.dart';
+import 'learn_card.dart';
 
-const _lessonKinds = ['learn', 'check1', 'check2', 'check3'];
-const _lessonLabels = ['Learn', 'Check 1', 'Check 2', 'Check 3'];
-const _checkKinds = {'check1', 'check2', 'check3'};
+const _checkKinds = ['check1', 'check2', 'check3'];
+const _edgeSwipeWidth = 28.0;
+const _edgeSwipeDismissDistance = 72.0;
+const _edgeSwipeFlingVelocity = 700.0;
+const _overscrollDismissDistance = 96.0;
+const _overscrollPullMax = 220.0;
 
 Future<void> showLearnSheet(
   BuildContext context, {
@@ -21,10 +25,18 @@ Future<void> showLearnSheet(
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       opaque: false,
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 220),
+      reverseTransitionDuration: const Duration(milliseconds: 280),
       pageBuilder: (context, animation, secondaryAnimation) {
         return LearnSheet(nodeId: nodeId, title: title);
       },
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        // Fade in on open; stay opaque on dismiss so edge-swipe can slide off cleanly.
+        if (animation.status == AnimationStatus.reverse) {
+          return child;
+        }
         final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
         return FadeTransition(opacity: curved, child: child);
       },
@@ -48,28 +60,41 @@ class _LearnSheetState extends State<LearnSheet> {
   String? _error;
   String? _watchedJobId;
   var _listening = false;
-  var _selectedChoice = -1;
-  var _revealed = false;
-  var _step = 0;
-  var _packIndex = 1;
-  var _generatingAnother = false;
   GraphController? _graph;
   final Set<String> _trackedKinds = {};
   final Set<int> _completedPacks = {};
-  final _clozeController = TextEditingController();
-
-  TopicPack? get _activePack => _content?.pack(_packIndex);
+  List<LearnDeckEntry> _deck = const [];
+  final _rng = math.Random();
+  var _overscrollPull = 0.0;
+  var _dismissing = false;
 
   void _mergeCompletedFrom(TopicContent content) {
     _completedPacks.addAll(content.completedPacks);
   }
 
-  void _maybeMarkPackCompleted() {
+  List<LearnDeckEntry> _buildDeck(TopicContent content) {
+    final entries = <LearnDeckEntry>[];
+    for (final pack in content.packs) {
+      final available = [
+        for (final kind in _checkKinds)
+          if (pack.bit(kind) != null) kind,
+      ];
+      if (available.isEmpty) continue;
+      final kind = available[_rng.nextInt(available.length)];
+      entries.add(LearnDeckEntry(pack: pack, checkKind: kind));
+    }
+    return entries;
+  }
+
+  String _trackKey(int packIndex, String kind) => '$packIndex:$kind';
+
+  void _maybeMarkPackCompleted(int packIndex, String checkKind) {
     final needed = {
-      for (final kind in _lessonKinds) _trackKey(kind),
+      _trackKey(packIndex, 'learn'),
+      _trackKey(packIndex, checkKind),
     };
     if (!needed.every(_trackedKinds.contains)) return;
-    if (_completedPacks.add(_packIndex)) {
+    if (_completedPacks.add(packIndex)) {
       setState(() {});
     }
   }
@@ -113,14 +138,15 @@ class _LearnSheetState extends State<LearnSheet> {
       return;
     }
     if (existing.packs.isNotEmpty && !existing.incomplete) {
-      _applyContent(existing, selectPack: existing.initialPackIndex());
+      _applyContent(existing);
       return;
     }
     if (existing.packs.isNotEmpty) {
-      _applyContent(existing, selectPack: existing.initialPackIndex());
+      _applyContent(existing);
     } else {
       setState(() {
         _content = existing;
+        _deck = const [];
         _loading = false;
       });
     }
@@ -137,7 +163,7 @@ class _LearnSheetState extends State<LearnSheet> {
       return;
     }
     if (queued.packs.isNotEmpty && !queued.incomplete) {
-      _applyContent(queued, selectPack: queued.initialPackIndex(extraCompleted: _completedPacks));
+      _applyContent(queued);
       return;
     }
     _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
@@ -145,23 +171,15 @@ class _LearnSheetState extends State<LearnSheet> {
     setState(() => _content = queued);
   }
 
-  void _applyContent(TopicContent content, {required int selectPack}) {
-    final pack = content.pack(selectPack) ?? content.packs.firstOrNull;
+  void _applyContent(TopicContent content) {
     setState(() {
       _content = content;
       _mergeCompletedFrom(content);
+      _deck = _buildDeck(content);
       _loading = false;
       _error = null;
-      _packIndex = pack?.packIndex ?? 1;
-      _step = 0;
-      _selectedChoice = -1;
-      _revealed = false;
-      _generatingAnother = false;
-      _clozeController.clear();
       _trackedKinds.clear();
     });
-    final graph = _graph ?? context.read<GraphController>();
-    _maybeTrackView(graph);
   }
 
   void _onGraphChanged() {
@@ -186,135 +204,88 @@ class _LearnSheetState extends State<LearnSheet> {
     final next = await graph.fetchContent(widget.nodeId);
     if (!mounted) return;
     if (next == null) {
-      setState(() {
-        _error = graph.error ?? 'Could not load learning bits';
-        _generatingAnother = false;
-      });
+      setState(() => _error = graph.error ?? 'Could not load learning bits');
       return;
     }
-    final prefer = next.packs.isNotEmpty ? next.packs.last.packIndex : _packIndex;
-    _applyContent(next, selectPack: prefer);
+    _applyContent(next);
   }
 
   void _dismiss() {
+    if (_dismissing || !mounted) return;
+    _dismissing = true;
     Navigator.of(context).pop();
   }
 
-  void _goBack() {
-    if (_step <= 0) return;
-    setState(() {
-      _step -= 1;
-      _selectedChoice = -1;
-      _revealed = false;
-      _clozeController.clear();
-    });
-    final graph = _graph ?? context.read<GraphController>();
-    _maybeTrackView(graph);
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+
+    // Only user-driven overscroll (not the bounce spring) can dismiss.
+    if (notification is OverscrollNotification &&
+        notification.dragDetails != null) {
+      final next =
+          (_overscrollPull + notification.overscroll).clamp(-_overscrollPullMax, _overscrollPullMax);
+      if (next != _overscrollPull) {
+        setState(() => _overscrollPull = next);
+      }
+      if (next.abs() >= _overscrollDismissDistance) {
+        _dismiss();
+      }
+      return false;
+    }
+
+    if (notification is ScrollUpdateNotification) {
+      final metrics = notification.metrics;
+      final inRange = metrics.pixels > metrics.minScrollExtent &&
+          metrics.pixels < metrics.maxScrollExtent;
+      if (inRange && _overscrollPull != 0) {
+        setState(() => _overscrollPull = 0);
+      }
+      return false;
+    }
+
+    if (notification is ScrollEndNotification) {
+      if (_overscrollPull.abs() >= _overscrollDismissDistance) {
+        _dismiss();
+      } else if (_overscrollPull != 0) {
+        setState(() => _overscrollPull = 0);
+      }
+    }
+    return false;
   }
 
-  void _goContinue() {
-    if (_step >= _lessonKinds.length - 1) {
-      _maybeMarkPackCompleted();
-      _dismiss();
-      return;
-    }
-    setState(() {
-      _step += 1;
-      _selectedChoice = -1;
-      _revealed = false;
-      _clozeController.clear();
-    });
-    final graph = _graph ?? context.read<GraphController>();
-    _maybeTrackView(graph);
-  }
-
-  void _selectPack(int packIndex) {
-    if (_packIndex == packIndex) return;
-    setState(() {
-      _packIndex = packIndex;
-      _step = 0;
-      _selectedChoice = -1;
-      _revealed = false;
-      _clozeController.clear();
-      _trackedKinds.clear();
-    });
-    final graph = _graph ?? context.read<GraphController>();
-    _maybeTrackView(graph);
-  }
-
-  Future<void> _generateAnother() async {
-    final graph = _graph ?? context.read<GraphController>();
-    if (graph.jobForNode(widget.nodeId) != null) return;
-    if (_content?.allPacksComplete != true) return;
-    setState(() {
-      _generatingAnother = true;
-      _error = null;
-    });
-    final queued = await graph.enqueueContent(
-      widget.nodeId,
-      title: widget.title,
-      newPack: true,
-    );
-    if (!mounted) return;
-    if (queued == null) {
-      setState(() {
-        _generatingAnother = false;
-        _error = graph.error ?? 'Could not start content generation';
-      });
-      return;
-    }
-    // Job queued: keep existing packs visible/playable while the worker runs.
-    if (graph.jobForNode(widget.nodeId) != null) {
-      _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
-      _listen(graph);
-      setState(() => _generatingAnother = true);
-      return;
-    }
-    // Synchronous complete (rare): refresh packs without wiping the current step.
-    if (queued.packs.isNotEmpty) {
-      setState(() {
-        _content = queued;
-        _mergeCompletedFrom(queued);
-        _generatingAnother = false;
-      });
-    }
-  }
-
-  String _trackKey(String kind) => '$_packIndex:$kind';
-
-  void _maybeTrackView(GraphController graph) {
-    final kind = _lessonKinds[_step];
-    if (_checkKinds.contains(kind)) return;
-    if (_trackedKinds.contains(_trackKey(kind))) return;
-    if (_activePack?.bit(kind) == null) return;
-    _trackedKinds.add(_trackKey(kind));
+  void _trackLearn(GraphController graph, LearnDeckEntry entry) {
+    final key = _trackKey(entry.packIndex, 'learn');
+    if (_trackedKinds.contains(key)) return;
+    if (entry.pack.bit('learn') == null) return;
+    _trackedKinds.add(key);
     unawaited(
       graph.trackEvent(
         nodeId: widget.nodeId,
-        kind: kind,
-        payload: {'pack_index': _packIndex},
+        kind: 'learn',
+        payload: {'pack_index': entry.packIndex},
       ),
     );
-    _maybeMarkPackCompleted();
+    _maybeMarkPackCompleted(entry.packIndex, entry.checkKind);
   }
 
-  void _trackCheckAnswer(
+  void _trackCheck(
     GraphController graph,
-    String kind, {
+    LearnDeckEntry entry, {
     required bool correct,
     int? choiceIndex,
     bool? answerBool,
     String? answerText,
   }) {
-    if (_trackedKinds.contains(_trackKey(kind))) return;
-    if (_activePack?.bit(kind) == null) return;
-    _trackedKinds.add(_trackKey(kind));
+    final key = _trackKey(entry.packIndex, entry.checkKind);
+    if (_trackedKinds.contains(key)) return;
+    if (entry.pack.bit(entry.checkKind) == null) return;
+    _trackedKinds.add(key);
     unawaited(
       graph.trackEvent(
         nodeId: widget.nodeId,
-        kind: kind,
+        kind: entry.checkKind,
         payload: {
-          'pack_index': _packIndex,
+          'pack_index': entry.packIndex,
           'correct': correct,
           if (choiceIndex != null) 'choice_index': choiceIndex,
           if (answerBool != null) 'answer_bool': answerBool,
@@ -322,71 +293,28 @@ class _LearnSheetState extends State<LearnSheet> {
         },
       ),
     );
-    _maybeMarkPackCompleted();
+    _maybeMarkPackCompleted(entry.packIndex, entry.checkKind);
   }
 
-  void _onSelectMc(GraphController graph, String kind, int choiceIndex) {
-    if (_revealed) return;
-    final bit = _activePack?.bit(kind);
-    final answerIndex = (bit?.body['answer_index'] as num?)?.toInt() ?? 0;
-    setState(() {
-      _selectedChoice = choiceIndex;
-      _revealed = true;
-    });
-    _trackCheckAnswer(
-      graph,
-      kind,
-      correct: choiceIndex == answerIndex,
-      choiceIndex: choiceIndex,
-    );
-  }
-
-  void _onSelectBool(GraphController graph, String kind, bool value) {
-    if (_revealed) return;
-    final bit = _activePack?.bit(kind);
-    final answer = bit?.body['answer'] == true;
-    setState(() {
-      _selectedChoice = value ? 1 : 0;
-      _revealed = true;
-    });
-    _trackCheckAnswer(
-      graph,
-      kind,
-      correct: value == answer,
-      answerBool: value,
-    );
-  }
-
-  void _onSubmitCloze(GraphController graph, String kind) {
-    if (_revealed) return;
-    final bit = _activePack?.bit(kind);
-    if (bit == null) return;
-    final text = _clozeController.text;
-    final correct = gradeCloze(bit, text);
-    setState(() => _revealed = true);
-    _trackCheckAnswer(
-      graph,
-      kind,
-      correct: correct,
-      answerText: text.trim(),
-    );
-  }
-
-  bool _stepReady({
-    required bool generating,
-    required String kind,
-  }) {
-    if (_error != null) return true;
-    if (_loading) return false;
-    if (_activePack?.bit(kind) != null) return true;
-    if (generating) return false;
-    return true;
+  (String?, String?) _imageUrls(GraphController graph) {
+    final nodes = graph.categoryGraph?['nodes'];
+    if (nodes is! List) return (null, null);
+    for (final raw in nodes) {
+      if (raw is Map && raw['id']?.toString() == widget.nodeId) {
+        final url = raw['image_url']?.toString().trim();
+        final thumb = raw['image_thumb_url']?.toString().trim();
+        return (
+          (url == null || url.isEmpty) ? null : url,
+          (thumb == null || thumb.isEmpty) ? null : thumb,
+        );
+      }
+    }
+    return (null, null);
   }
 
   @override
   void dispose() {
     _stopListening();
-    _clozeController.dispose();
     super.dispose();
   }
 
@@ -396,115 +324,287 @@ class _LearnSheetState extends State<LearnSheet> {
     final scheme = Theme.of(context).colorScheme;
     final job = graph.jobForNode(widget.nodeId);
     final generating = job != null ||
-        _generatingAnother ||
         (_content != null && _content!.packs.isEmpty && _content!.incomplete);
-    final kind = _lessonKinds[_step];
-    final label = _lessonLabels[_step];
-    final ready = _stepReady(generating: generating, kind: kind);
-    final onCheck = _checkKinds.contains(kind);
-    final continueEnabled =
-        ready && (!onCheck || _revealed || _activePack?.bit(kind) == null);
-    final continueLabel = _step >= _lessonKinds.length - 1 ? 'Done' : 'Continue';
-    final bottomClearance = OverlayPanel.bottomClearance(context, hasBottom: true);
-    final packs = _content?.packs ?? const <TopicPack>[];
-    final allUserCompleted = packs.isNotEmpty &&
-        (_content?.allPacksComplete == true) &&
-        packs.every((pack) => _completedPacks.contains(pack.packIndex));
-    final canGenerateAnother = !generating && allUserCompleted;
+    final urls = _imageUrls(graph);
+    final imageUrl = urls.$1 ?? urls.$2;
+    final padding = MediaQuery.paddingOf(context);
+    final listPadding = EdgeInsets.fromLTRB(
+      20,
+      padding.top + 12,
+      20,
+      padding.bottom + 24,
+    );
 
-    return OverlayPanel(
-      onDismiss: _dismiss,
-      bottom: OverlayLessonFooter(
-        onBack: _step > 0 ? _goBack : null,
-        onContinue: _goContinue,
-        continueLabel: continueLabel,
-        continueEnabled: continueEnabled,
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    const scrollPhysics = AlwaysScrollableScrollPhysics(
+      parent: BouncingScrollPhysics(),
+    );
+    Widget body;
+    if (_loading && _deck.isEmpty) {
+      body = ListView(
+        physics: scrollPhysics,
+        padding: listPadding,
+        children: const [
+          PulsePlaceholder.image(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
+          SizedBox(height: 12),
+          SizedBox(
+            height: 120,
+            child: PulsePlaceholder(
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+            ),
+          ),
+        ],
+      );
+    } else {
+      body = ListView.builder(
+        physics: scrollPhysics,
+        padding: listPadding,
+        itemCount: _deck.length + (generating && _deck.isEmpty ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (generating && _deck.isEmpty && index == 0) {
+            return const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: SizedBox(
+                height: 220,
+                child: PulsePlaceholder(
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
+                ),
+              ),
+            );
+          }
+          final entry = _deck[index];
+          return LearnFlipCard(
+            key: ValueKey('pack-${entry.packIndex}-${entry.checkKind}'),
+            entry: entry,
+            imageUrl: imageUrl,
+            imageLoading: graph.jobForNode(widget.nodeId)?.type == 'generate_image',
+            loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+            cachedBytes: graph.cachedImageBytes(imageUrl),
+            completed: _completedPacks.contains(entry.packIndex),
+            onShown: () => _trackLearn(graph, entry),
+            onCheckAnswer: ({
+              required bool correct,
+              int? choiceIndex,
+              bool? answerBool,
+              String? answerText,
+            }) {
+              _trackCheck(
+                graph,
+                entry,
+                correct: correct,
+                choiceIndex: choiceIndex,
+                answerBool: answerBool,
+                answerText: answerText,
+              );
+            },
+          );
+        },
+      );
+    }
+
+    final bottomFadeHeight = padding.bottom + 56 + ProfileTopFade.fadeExtension;
+    final pullT = (_overscrollPull.abs() / _overscrollDismissDistance).clamp(0.0, 1.0);
+
+    return Material(
+      type: MaterialType.transparency,
+      child: _LeftEdgeSwipeToDismiss(
+        onDismiss: _dismiss,
+        child: Stack(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    packs.isEmpty
-                        ? label
-                        : '${packs.length} learning${packs.length == 1 ? '' : 's'} · $label',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.55),
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.4,
-                        ),
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: Transform.translate(
+                  // Negative overscroll (pull down at top) → content moves down.
+                  offset: Offset(0, -_overscrollPull * 0.45),
+                  child: Opacity(
+                    opacity: 1 - (0.28 * pullT),
+                    child: body,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.title,
-                    style: const TextStyle(
-                      fontFamily: 'tt_ramilas',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 26,
-                      height: 1.15,
-                    ),
-                  ),
-                  if (packs.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    LearnPackBadgeRow(
-                      packs: packs,
-                      selectedPackIndex: _packIndex,
-                      completedPackIndexes: _completedPacks,
-                      onSelectPack: _selectPack,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  LearnStepDots(step: _step, total: _lessonKinds.length),
-                ],
+                ),
               ),
             ),
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, bottomClearance),
-                children: [
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(color: scheme.error, height: 1.35),
-                      ),
+            // Same top/bottom fades as the graph chrome.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: ProfileTopFade.height(context),
+              child: const ProfileTopFade(),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: bottomFadeHeight,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        scheme.surface.withValues(alpha: 0.94),
+                        scheme.surface.withValues(alpha: 0.72),
+                        scheme.surface.withValues(alpha: 0.28),
+                        scheme.surface.withValues(alpha: 0.0),
+                      ],
+                      stops: const [0.0, 0.35, 0.72, 1.0],
                     ),
-                  if (allUserCompleted || (generating && _generatingAnother)) ...[
-                    LearnGenerateAnotherButton(
-                      enabled: canGenerateAnother,
-                      busy: generating && _generatingAnother,
-                      onTap: canGenerateAnother ? () => unawaited(_generateAnother()) : null,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  LearnBitSection(
-                    label: label,
-                    loading: !ready && _error == null,
-                    child: onCheck
-                        ? LearnCheckBit(
-                            bit: _activePack?.bit(kind),
-                            selected: _selectedChoice,
-                            revealed: _revealed,
-                            clozeController: _clozeController,
-                            onSelectChoice: (index) => _onSelectMc(graph, kind, index),
-                            onSelectBool: (value) => _onSelectBool(graph, kind, value),
-                            onSubmitCloze: () => _onSubmitCloze(graph, kind),
-                          )
-                        : LearnMarkdownBit(bit: _activePack?.bit(kind)),
                   ),
-                ],
+                ),
               ),
             ),
+            if (_error != null)
+              Positioned(
+                left: 20,
+                right: 20,
+                top: padding.top + 8,
+                child: IgnorePointer(
+                  child: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: scheme.error,
+                      height: 1.35,
+                      shadows: const [
+                        Shadow(blurRadius: 6, color: Colors.black45),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// iOS-style dismiss: drag from a left-edge hit strip slides cards right, then pops.
+class _LeftEdgeSwipeToDismiss extends StatefulWidget {
+  const _LeftEdgeSwipeToDismiss({
+    required this.child,
+    required this.onDismiss,
+  });
+
+  final Widget child;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_LeftEdgeSwipeToDismiss> createState() => _LeftEdgeSwipeToDismissState();
+}
+
+class _LeftEdgeSwipeToDismissState extends State<_LeftEdgeSwipeToDismiss>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _slide;
+  var _dragging = false;
+  var _dismissing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _slide = AnimationController.unbounded(vsync: this, value: 0);
+  }
+
+  @override
+  void dispose() {
+    _slide.dispose();
+    super.dispose();
+  }
+
+  double get _screenWidth {
+    final width = MediaQuery.sizeOf(context).width;
+    return width > 0 ? width : 400;
+  }
+
+  void _onStart(DragStartDetails details) {
+    if (_dismissing) return;
+    _slide.stop();
+    _dragging = true;
+  }
+
+  void _onUpdate(DragUpdateDetails details) {
+    if (!_dragging || _dismissing) return;
+    final next = (_slide.value + (details.primaryDelta ?? 0)).clamp(0.0, _screenWidth);
+    _slide.value = next;
+  }
+
+  void _onEnd(DragEndDetails details) {
+    if (!_dragging || _dismissing) return;
+    _dragging = false;
+    final fling = details.velocity.pixelsPerSecond.dx;
+    final shouldDismiss =
+        _slide.value >= _edgeSwipeDismissDistance || fling > _edgeSwipeFlingVelocity;
+    if (shouldDismiss) {
+      unawaited(_animateOffThenDismiss(fling));
+      return;
+    }
+    unawaited(_animateBack());
+  }
+
+  void _onCancel() {
+    if (_dismissing) return;
+    _dragging = false;
+    unawaited(_animateBack());
+  }
+
+  Future<void> _animateBack() async {
+    await _slide.animateTo(
+      0,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Future<void> _animateOffThenDismiss(double flingVx) async {
+    if (_dismissing) return;
+    _dismissing = true;
+    final target = _screenWidth + 24;
+    final distance = (target - _slide.value).clamp(1.0, target);
+    // Keep motion continuous with the finger fling when present.
+    final ms = flingVx > 200
+        ? (distance / flingVx * 1000).clamp(140.0, 280.0).round()
+        : 240;
+    await _slide.animateTo(
+      target,
+      duration: Duration(milliseconds: ms),
+      curve: Curves.easeOutCubic,
+    );
+    if (!mounted) return;
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        AnimatedBuilder(
+          animation: _slide,
+          builder: (context, child) {
+            return Transform.translate(
+              offset: Offset(_slide.value, 0),
+              child: child,
+            );
+          },
+          child: widget.child,
+        ),
+        // Narrow left strip so card Y-flip drag stays free in the content area.
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: _edgeSwipeWidth,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragStart: _onStart,
+            onHorizontalDragUpdate: _onUpdate,
+            onHorizontalDragEnd: _onEnd,
+            onHorizontalDragCancel: _onCancel,
+          ),
+        ),
+      ],
     );
   }
 }
