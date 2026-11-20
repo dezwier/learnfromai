@@ -176,7 +176,7 @@ class TopicContent {
   final int recipeVersion;
   final int packCount;
   final List<TopicPack> packs;
-  /// Pack indexes the current user has fully walked (learn → three checks).
+  /// Pack indexes the current user has atomically walked (learn + any one check).
   final List<int> completedPacks;
 
   bool get allPacksComplete =>
@@ -243,6 +243,48 @@ class TopicContent {
       recipeVersion: (raw['recipe_version'] as num?)?.toInt() ?? 1,
       packCount: (raw['pack_count'] as num?)?.toInt() ?? packs.length,
       packs: packs,
+      completedPacks: [
+        if (completedRaw is List)
+          for (final row in completedRaw)
+            if (row is num) row.toInt(),
+      ],
+    );
+  }
+}
+
+class LearningNext {
+  const LearningNext({
+    required this.status,
+    required this.nodeId,
+    required this.title,
+    this.packIndex,
+    this.pack,
+    this.affinity = 0,
+    this.completedPacks = const [],
+  });
+
+  /// `ready` or `generate`.
+  final String status;
+  final String nodeId;
+  final String title;
+  final int? packIndex;
+  final TopicPack? pack;
+  final double affinity;
+  final List<int> completedPacks;
+
+  bool get needsGenerate => status == 'generate';
+  bool get isReady => status == 'ready' && pack != null;
+
+  factory LearningNext.fromJson(Map<String, dynamic> raw) {
+    final packRaw = raw['pack'];
+    final completedRaw = raw['completed_packs'];
+    return LearningNext(
+      status: raw['status']?.toString() ?? 'generate',
+      nodeId: raw['node_id']?.toString() ?? '',
+      title: raw['title']?.toString() ?? '',
+      packIndex: (raw['pack_index'] as num?)?.toInt(),
+      pack: packRaw is Map ? TopicPack.fromJson(Map<String, dynamic>.from(packRaw)) : null,
+      affinity: (raw['affinity'] as num?)?.toDouble() ?? 0,
       completedPacks: [
         if (completedRaw is List)
           for (final row in completedRaw)

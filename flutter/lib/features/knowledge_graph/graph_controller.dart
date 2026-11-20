@@ -291,6 +291,18 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Next unlearned atomic pack on seed or a neighbor (exploit / explore).
+  Future<LearningNext?> fetchLearningNext(String seedNodeId) async {
+    try {
+      final raw = await _get('/me/learning-next?seed_node_id=$seedNodeId');
+      return LearningNext.fromJson(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// Request shared content expand when incomplete; track the job like neighborhood.
   Future<TopicContent?> enqueueContent(
     String id, {

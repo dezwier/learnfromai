@@ -21,6 +21,13 @@ LEGACY_CHECK_KIND = "check"
 LEGACY_EXAMPLE_KIND = "example"
 
 
+def pack_atomically_complete(kinds: set[str]) -> bool:
+    """True when the user walked learn + any one check for a pack."""
+    if "learn" not in kinds:
+        return False
+    return bool(kinds & set(CHECK_KINDS))
+
+
 class KnowledgeBit(SQLModel, table=True):
     """One typed learning bit for a shared topic pack (learn / example / check / …)."""
 

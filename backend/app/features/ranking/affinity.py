@@ -11,7 +11,7 @@ from sqlmodel import Session, col, select
 
 from app.core.config import Settings, get_settings
 from app.core.time import utcnow
-from app.features.content.models import CONTENT_KINDS, LEGACY_CHECK_KIND
+from app.features.content.models import CONTENT_KINDS, LEGACY_CHECK_KIND, pack_atomically_complete
 from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.user_events.models import UserTopicEvent
 
@@ -46,6 +46,7 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "rank_half_life_days": s.rank_half_life_days,
         "rank_w_neighbor_penalty": s.rank_w_neighbor_penalty,
         "rank_w_pack_penalty": s.rank_w_pack_penalty,
+        "learn_track_exploit_p": s.learn_track_exploit_p,
         "cron_neighbor_jobs_per_day": s.cron_neighbor_jobs_per_day,
         "cron_learn_jobs_per_day": s.cron_learn_jobs_per_day,
         "cron_neighbor_budget_total": s.cron_neighbor_budget_total,
@@ -100,7 +101,6 @@ def score_user_tiles(
 
     nodes = session.exec(select(KnowledgeNode).where(col(KnowledgeNode.id).in_(node_ids))).all()
     by_id = {node.id: node for node in nodes}
-    needed = set(CONTENT_KINDS)
 
     scored: dict[UUID, dict] = {}
     for nid in node_ids:
@@ -110,7 +110,9 @@ def score_user_tiles(
         focus_n = focus_counts.get(nid, 0)
         open_n = open_counts.get(nid, 0)
         learned = nid in learned_nodes
-        packs_done = sum(1 for kinds in packs_walked[nid].values() if needed <= kinds)
+        packs_done = sum(
+            1 for kinds in packs_walked[nid].values() if pack_atomically_complete(kinds)
+        )
         node_age = age_days(node.created_at, now=current)
         event_age = age_days(last_event_at.get(nid), now=current)
         base = (

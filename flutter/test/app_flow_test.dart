@@ -8,6 +8,7 @@ import 'package:adaptive_mastery/features/auth/auth_gateway.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/graph_controller.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/layout/graph_layout.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/ui/learn_sheet.dart';
+import 'package:adaptive_mastery/features/knowledge_graph/ui/learning_track_sheet.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/ui/turnable_y_axis_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,9 +74,38 @@ void main() {
   });
 
   testWidgets('graph shows parents, siblings, children, related', (tester) async {
+    var contentPosts = 0;
     final graph = GraphController(
-      poster: (path, {body}) async => _compact(),
-      loader: (path) async => _compact(),
+      poster: (path, {body}) async {
+        if (path == '/knowledge/nodes/2/content') {
+          contentPosts += 1;
+          return {
+            'status': 'queued',
+            'job_id': 'job-content',
+            'focus_node_id': '2',
+            'pack_index': 1,
+            'progress': {'message': 'Writing…'},
+          };
+        }
+        return _compact();
+      },
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          },
+      loader: (path) async {
+        if (path.startsWith('/me/learning-next')) return _learningNextGenerate();
+        if (path == '/knowledge/nodes/2/content') {
+          return {
+            'node_id': '2',
+            'incomplete': true,
+            'pack_count': 0,
+            'packs': <Map<String, dynamic>>[],
+          };
+        }
+        return _compact();
+      },
     )..categoryGraph = _compact();
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
@@ -88,12 +118,15 @@ void main() {
     expect(find.text('Ada'), findsOneWidget);
     expect(find.text('0 / 100 XP'), findsOneWidget);
 
-    // No packs yet → focus tap opens the action drawer (not cards, no auto-generate).
+    // No packs nearby → focus tap starts the track and enqueues generate for focus.
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
-    await tester.pumpAndSettle();
-    expect(find.byType(LearnSheet), findsNothing);
-    expect(find.text('Generate atomic learning'), findsOneWidget);
-    expect(find.text('Upload or generate an image'), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(LearningTrackSheet), findsOneWidget);
+    expect(find.byType(PulsePlaceholder), findsWidgets);
+    expect(contentPosts, 1);
+    graph.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('profile hud opens overlay with settings and logout', (tester) async {
@@ -124,13 +157,14 @@ void main() {
     expect(find.text('Neighborhood size'), findsOneWidget);
   });
 
-  testWidgets('closing profile then opening focus shows learn cards not profile', (tester) async {
+  testWidgets('closing profile then opening focus shows learning track not profile', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => _compact(),
       loader: (path) async {
         if (path.startsWith('/me/topic-affinity')) {
           return {'nodes': [], 'clusters': [], 'edges': []};
         }
+        if (path.startsWith('/me/learning-next')) return _learningNextReady();
         if (path == '/knowledge/nodes/2/content') {
           return _contentReady();
         }
@@ -150,7 +184,7 @@ void main() {
 
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byType(LearnSheet), findsOneWidget);
+    expect(find.byType(LearningTrackSheet), findsOneWidget);
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
     expect(find.text('Settings'), findsNothing);
     expect(find.text('Learning about'), findsNothing);
@@ -291,7 +325,8 @@ void main() {
     expect(find.byTooltip('Request neighbors'), findsNothing);
     expect(find.text('Parents'), findsNothing);
 
-    await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    // Long-press opens the action drawer (focus tap starts the learning track).
+    await tester.longPress(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
     expect(find.text('Generate relations'), findsOneWidget);
 
@@ -523,10 +558,11 @@ void main() {
     expect(focus['image_url'], '/knowledge/nodes/2/image/file');
   });
 
-  testWidgets('focus tap with packs opens learn cards', (tester) async {
+  testWidgets('focus tap with packs opens learning track', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async => {},
       loader: (path) async {
+        if (path.startsWith('/me/learning-next')) return _learningNextReady();
         if (path == '/knowledge/nodes/2/content') return _contentReady();
         return _compact();
       },
@@ -537,7 +573,8 @@ void main() {
 
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
     await tester.pumpAndSettle();
-    expect(find.byType(LearnSheet), findsOneWidget);
+    expect(find.byType(LearningTrackSheet), findsOneWidget);
+    expect(find.byType(LearnSheet), findsNothing);
     expect(find.textContaining('What is Dinosaurs'), findsWidgets);
     expect(find.textContaining('extinct reptiles'), findsWidgets);
 
@@ -550,16 +587,36 @@ void main() {
         find.textContaining('claim about Dinosaurs is weakest').evaluate().isNotEmpty;
     expect(quizVisible, isTrue);
     expect(find.textContaining('Dinosaurs are a learning topic'), findsWidgets);
+
+    // Answer the MC quiz → Next appears.
+    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Next'), findsOneWidget);
   });
 
-  testWidgets('focus tap with no packs opens action drawer without enqueue', (tester) async {
+  testWidgets('focus tap with no packs enqueues generate on learning track', (tester) async {
     var contentPosts = 0;
     final graph = GraphController(
       poster: (path, {body}) async {
-        if (path == '/knowledge/nodes/2/content') contentPosts += 1;
+        if (path == '/knowledge/nodes/2/content') {
+          contentPosts += 1;
+          return {
+            'status': 'queued',
+            'job_id': 'job-content',
+            'focus_node_id': '2',
+            'pack_index': 1,
+            'progress': {'message': 'Writing…'},
+          };
+        }
         return {};
       },
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Writing…'},
+          },
       loader: (path) async {
+        if (path.startsWith('/me/learning-next')) return _learningNextGenerate();
         if (path == '/knowledge/nodes/2/content') {
           return {
             'node_id': '2',
@@ -576,10 +633,15 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(LearningTrackSheet), findsOneWidget);
     expect(find.byType(LearnSheet), findsNothing);
-    expect(find.text('Generate atomic learning'), findsOneWidget);
-    expect(contentPosts, 0);
+    expect(find.text('Generate atomic learning'), findsNothing);
+    expect(contentPosts, 1);
+    expect(graph.activeJobCount, 1);
+    graph.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('long-press focus tile shows topic action sheet', (tester) async {
@@ -596,6 +658,7 @@ void main() {
     expect(find.text('Manage topic'), findsOneWidget);
     expect(find.text('Delete'), findsNothing);
     expect(find.text('Show relations'), findsOneWidget);
+    expect(find.text('Show atomic learning'), findsOneWidget);
     expect(find.text('Generate atomic learning'), findsOneWidget);
     expect(find.text('Generate relations'), findsOneWidget);
 
@@ -612,6 +675,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Relationships'), findsOneWidget);
     expect(find.textContaining('Saurischia'), findsWidgets);
+  });
+
+  testWidgets('show atomic learning opens review deck', (tester) async {
+    final graph = GraphController(
+      poster: (path, {body}) async => {},
+      loader: (path) async {
+        if (path == '/knowledge/nodes/2/content') return _contentReady();
+        return _compact();
+      },
+    )..categoryGraph = _compact();
+    await tester.pumpWidget(_app(_signedIn(), graph));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byWidgetPredicate(_titleLooksLike('Dinosaurs')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Show atomic learning'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LearnSheet), findsOneWidget);
+    expect(find.textContaining('What is Dinosaurs'), findsWidgets);
   });
 
   testWidgets('search fab expands a field and dismisses on outside tap', (tester) async {
@@ -660,7 +742,20 @@ void main() {
         return _compact();
       },
       loader: (path) async {
-        if (path.startsWith('/knowledge/nodes')) {
+        if (path.startsWith('/me/learning-next')) {
+          final content = _contentReady();
+          final packs = content['packs'] as List;
+          return {
+            'status': 'ready',
+            'node_id': '3',
+            'title': 'Saurischia',
+            'pack_index': 1,
+            'pack': packs.first,
+            'affinity': 1.0,
+            'completed_packs': <int>[],
+          };
+        }
+        if (path.startsWith('/knowledge/nodes?') || path == '/knowledge/nodes') {
           return {
             'nodes': [
               {'id': '3', 'title': 'Saurischia', 'description': 'Lizard-hipped dinosaurs.'},
@@ -685,6 +780,7 @@ void main() {
     await tester.tap(find.textContaining('Lizard-hipped'));
     await tester.pumpAndSettle();
     expect(graph.focusId, '3');
+    expect(find.byType(LearningTrackSheet), findsOneWidget);
     // openExisting uses GET only; search may post learn `open` telemetry, not a focus create.
     final focusCreates = posts.where((body) {
       if (body is! Map) return false;
@@ -799,6 +895,28 @@ Map<String, dynamic> _compactIncomplete() {
   final graph = _compact();
   graph['incomplete'] = true;
   return graph;
+}
+
+Map<String, dynamic> _learningNextGenerate() {
+  return {
+    'status': 'generate',
+    'node_id': '2',
+    'title': 'Dinosaurs',
+  };
+}
+
+Map<String, dynamic> _learningNextReady() {
+  final content = _contentReady();
+  final packs = content['packs'] as List;
+  return {
+    'status': 'ready',
+    'node_id': '2',
+    'title': 'Dinosaurs',
+    'pack_index': 1,
+    'pack': packs.first,
+    'affinity': 1.0,
+    'completed_packs': <int>[],
+  };
 }
 
 Map<String, dynamic> _contentReady() {

@@ -229,6 +229,7 @@ def test_content_reports_completed_packs_for_user(client, auth, session):
     before = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
     assert before.json()["completed_packs"] == []
 
+    # Atomic completion: learn + any one check is enough.
     client.post(
         "/api/v1/me/events",
         headers=auth,
@@ -239,16 +240,6 @@ def test_content_reports_completed_packs_for_user(client, auth, session):
                     "node_id": str(node.id),
                     "kind": "check1",
                     "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
-                },
-                {
-                    "node_id": str(node.id),
-                    "kind": "check2",
-                    "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
-                },
-                {
-                    "node_id": str(node.id),
-                    "kind": "check3",
-                    "payload": {"pack_index": 1, "correct": False, "choice_index": 1},
                 },
             ]
         },

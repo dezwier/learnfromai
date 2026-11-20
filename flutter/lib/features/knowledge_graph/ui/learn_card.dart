@@ -321,11 +321,14 @@ class _LearnCardFace extends StatelessWidget {
                 ),
             ],
           ),
-          Padding(
-            padding: _bodyPadding,
-            child: child,
+          Expanded(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: _bodyPadding,
+                child: child,
+              ),
+            ),
           ),
-          const Spacer(),
         ],
       ),
     );

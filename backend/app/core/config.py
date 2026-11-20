@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     rank_half_life_days: float = 14.0
     rank_w_neighbor_penalty: float = 0.15
     rank_w_pack_penalty: float = 0.5
+    # Learning track: P(stay on seed topic when it still has unlearned packs).
+    learn_track_exploit_p: float = 0.7
     cron_neighbor_jobs_per_day: int = 5
     cron_learn_jobs_per_day: int = 10
     cron_neighbor_budget_total: int = 16

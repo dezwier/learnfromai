@@ -15,6 +15,7 @@ from app.features.content.models import (
     LEGACY_CHECK_KIND,
     RECIPE_VERSION,
     KnowledgeBit,
+    pack_atomically_complete,
 )
 from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.platform.jobs import enqueue, ensure_watcher
@@ -189,7 +190,7 @@ def completed_pack_indexes(
     user_id: UUID,
     node_id: UUID,
 ) -> list[int]:
-    """Pack indexes where the user has recorded learn+check1–3."""
+    """Pack indexes where the user has recorded learn + any one check."""
     from app.features.user_events.models import UserTopicEvent
 
     rows = list(
@@ -212,8 +213,7 @@ def completed_pack_indexes(
         if kind not in CONTENT_KINDS:
             continue
         by_pack.setdefault(pack_index, set()).add(kind)
-    needed = set(CONTENT_KINDS)
-    return sorted(pack for pack, kinds in by_pack.items() if needed <= kinds)
+    return sorted(pack for pack, kinds in by_pack.items() if pack_atomically_complete(kinds))
 
 
 def content_for_node(

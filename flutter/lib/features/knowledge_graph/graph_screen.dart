@@ -15,6 +15,7 @@ import 'ui/focus_trail_bar.dart';
 import 'ui/graph_view.dart';
 import 'ui/jobs_chrome.dart';
 import 'ui/learn_sheet.dart';
+import 'ui/learning_track_sheet.dart';
 import 'ui/search_bar.dart';
 import 'ui/topic_relations_sheet.dart';
 
@@ -322,7 +323,7 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _selectNode(PlacedNode node) {
     final graph = context.read<GraphController>();
-    // Focus tile: cards if packs exist, otherwise the action drawer (no auto-generate).
+    // Focus tile: organic learning track (generates a pack if none nearby).
     if (node.id == graph.focusId) {
       _dwellTimer?.cancel();
       setState(() {
@@ -585,19 +586,32 @@ class _GraphScreenState extends State<GraphScreen>
     return null;
   }
 
-  /// Focus/search: open cards when packs exist; otherwise the action drawer.
+  /// Focus/search: start the organic learning track seeded on this topic.
   Future<void> _openFocusPrimary(PlacedNode node, {required String source}) async {
-    final graph = context.read<GraphController>();
-    final content = await graph.fetchContent(node.id);
-    if (!mounted) return;
-    if (content == null || content.packs.isEmpty) {
-      await _showTopicActionsSheet(node);
-      return;
-    }
-    await _openLearn(node, source: source);
+    await _openLearningTrack(node, source: source);
   }
 
-  Future<void> _openLearn(PlacedNode node, {required String source}) async {
+  Future<void> _openLearningTrack(PlacedNode node, {required String source}) async {
+    if (!_learnOpen || _jobsPanelOpen) {
+      setState(() {
+        _learnOpen = true;
+        _jobsPanelOpen = false;
+      });
+    }
+    try {
+      await showLearningTrack(
+        context,
+        seedNodeId: node.id,
+        seedTitle: node.title,
+        openSource: source,
+      );
+    } finally {
+      if (mounted && _learnOpen) setState(() => _learnOpen = false);
+    }
+  }
+
+  /// Multi-pack review deck for one topic (action drawer → Show atomic learning).
+  Future<void> _openAtomicReview(PlacedNode node, {required String source}) async {
     final graph = context.read<GraphController>();
     unawaited(
       graph.trackEvent(
@@ -647,37 +661,44 @@ class _GraphScreenState extends State<GraphScreen>
       showDragHandle: true,
       builder: (context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.image_outlined),
-                title: const Text('Upload or generate an image'),
-                onTap: () => Navigator.pop(context, 'image'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Manage topic'),
-                onTap: () => Navigator.pop(context, 'manage'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.hub_outlined),
-                title: const Text('Show relations'),
-                onTap: () => Navigator.pop(context, 'relations'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.auto_awesome),
-                title: const Text('Generate relations'),
-                enabled: incomplete && !busy,
-                onTap: () => Navigator.pop(context, 'neighbors'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.school_outlined),
-                title: const Text('Generate atomic learning'),
-                enabled: !busy,
-                onTap: () => Navigator.pop(context, 'new_pack'),
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.image_outlined),
+                  title: const Text('Upload or generate an image'),
+                  onTap: () => Navigator.pop(context, 'image'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined),
+                  title: const Text('Manage topic'),
+                  onTap: () => Navigator.pop(context, 'manage'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.hub_outlined),
+                  title: const Text('Show relations'),
+                  onTap: () => Navigator.pop(context, 'relations'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.menu_book_outlined),
+                  title: const Text('Show atomic learning'),
+                  onTap: () => Navigator.pop(context, 'review'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.auto_awesome),
+                  title: const Text('Generate relations'),
+                  enabled: incomplete && !busy,
+                  onTap: () => Navigator.pop(context, 'neighbors'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.school_outlined),
+                  title: const Text('Generate atomic learning'),
+                  enabled: !busy,
+                  onTap: () => Navigator.pop(context, 'new_pack'),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -699,6 +720,9 @@ class _GraphScreenState extends State<GraphScreen>
           focusId: g.focusId,
           onOpenRelated: (related) => unawaited(_openRelatedTopic(g, related)),
         );
+      case 'review':
+        final target = _highlighted ?? node;
+        await _openAtomicReview(target, source: 'graph');
       case 'new_pack':
         await _generateNewLearningPack(g);
       case 'neighbors':
