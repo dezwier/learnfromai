@@ -35,6 +35,10 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   List<_ReviewCard> _queue = const [];
   int _queueIndex = 0;
   var _answered = false;
+  /// Prevents the cloze Check / keyboard Done tap from also hitting Next/Done.
+  var _continueArmed = false;
+  int _hubLoadGen = 0;
+  int _reviewSessionGen = 0;
 
   /// Faded hub backdrop: one random topic image, slight rotation.
   String? _backdropUrl;
@@ -96,6 +100,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
 
   Future<void> _loadHub({bool quiet = false}) async {
     final graph = context.read<GraphController>();
+    final gen = ++_hubLoadGen;
     setState(() {
       if (quiet) {
         _refreshing = true;
@@ -107,9 +112,10 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queue = const [];
       _queueIndex = 0;
       _answered = false;
+      _continueArmed = false;
     });
     final dist = await graph.fetchReviewDistribution();
-    if (!mounted) return;
+    if (!mounted || gen != _hubLoadGen) return;
     setState(() {
       _distribution = dist;
       _loading = false;
@@ -122,12 +128,16 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
 
   Future<void> _startReview() async {
     final graph = context.read<GraphController>();
+    // Invalidate any in-flight hub load so it can't wipe the session.
+    _hubLoadGen++;
+    final sessionGen = ++_reviewSessionGen;
     setState(() {
       _loading = true;
       _error = null;
+      _continueArmed = false;
     });
     final queue = await graph.fetchReviewDue(limit: 10);
-    if (!mounted) return;
+    if (!mounted || sessionGen != _reviewSessionGen) return;
     if (queue == null || queue.items.isEmpty) {
       setState(() {
         _loading = false;
@@ -140,8 +150,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     }
     final cards = <_ReviewCard>[
       for (final item in queue.items)
-        if (_pickCheck(item.pack) != null)
-          _ReviewCard(item: item, checkKind: _pickCheck(item.pack)!),
+        if (_pickCheck(item.pack) case final kind?)
+          _ReviewCard(item: item, checkKind: kind),
     ];
     if (cards.isEmpty) {
       setState(() {
@@ -154,6 +164,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queue = cards;
       _queueIndex = 0;
       _answered = false;
+      _continueArmed = false;
       _reviewing = true;
       _loading = false;
     });
@@ -177,9 +188,11 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     if (_submitting || _answered) return;
     final card = _queue[_queueIndex];
     final graph = context.read<GraphController>();
+    final sessionGen = _reviewSessionGen;
     setState(() {
       _submitting = true;
       _answered = true;
+      _continueArmed = false;
     });
     await graph.submitReview(
       nodeId: card.item.nodeId,
@@ -190,12 +203,16 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       answerBool: answerBool,
       answerText: answerText,
     );
-    if (!mounted) return;
+    if (!mounted || sessionGen != _reviewSessionGen) return;
     setState(() => _submitting = false);
+    // Arm Next/Done after the submitting tap/keyboard Done has fully settled.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
+    setState(() => _continueArmed = true);
   }
 
   Future<void> _onNextCard() async {
-    if (!_answered) return;
+    if (!_answered || !_continueArmed || _submitting) return;
     if (_queueIndex + 1 >= _queue.length) {
       await _loadHub();
       return;
@@ -203,6 +220,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     setState(() {
       _queueIndex += 1;
       _answered = false;
+      _continueArmed = false;
     });
   }
 
@@ -224,21 +242,16 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
     final showNext = _reviewing && _answered;
-    final bottomClearance = OverlayPanel.bottomClearance(
-      context,
-      hasBottom: showNext,
-    );
+    final media = MediaQuery.of(context);
+    final keyboardInset = media.viewInsets.bottom;
+    final safeBottom = media.padding.bottom;
+    // Floating button only — no fade bar. Keep scroll clear of the pill.
+    final bottomClearance = showNext
+        ? safeBottom + keyboardInset + 72
+        : OverlayPanel.bottomClearance(context, hasBottom: false) + keyboardInset;
 
     return OverlayPanel(
       onDismiss: widget.onClose,
-      bottom: showNext
-          ? OverlayLessonFooter(
-              continueLabel:
-                  _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-              continueEnabled: !_submitting,
-              onContinue: () => unawaited(_onNextCard()),
-            )
-          : null,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -278,6 +291,29 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
+          if (showNext)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: safeBottom + keyboardInset + 16,
+              child: FilledButton(
+                onPressed: (!_submitting && _continueArmed)
+                    ? () => unawaited(_onNextCard())
+                    : null,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  elevation: 4,
+                  shadowColor: Colors.black.withValues(alpha: 0.28),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: Text(
+                  _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -419,45 +455,17 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final scheme = Theme.of(context).colorScheme;
     final imageUrl = _cardImageUrl(card.item, graph);
     final entry = LearnDeckEntry(pack: card.item.pack, checkKind: card.checkKind);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    const titleShadows = [
+      Shadow(blurRadius: 8, color: Color(0x66000000)),
+      Shadow(blurRadius: 2, color: Color(0x88000000)),
+    ];
+    // Card sits under a transparent top chrome so the flip can show through.
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        // Align with OverlayCloseButton (top + closeInset, height closeSize).
-        Padding(
-          padding: EdgeInsets.only(
-            top: OverlayPanel.closeInset,
-            left: 20,
-            right: OverlayPanel.closeSize + OverlayPanel.closeInset + 14,
-          ),
-          child: SizedBox(
-            height: OverlayPanel.closeSize,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    card.item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  '${_queueIndex + 1} / ${_queue.length}',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.55),
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
+        Positioned.fill(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(20, 4, 20, bottomClearance),
+            padding: EdgeInsets.fromLTRB(20, OverlayPanel.closeInset, 20, bottomClearance),
             child: SingleChildScrollView(
               child: LearnFlipCard(
                 key: ValueKey(
@@ -488,6 +496,39 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                   );
                 },
               ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: OverlayPanel.closeInset,
+          left: 20,
+          right: OverlayPanel.closeSize + OverlayPanel.closeInset + 14,
+          height: OverlayPanel.closeSize,
+          child: IgnorePointer(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    card.item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurface,
+                          shadows: titleShadows,
+                        ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${_queueIndex + 1} / ${_queue.length}',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                        shadows: titleShadows,
+                      ),
+                ),
+              ],
             ),
           ),
         ),

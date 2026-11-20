@@ -58,8 +58,16 @@ class _OverlayPanelState extends State<OverlayPanel>
 
   double get _width => MediaQuery.sizeOf(context).width;
 
+  bool get _textInputFocused {
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null || !primary.hasFocus) return false;
+    final ctx = primary.context;
+    if (ctx == null) return false;
+    return ctx.widget is EditableText;
+  }
+
   void _onDragStart(DragStartDetails details) {
-    if (_dismissing) return;
+    if (_dismissing || _textInputFocused) return;
     _controller.stop();
     _grabGlobalX = details.globalPosition.dx;
     _grabPanelPx = _dragPx;
@@ -259,13 +267,16 @@ class OverlayLessonFooter extends StatelessWidget {
   static const double fadeExtra = 56;
 
   static double height(BuildContext context) =>
-      MediaQuery.paddingOf(context).bottom + rowHeight;
+      MediaQuery.paddingOf(context).bottom +
+      MediaQuery.viewInsetsOf(context).bottom +
+      rowHeight;
 
   static double fadeHeight(BuildContext context) => height(context) + fadeExtra;
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bottomInset =
+        MediaQuery.paddingOf(context).bottom + MediaQuery.viewInsetsOf(context).bottom;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final scheme = Theme.of(context).colorScheme;
 

@@ -1359,7 +1359,10 @@ class _GraphScreenState extends State<GraphScreen>
             ),
           if (_testingOpen)
             Positioned.fill(
-              child: TestingTrackSheet(onClose: _closeTestingTrack),
+              child: TestingTrackSheet(
+                key: const ValueKey('testing-track'),
+                onClose: _closeTestingTrack,
+              ),
             ),
         ],
       ),

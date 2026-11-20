@@ -130,6 +130,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     final text = _clozeController.text;
     final correct = gradeCloze(bit, text);
     _measureClozeController.text = text;
+    FocusManager.instance.primaryFocus?.unfocus();
     _markRevealed();
     widget.onCheckAnswer(correct: correct, answerText: text.trim());
   }
@@ -193,31 +194,34 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Measure offstage without allowing TextFields to take focus (cloze).
             Offstage(
               offstage: true,
-              child: SizedBox(
-                width: width,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _MeasureSize(
-                      onChange: _onFrontBodySize,
-                      child: Padding(
-                        padding: _bodyPadding,
-                        child: _frontBody(),
-                      ),
-                    ),
-                    _MeasureSize(
-                      onChange: _onBackBodySize,
-                      child: Padding(
-                        padding: _bodyPadding,
-                        child: _backBody(
-                          clozeController: _measureClozeController,
-                          interactive: false,
+              child: ExcludeFocus(
+                child: SizedBox(
+                  width: width,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _MeasureSize(
+                        onChange: _onFrontBodySize,
+                        child: Padding(
+                          padding: _bodyPadding,
+                          child: _frontBody(),
                         ),
                       ),
-                    ),
-                  ],
+                      _MeasureSize(
+                        onChange: _onBackBodySize,
+                        child: Padding(
+                          padding: _bodyPadding,
+                          child: _backBody(
+                            clozeController: _measureClozeController,
+                            interactive: false,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
