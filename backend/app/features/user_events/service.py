@@ -107,6 +107,10 @@ def record_events(
         )
         session.add(event)
         events.append(event)
+
+    from app.features.reviews.service import enroll_from_events
+
+    enroll_from_events(session, user=user, events=events)
     return events
 
 

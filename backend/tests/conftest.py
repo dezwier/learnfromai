@@ -35,10 +35,10 @@ def clean_db():
     with Session(engine, expire_on_commit=False) as session:
         session.exec(
             text(
-                "TRUNCATE TABLE user_topic_events, knowledge_request_nodes, knowledge_requests, knowledge_edges, "
+                "TRUNCATE TABLE user_pack_reviews, user_topic_events, knowledge_request_nodes, knowledge_requests, knowledge_edges, "
                 "knowledge_nodes, knowledge_category_edges, knowledge_categories, "
                 "extend_requests, llm_usage, generation_job_watchers, generation_jobs, edges, concepts, graphs, "
-                "worker_heartbeats, users RESTART IDENTITY CASCADE"
+                "worker_heartbeats, cron_runs, users RESTART IDENTITY CASCADE"
             )
         )
         session.commit()

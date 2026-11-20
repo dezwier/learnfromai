@@ -17,6 +17,7 @@ import 'ui/jobs_chrome.dart';
 import 'ui/learn_sheet.dart';
 import 'ui/learning_track_sheet.dart';
 import 'ui/search_bar.dart';
+import 'ui/testing_track_sheet.dart';
 import 'ui/topic_relations_sheet.dart';
 
 class GraphScreen extends StatefulWidget {
@@ -605,6 +606,20 @@ class _GraphScreenState extends State<GraphScreen>
         seedTitle: node.title,
         openSource: source,
       );
+    } finally {
+      if (mounted && _learnOpen) setState(() => _learnOpen = false);
+    }
+  }
+
+  Future<void> _openTestingTrack() async {
+    if (!_learnOpen || _jobsPanelOpen) {
+      setState(() {
+        _learnOpen = true;
+        _jobsPanelOpen = false;
+      });
+    }
+    try {
+      await showTestingTrack(context);
     } finally {
       if (mounted && _learnOpen) setState(() => _learnOpen = false);
     }
@@ -1264,6 +1279,19 @@ class _GraphScreenState extends State<GraphScreen>
                         ),
                         const SizedBox(height: 6),
                       ],
+                      FloatingActionButton.small(
+                        heroTag: 'graph-testing',
+                        tooltip: 'Testing track',
+                        backgroundColor: scheme.surfaceContainerHighest,
+                        foregroundColor: scheme.onSurfaceVariant,
+                        elevation: 1.5,
+                        focusElevation: 2,
+                        hoverElevation: 2,
+                        highlightElevation: 2,
+                        onPressed: () => unawaited(_openTestingTrack()),
+                        child: const Icon(Icons.style_outlined, size: 20),
+                      ),
+                      const SizedBox(height: 6),
                       FloatingActionButton.small(
                         heroTag: 'graph-search',
                         tooltip: 'Search',

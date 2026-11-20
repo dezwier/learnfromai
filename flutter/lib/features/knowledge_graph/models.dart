@@ -308,6 +308,154 @@ class LearningNext {
   }
 }
 
+class LeitnerBinData {
+  const LeitnerBinData({
+    required this.bin,
+    required this.count,
+    required this.countDue,
+    required this.countNotDue,
+  });
+
+  final int bin;
+  final int count;
+  final int countDue;
+  final int countNotDue;
+
+  factory LeitnerBinData.fromJson(Map<String, dynamic> raw) {
+    return LeitnerBinData(
+      bin: (raw['bin'] as num?)?.toInt() ?? 0,
+      count: (raw['count'] as num?)?.toInt() ?? 0,
+      countDue: (raw['count_due'] as num?)?.toInt() ?? 0,
+      countNotDue: (raw['count_not_due'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class LeitnerDistribution {
+  const LeitnerDistribution({
+    required this.graduationBin,
+    required this.dueCount,
+    required this.bins,
+    this.firstNextReviewAt,
+    this.intervalsHours = const [],
+  });
+
+  final int graduationBin;
+  final int dueCount;
+  final String? firstNextReviewAt;
+  final List<int> intervalsHours;
+  final List<LeitnerBinData> bins;
+
+  factory LeitnerDistribution.fromJson(Map<String, dynamic> raw) {
+    final rows = raw['distribution'];
+    final intervals = raw['intervals_hours'];
+    return LeitnerDistribution(
+      graduationBin: (raw['graduation_bin'] as num?)?.toInt() ?? 8,
+      dueCount: (raw['due_count'] as num?)?.toInt() ?? 0,
+      firstNextReviewAt: raw['first_next_review_at']?.toString(),
+      intervalsHours: [
+        if (intervals is List)
+          for (final row in intervals)
+            if (row is num) row.toInt(),
+      ],
+      bins: [
+        if (rows is List)
+          for (final row in rows)
+            if (row is Map) LeitnerBinData.fromJson(Map<String, dynamic>.from(row)),
+      ],
+    );
+  }
+}
+
+class ReviewDueItem {
+  const ReviewDueItem({
+    required this.nodeId,
+    required this.title,
+    required this.packIndex,
+    required this.leitnerBin,
+    required this.pack,
+    this.nextReviewAt,
+    this.imageUrl,
+    this.imageThumbUrl,
+  });
+
+  final String nodeId;
+  final String title;
+  final int packIndex;
+  final int leitnerBin;
+  final TopicPack pack;
+  final String? nextReviewAt;
+  final String? imageUrl;
+  final String? imageThumbUrl;
+
+  factory ReviewDueItem.fromJson(Map<String, dynamic> raw) {
+    final packRaw = raw['pack'];
+    return ReviewDueItem(
+      nodeId: raw['node_id']?.toString() ?? '',
+      title: raw['title']?.toString() ?? '',
+      packIndex: (raw['pack_index'] as num?)?.toInt() ?? 1,
+      leitnerBin: (raw['leitner_bin'] as num?)?.toInt() ?? 1,
+      nextReviewAt: raw['next_review_at']?.toString(),
+      imageUrl: raw['image_url']?.toString(),
+      imageThumbUrl: raw['image_thumb_url']?.toString(),
+      pack: packRaw is Map
+          ? TopicPack.fromJson(Map<String, dynamic>.from(packRaw))
+          : const TopicPack(packIndex: 1, incomplete: true, bits: []),
+    );
+  }
+}
+
+class ReviewDueQueue {
+  const ReviewDueQueue({required this.items, required this.dueCount});
+
+  final List<ReviewDueItem> items;
+  final int dueCount;
+
+  factory ReviewDueQueue.fromJson(Map<String, dynamic> raw) {
+    final rows = raw['items'];
+    return ReviewDueQueue(
+      dueCount: (raw['due_count'] as num?)?.toInt() ?? 0,
+      items: [
+        if (rows is List)
+          for (final row in rows)
+            if (row is Map) ReviewDueItem.fromJson(Map<String, dynamic>.from(row)),
+      ],
+    );
+  }
+}
+
+class ReviewSubmitResult {
+  const ReviewSubmitResult({
+    required this.nodeId,
+    required this.packIndex,
+    required this.leitnerBin,
+    required this.graduated,
+    required this.updated,
+    this.nextReviewAt,
+    this.intervalHours,
+  });
+
+  final String nodeId;
+  final int packIndex;
+  final int leitnerBin;
+  final bool graduated;
+  final bool updated;
+  final String? nextReviewAt;
+  final int? intervalHours;
+
+  factory ReviewSubmitResult.fromJson(Map<String, dynamic> raw) {
+    return ReviewSubmitResult(
+      nodeId: raw['node_id']?.toString() ?? '',
+      packIndex: (raw['pack_index'] as num?)?.toInt() ?? 1,
+      leitnerBin: (raw['leitner_bin'] as num?)?.toInt() ?? 1,
+      graduated: raw['graduated'] == true,
+      updated: raw['updated'] == true,
+      nextReviewAt: raw['next_review_at']?.toString(),
+      intervalHours: (raw['interval_hours'] as num?)?.toInt(),
+    );
+  }
+}
+
 class TrackedJob {
   const TrackedJob({
     required this.jobId,

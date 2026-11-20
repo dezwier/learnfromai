@@ -43,7 +43,9 @@ def test_openapi_is_auth_and_graph(client):
     assert "delete" in paths["/api/v1/graph/extend/{request_id}"]
     assert "/api/v1/graph" not in paths
     assert "/api/v1/goals" not in paths
-    assert "/api/v1/reviews/due" not in paths
+    assert "/api/v1/me/reviews/due" in paths
+    assert "/api/v1/me/reviews/distribution" in paths
+    assert "/api/v1/me/reviews/submit" in paths
     assert "/api/v1/mastery/overview" not in paths
 
 

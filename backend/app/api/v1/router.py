@@ -43,6 +43,7 @@ from app.features.platform.models import GenerationJob
 from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.learning.service import learning_next
+from app.features.reviews.service import distribution_for_user, due_reviews, submit_review
 from app.features.user_events.affinity import topic_affinity
 from app.features.user_events.service import record_events
 
@@ -101,6 +102,16 @@ class UserEventItem(BaseModel):
 
 class UserEventsBody(BaseModel):
     events: list[UserEventItem] = Field(default_factory=list, max_length=50)
+
+
+class ReviewSubmitBody(BaseModel):
+    node_id: UUID
+    pack_index: int = Field(ge=1)
+    correct: bool
+    check_kind: str = Field(min_length=1, max_length=16)
+    choice_index: int | None = None
+    answer_bool: bool | None = None
+    answer_text: str | None = None
 
 
 @router.post("/auth/firebase")
@@ -211,6 +222,49 @@ def get_me_learning_next(
         exclude_node_id=exclude_node_id,
         exclude_pack_index=exclude_pack_index,
     )
+
+
+@router.get("/me/reviews/distribution")
+def get_me_reviews_distribution(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    return distribution_for_user(session, user=user)
+
+
+@router.get("/me/reviews/due")
+def get_me_reviews_due(
+    limit: int = 10,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    return due_reviews(session, user=user, limit=limit)
+
+
+@router.post("/me/reviews/submit")
+def post_me_reviews_submit(
+    body: ReviewSubmitBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    answer_fields: dict[str, Any] = {}
+    if body.choice_index is not None:
+        answer_fields["choice_index"] = body.choice_index
+    if body.answer_bool is not None:
+        answer_fields["answer_bool"] = body.answer_bool
+    if body.answer_text is not None:
+        answer_fields["answer_text"] = body.answer_text
+    result = submit_review(
+        session,
+        user=user,
+        node_id=body.node_id,
+        pack_index=body.pack_index,
+        correct=body.correct,
+        check_kind=body.check_kind,
+        answer_fields=answer_fields,
+    )
+    session.commit()
+    return result
 
 
 @router.get("/admin/cron-runs/latest")

@@ -419,6 +419,61 @@ class GraphController extends ChangeNotifier {
     return enqueueContent(id, title: title, newPack: newPack);
   }
 
+  /// Leitner hub chart + due count for the testing track.
+  Future<LeitnerDistribution?> fetchReviewDistribution() async {
+    try {
+      final raw = await _get('/me/reviews/distribution');
+      return LeitnerDistribution.fromJson(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Due packs for a review session (capped server-side).
+  Future<ReviewDueQueue?> fetchReviewDue({int limit = 10}) async {
+    try {
+      final raw = await _get('/me/reviews/due?limit=$limit');
+      return ReviewDueQueue.fromJson(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Submit one testing-track answer and apply Leitner moves.
+  Future<ReviewSubmitResult?> submitReview({
+    required String nodeId,
+    required int packIndex,
+    required bool correct,
+    required String checkKind,
+    int? choiceIndex,
+    bool? answerBool,
+    String? answerText,
+  }) async {
+    try {
+      final raw = await _post(
+        '/me/reviews/submit',
+        body: {
+          'node_id': nodeId,
+          'pack_index': packIndex,
+          'correct': correct,
+          'check_kind': checkKind,
+          if (choiceIndex != null) 'choice_index': choiceIndex,
+          if (answerBool != null) 'answer_bool': answerBool,
+          if (answerText != null) 'answer_text': answerText,
+        },
+      );
+      return ReviewSubmitResult.fromJson(raw);
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// Fire-and-forget learn/example/check interaction (never blocks UI).
   Future<void> trackEvent({
     required String nodeId,
