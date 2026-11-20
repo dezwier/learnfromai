@@ -207,7 +207,7 @@ def test_me_includes_is_admin(client, auth, user, session):
     assert response.json()["is_admin"] is True
 
 
-def test_score_user_tiles_uses_packs(session, user):
+def test_score_user_tiles_ignores_learn_events(session, user):
     node = KnowledgeNode(name="Packy", name_key="packy", description="x")
     session.add(node)
     session.flush()
@@ -222,20 +222,10 @@ def test_score_user_tiles_uses_packs(session, user):
                 "kind": "check1",
                 "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
             },
-            {
-                "node_id": str(node.id),
-                "kind": "check2",
-                "payload": {"pack_index": 1, "correct": True, "answer_bool": True},
-            },
-            {
-                "node_id": str(node.id),
-                "kind": "check3",
-                "payload": {"pack_index": 1, "correct": True, "answer_text": "ok"},
-            },
         ],
     )
     session.commit()
     scored = score_user_tiles(session, user_id=user.id)
-    assert scored[node.id]["packs_done"] == 1
-    # focus(1) + learned(3) + packs(1) + new(2) ≈ 7
-    assert scored[node.id]["affinity"] == pytest.approx(7.0, abs=0.1)
+    assert scored[node.id]["learned"] is True
+    # focus(1) + new(2) ≈ 3 — learn/check do not add to affinity
+    assert scored[node.id]["affinity"] == pytest.approx(3.0, abs=0.1)

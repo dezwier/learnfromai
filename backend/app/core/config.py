@@ -69,24 +69,14 @@ class Settings(BaseSettings):
     wikidata_max_items_per_request: int = 200
 
     # --- Affinity (profile map + base tile score for cron) ---
-    # affinity(u,t) = (w_focus*focus + w_open*open + w_learned*learned
-    #   + w_packs_done*packs_done + w_new*recency(node_age))
-    #   * recency(days_since_last_event)
+    # Only focus + open (not learn/check/packs). Soft newness + event recency.
+    # affinity(u,t) = (w_focus*focus + w_open*open + w_new*recency(node_age))
+    #                 * recency(days_since_last_focus_or_open)
     affinity_w_focus: float = Field(
         default=1.0, validation_alias=_env("affinity_w_focus", "AFFINITY_W_FOCUS", "RANK_W_FOCUS")
     )
     affinity_w_open: float = Field(
         default=2.0, validation_alias=_env("affinity_w_open", "AFFINITY_W_OPEN", "RANK_W_OPEN")
-    )
-    affinity_w_learned: float = Field(
-        default=3.0,
-        validation_alias=_env("affinity_w_learned", "AFFINITY_W_LEARNED", "RANK_W_LEARNED"),
-    )
-    affinity_w_packs_done: float = Field(
-        default=1.0,
-        validation_alias=_env(
-            "affinity_w_packs_done", "AFFINITY_W_PACKS_DONE", "RANK_W_PACKS"
-        ),
     )
     affinity_w_new: float = Field(
         default=2.0, validation_alias=_env("affinity_w_new", "AFFINITY_W_NEW", "RANK_W_NEW")
