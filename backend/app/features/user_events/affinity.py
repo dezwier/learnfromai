@@ -105,12 +105,14 @@ def topic_affinity(
             cluster_id_by_node[nid] = index
 
     nodes_out = []
-    for row in top:
+    for rank, row in enumerate(top, start=1):
         nid = row["id"]
+        breakdown = row.get("breakdown") or {}
         nodes_out.append(
             {
                 "id": str(nid),
                 "name": row["name"],
+                "rank": rank,
                 "affinity": round(float(row["affinity"]), 4),
                 "focus_count": row["focus_count"],
                 "open_count": row["open_count"],
@@ -119,6 +121,13 @@ def topic_affinity(
                     f"/knowledge/nodes/{nid}/image/file?variant=thumb" if row["has_image"] else None
                 ),
                 "cluster_id": cluster_id_by_node[nid],
+                "breakdown": {
+                    "focus": round(float(breakdown.get("focus") or 0), 4),
+                    "open": round(float(breakdown.get("open") or 0), 4),
+                    "neighbor": round(float(breakdown.get("neighbor") or 0), 4),
+                    "new": round(float(breakdown.get("new") or 0), 4),
+                    "recency": round(float(breakdown.get("recency") or 1), 4),
+                },
             }
         )
 

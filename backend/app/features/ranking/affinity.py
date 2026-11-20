@@ -141,7 +141,8 @@ def score_user_tiles(
             continue
         focus_n = focus_counts.get(nid, 0)
         open_n = open_counts.get(nid, 0)
-        own = _own_engagement(focus_n=focus_n, open_n=open_n, settings=s)
+        focus_term = float(s.affinity_w_focus * focus_n)
+        open_term = float(s.affinity_w_open * open_n)
         neighbor_spill = 0.0
         for nb in neighbor_map.get(nid, ()):
             neighbor_spill += _own_engagement(
@@ -149,15 +150,18 @@ def score_user_tiles(
                 open_n=open_counts.get(nb, 0),
                 settings=s,
             )
+        neighbor_term = float(s.affinity_w_neighbor * neighbor_spill)
         node_age = age_days(node.created_at, now=current)
         event_age = age_days(last_engage_at.get(nid), now=current)
-        base = (
-            own
-            + s.affinity_w_neighbor * neighbor_spill
-            + s.affinity_w_new
+        new_term = float(
+            s.affinity_w_new
             * recency(node_age, half_life_days=s.affinity_half_life_days)
         )
-        affinity = base * recency(event_age, half_life_days=s.affinity_half_life_days)
+        recency_factor = float(
+            recency(event_age, half_life_days=s.affinity_half_life_days)
+        )
+        base = focus_term + open_term + neighbor_term + new_term
+        affinity = base * recency_factor
         if affinity <= 0:
             continue
         scored[nid] = {
@@ -168,6 +172,13 @@ def score_user_tiles(
             "open_count": open_n,
             "learned": nid in learned_nodes,
             "has_image": bool(node.image_url),
+            "breakdown": {
+                "focus": round(focus_term, 4),
+                "open": round(open_term, 4),
+                "neighbor": round(neighbor_term, 4),
+                "new": round(new_term, 4),
+                "recency": round(recency_factor, 4),
+            },
         }
     return scored
 

@@ -1,33 +1,77 @@
+class TopicAffinityBreakdown {
+  const TopicAffinityBreakdown({
+    required this.focus,
+    required this.open,
+    required this.neighbor,
+    required this.fresh,
+    required this.recency,
+  });
+
+  final double focus;
+  final double open;
+  final double neighbor;
+  final double fresh;
+  final double recency;
+
+  factory TopicAffinityBreakdown.fromJson(Map<String, dynamic>? raw) {
+    if (raw == null) {
+      return const TopicAffinityBreakdown(
+        focus: 0,
+        open: 0,
+        neighbor: 0,
+        fresh: 0,
+        recency: 1,
+      );
+    }
+    return TopicAffinityBreakdown(
+      focus: (raw['focus'] as num?)?.toDouble() ?? 0,
+      open: (raw['open'] as num?)?.toDouble() ?? 0,
+      neighbor: (raw['neighbor'] as num?)?.toDouble() ?? 0,
+      fresh: (raw['new'] as num?)?.toDouble() ?? 0,
+      recency: (raw['recency'] as num?)?.toDouble() ?? 1,
+    );
+  }
+}
+
 class TopicAffinityNode {
   const TopicAffinityNode({
     required this.id,
     required this.name,
+    required this.rank,
     required this.affinity,
     required this.focusCount,
     required this.openCount,
     required this.learned,
     required this.clusterId,
+    required this.breakdown,
     this.imageThumbUrl,
   });
 
   final String id;
   final String name;
+  final int rank;
   final double affinity;
   final int focusCount;
   final int openCount;
   final bool learned;
   final int clusterId;
+  final TopicAffinityBreakdown breakdown;
   final String? imageThumbUrl;
 
   factory TopicAffinityNode.fromJson(Map<String, dynamic> raw) {
+    final breakdownRaw = raw['breakdown'];
     return TopicAffinityNode(
       id: raw['id']?.toString() ?? '',
       name: raw['name']?.toString() ?? 'Topic',
+      rank: (raw['rank'] as num?)?.toInt() ?? 0,
       affinity: (raw['affinity'] as num?)?.toDouble() ?? 0,
       focusCount: (raw['focus_count'] as num?)?.toInt() ?? 0,
       openCount: (raw['open_count'] as num?)?.toInt() ?? 0,
       learned: raw['learned'] == true,
       clusterId: (raw['cluster_id'] as num?)?.toInt() ?? 0,
+      breakdown: TopicAffinityBreakdown.fromJson(
+        breakdownRaw is Map ? Map<String, dynamic>.from(breakdownRaw) : null,
+      ),
       imageThumbUrl: raw['image_thumb_url']?.toString(),
     );
   }

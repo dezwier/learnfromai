@@ -83,6 +83,9 @@ class TopicAffinityMap extends StatelessWidget {
                     _TopicBadge(
                       key: ValueKey(topic.node.id),
                       title: topic.node.name,
+                      rank: topic.node.rank,
+                      affinity: topic.node.affinity,
+                      breakdown: topic.node.breakdown,
                       isMain: topic.rankInCluster == 0,
                       color: _fadeColor(
                         topic.color,
@@ -194,10 +197,33 @@ Color _inkFor(Color base, int index, int total, ColorScheme scheme) {
   return scheme.onSurface.withValues(alpha: 0.88 - 0.18 * (index / math.max(1, total - 1)));
 }
 
+String _compactScore(double value) {
+  if (value == 0) return '0';
+  if (value >= 10) return value.toStringAsFixed(0);
+  final one = value.toStringAsFixed(1);
+  return one.endsWith('.0') ? one.substring(0, one.length - 2) : one;
+}
+
+String _breakdownLine(TopicAffinityBreakdown b) {
+  final parts = <String>[
+    if (b.focus > 0) 'f${_compactScore(b.focus)}',
+    if (b.open > 0) 'o${_compactScore(b.open)}',
+    if (b.neighbor > 0) 'n${_compactScore(b.neighbor)}',
+    if (b.fresh > 0) '+${_compactScore(b.fresh)}',
+  ];
+  if (b.recency < 0.995) {
+    parts.add('×${_compactScore(b.recency)}');
+  }
+  return parts.isEmpty ? '—' : parts.join(' · ');
+}
+
 class _TopicBadge extends StatelessWidget {
   const _TopicBadge({
     super.key,
     required this.title,
+    required this.rank,
+    required this.affinity,
+    required this.breakdown,
     required this.isMain,
     required this.color,
     required this.ink,
@@ -205,6 +231,9 @@ class _TopicBadge extends StatelessWidget {
   });
 
   final String title;
+  final int rank;
+  final double affinity;
+  final TopicAffinityBreakdown breakdown;
   final bool isMain;
   final Color color;
   final Color ink;
@@ -212,6 +241,7 @@ class _TopicBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final muted = ink.withValues(alpha: 0.72);
     return Material(
       color: color,
       borderRadius: BorderRadius.circular(isMain ? 16 : 14),
@@ -220,19 +250,65 @@ class _TopicBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(isMain ? 16 : 14),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: isMain ? 14 : 12,
-            vertical: isMain ? 10 : 8,
+            horizontal: isMain ? 12 : 10,
+            vertical: isMain ? 9 : 7,
           ),
-          child: Text(
-            title,
-            softWrap: true,
-            style: TextStyle(
-              fontFamily: 'tt_ramilas',
-              fontWeight: isMain ? FontWeight.w700 : FontWeight.w600,
-              fontSize: isMain ? 16 : 13.5,
-              height: 1.2,
-              color: ink,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    rank > 0 ? '#$rank' : '·',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: isMain ? 12 : 11,
+                      height: 1.1,
+                      color: muted,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 148),
+                    child: Text(
+                      title,
+                      softWrap: true,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramilas',
+                        fontWeight: isMain ? FontWeight.w700 : FontWeight.w600,
+                        fontSize: isMain ? 15 : 13,
+                        height: 1.15,
+                        color: ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _compactScore(affinity),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: isMain ? 12.5 : 11.5,
+                      height: 1.1,
+                      color: ink,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                _breakdownLine(breakdown),
+                style: TextStyle(
+                  fontSize: 10.5,
+                  height: 1.15,
+                  fontWeight: FontWeight.w500,
+                  color: muted,
+                  letterSpacing: 0.15,
+                ),
+              ),
+            ],
           ),
         ),
       ),
