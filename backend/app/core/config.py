@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _env(*names: str) -> AliasChoices:
+    """Accept new + legacy env names (case-insensitive via settings)."""
+    return AliasChoices(*names)
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     environment: str = "development"
     database_url: str = "postgresql+psycopg://desiredewaele@localhost:5432/adaptive_mastery"
@@ -62,27 +68,71 @@ class Settings(BaseSettings):
     wikidata_max_cloud_radius: int = 2
     wikidata_max_items_per_request: int = 200
 
-    # Ranking: user–tile affinity + job scores (weights only; no hard caps).
+    # --- Affinity (profile map + base tile score for cron) ---
     # affinity(u,t) = (w_focus*focus + w_open*open + w_learned*learned
-    #   + w_packs*packs_done + w_new*recency(node_age))
+    #   + w_packs_done*packs_done + w_new*recency(node_age))
     #   * recency(days_since_last_event)
-    # recency(d) = exp(-ln(2)*d/half_life_days)
-    # neighbor_score = tile_affinity / (1 + w_neighbor_penalty * neighbors)
-    # learn_score    = tile_affinity / (1 + w_pack_penalty * packs)
-    rank_w_focus: float = 1.0
-    rank_w_open: float = 2.0
-    rank_w_learned: float = 3.0
-    rank_w_packs: float = 1.0
-    rank_w_new: float = 2.0
-    rank_half_life_days: float = 14.0
-    # Heavier penalties: prefer tiles with few neighbors / few packs.
-    rank_w_neighbor_penalty: float = 3.0
-    rank_w_pack_penalty: float = 8.0
-    # Learning track: P(stay on seed topic when it still has unlearned packs).
-    learn_track_exploit_p: float = 0.7
+    affinity_w_focus: float = Field(
+        default=1.0, validation_alias=_env("affinity_w_focus", "AFFINITY_W_FOCUS", "RANK_W_FOCUS")
+    )
+    affinity_w_open: float = Field(
+        default=2.0, validation_alias=_env("affinity_w_open", "AFFINITY_W_OPEN", "RANK_W_OPEN")
+    )
+    affinity_w_learned: float = Field(
+        default=3.0,
+        validation_alias=_env("affinity_w_learned", "AFFINITY_W_LEARNED", "RANK_W_LEARNED"),
+    )
+    affinity_w_packs_done: float = Field(
+        default=1.0,
+        validation_alias=_env(
+            "affinity_w_packs_done", "AFFINITY_W_PACKS_DONE", "RANK_W_PACKS"
+        ),
+    )
+    affinity_w_new: float = Field(
+        default=2.0, validation_alias=_env("affinity_w_new", "AFFINITY_W_NEW", "RANK_W_NEW")
+    )
+    affinity_half_life_days: float = Field(
+        default=14.0,
+        validation_alias=_env(
+            "affinity_half_life_days", "AFFINITY_HALF_LIFE_DAYS", "RANK_HALF_LIFE_DAYS"
+        ),
+    )
+
+    # --- Cron: expand-neighborhood job ranking ---
+    # neighbor_score = affinity / (1 + w_count_penalty * neighbor_count)
+    cron_neighbor_w_count_penalty: float = Field(
+        default=3.0,
+        validation_alias=_env(
+            "cron_neighbor_w_count_penalty",
+            "CRON_NEIGHBOR_W_COUNT_PENALTY",
+            "RANK_W_NEIGHBOR_PENALTY",
+        ),
+    )
     cron_neighbor_jobs_per_day: int = 5
-    cron_learn_jobs_per_day: int = 10
     cron_neighbor_budget_total: int = 16
+
+    # --- Cron: expand-content (atomic packs) job ranking ---
+    # learn_score = affinity * (1 + w_neighbor_boost * neighbors)
+    #               / (1 + w_pack_penalty * packs)
+    cron_learn_w_pack_penalty: float = Field(
+        default=8.0,
+        validation_alias=_env(
+            "cron_learn_w_pack_penalty", "CRON_LEARN_W_PACK_PENALTY", "RANK_W_PACK_PENALTY"
+        ),
+    )
+    cron_learn_w_neighbor_boost: float = Field(
+        default=0.25,
+        validation_alias=_env(
+            "cron_learn_w_neighbor_boost",
+            "CRON_LEARN_W_NEIGHBOR_BOOST",
+            "RANK_W_LEARN_NEIGHBOR_BOOST",
+        ),
+    )
+    cron_learn_jobs_per_day: int = 10
+
+    # --- Learning track (in-app next-card picker) ---
+    # P(stay on seed topic when it still has unlearned packs).
+    learn_track_exploit_p: float = 0.7
 
     @property
     def cors_origin_list(self) -> list[str]:

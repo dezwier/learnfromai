@@ -1,20 +1,15 @@
 """User–tile affinity and job ranking for HUD + daily cron.
 
-Formula (weights from Settings; soft decay only — never hard-cap to zero):
+Weights live on Settings, grouped by use case:
 
-  recency(age_days) = exp(-ln(2) * age_days / half_life_days)
+  Affinity:      AFFINITY_W_* / AFFINITY_HALF_LIFE_DAYS
+  Neighbor cron: CRON_NEIGHBOR_W_COUNT_PENALTY (+ jobs/day, budget)
+  Pack cron:     CRON_LEARN_W_PACK_PENALTY, CRON_LEARN_W_NEIGHBOR_BOOST
+  Learn track:   LEARN_TRACK_EXPLOIT_P
 
-  affinity(u, t) = (
-      w_focus   * focus_count
-    + w_open    * open_count
-    + w_learned * 1_if_any_learn_or_check
-    + w_packs   * completed_pack_count
-    + w_new     * recency(days_since_node_created)
-  ) * recency(days_since_last_event_on_tile)
-
-  tile_affinity(t)  = sum over users of affinity(u, t)
-  neighbor_score(t) = tile_affinity(t) / (1 + w_neighbor_penalty * neighbor_count)
-  learn_score(t)    = tile_affinity(t) / (1 + w_pack_penalty * pack_count)
+  neighbor_score = affinity / (1 + cron_neighbor_w_count_penalty * neighbors)
+  learn_score    = affinity * (1 + cron_learn_w_neighbor_boost * neighbors)
+                   / (1 + cron_learn_w_pack_penalty * packs)
 
 Collaborative filtering can later replace affinity(u,t) behind the same interface.
 """

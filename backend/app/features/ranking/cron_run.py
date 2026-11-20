@@ -58,6 +58,7 @@ def run_daily_cron(session: Session, *, settings: Settings | None = None) -> Cro
                     "score": round(float(row["score"]), 4),
                     "pack_index": row["pack_index"],
                     "pack_count": row["pack_count"],
+                    "neighbor_count": row.get("neighbor_count"),
                     "job_id": str(job.id) if job is not None else None,
                 }
             )

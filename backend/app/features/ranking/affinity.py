@@ -38,14 +38,15 @@ def age_days(when: datetime | None, *, now: datetime | None = None) -> float:
 def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]:
     s = settings or get_settings()
     return {
-        "rank_w_focus": s.rank_w_focus,
-        "rank_w_open": s.rank_w_open,
-        "rank_w_learned": s.rank_w_learned,
-        "rank_w_packs": s.rank_w_packs,
-        "rank_w_new": s.rank_w_new,
-        "rank_half_life_days": s.rank_half_life_days,
-        "rank_w_neighbor_penalty": s.rank_w_neighbor_penalty,
-        "rank_w_pack_penalty": s.rank_w_pack_penalty,
+        "affinity_w_focus": s.affinity_w_focus,
+        "affinity_w_open": s.affinity_w_open,
+        "affinity_w_learned": s.affinity_w_learned,
+        "affinity_w_packs_done": s.affinity_w_packs_done,
+        "affinity_w_new": s.affinity_w_new,
+        "affinity_half_life_days": s.affinity_half_life_days,
+        "cron_neighbor_w_count_penalty": s.cron_neighbor_w_count_penalty,
+        "cron_learn_w_pack_penalty": s.cron_learn_w_pack_penalty,
+        "cron_learn_w_neighbor_boost": s.cron_learn_w_neighbor_boost,
         "learn_track_exploit_p": s.learn_track_exploit_p,
         "cron_neighbor_jobs_per_day": s.cron_neighbor_jobs_per_day,
         "cron_learn_jobs_per_day": s.cron_learn_jobs_per_day,
@@ -116,13 +117,14 @@ def score_user_tiles(
         node_age = age_days(node.created_at, now=current)
         event_age = age_days(last_event_at.get(nid), now=current)
         base = (
-            s.rank_w_focus * focus_n
-            + s.rank_w_open * open_n
-            + (s.rank_w_learned if learned else 0.0)
-            + s.rank_w_packs * packs_done
-            + s.rank_w_new * recency(node_age, half_life_days=s.rank_half_life_days)
+            s.affinity_w_focus * focus_n
+            + s.affinity_w_open * open_n
+            + (s.affinity_w_learned if learned else 0.0)
+            + s.affinity_w_packs_done * packs_done
+            + s.affinity_w_new
+            * recency(node_age, half_life_days=s.affinity_half_life_days)
         )
-        affinity = base * recency(event_age, half_life_days=s.rank_half_life_days)
+        affinity = base * recency(event_age, half_life_days=s.affinity_half_life_days)
         if affinity <= 0:
             continue
         scored[nid] = {

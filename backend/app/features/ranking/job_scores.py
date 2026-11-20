@@ -47,7 +47,9 @@ def neighbor_job_scores(
         neighbors = _direct_neighbor_count(session, nid)
         if neighbors >= budget:
             continue
-        score = float(row["affinity"]) / (1.0 + s.rank_w_neighbor_penalty * neighbors)
+        score = float(row["affinity"]) / (
+            1.0 + s.cron_neighbor_w_count_penalty * neighbors
+        )
         ranked.append(
             {
                 "node_id": nid,
@@ -101,12 +103,19 @@ def learn_job_scores(
             new_pack = True
         if not missing:
             continue
-        score = float(row["affinity"]) / (1.0 + s.rank_w_pack_penalty * packs)
+        neighbors = _direct_neighbor_count(session, nid)
+        affinity = float(row["affinity"])
+        score = (
+            affinity
+            * (1.0 + s.cron_learn_w_neighbor_boost * neighbors)
+            / (1.0 + s.cron_learn_w_pack_penalty * packs)
+        )
         ranked.append(
             {
                 "node_id": nid,
                 "name": row["name"],
-                "tile_affinity": float(row["affinity"]),
+                "tile_affinity": affinity,
+                "neighbor_count": neighbors,
                 "pack_count": packs,
                 "pack_index": pack_index,
                 "missing_kinds": missing,

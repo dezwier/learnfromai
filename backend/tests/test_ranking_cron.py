@@ -67,7 +67,40 @@ def test_neighbor_and_learn_scores_penalize(session, user):
     learns = {row["name"]: row for row in learn_job_scores(session)}
     assert learns["Sparse"]["pack_count"] == 0
     assert learns["Rich"]["pack_count"] == 1
+    # Pack penalty still dominates when Sparse has zero packs.
     assert learns["Sparse"]["score"] > learns["Rich"]["score"]
+
+
+def test_learn_scores_boost_with_neighbors(session, user):
+    """Equal packs: more neighbors → higher learn score."""
+    lonely = KnowledgeNode(name="Lonely", name_key="lonely", description="x")
+    connected = KnowledgeNode(name="Connected", name_key="connected", description="x")
+    session.add(lonely)
+    session.add(connected)
+    session.flush()
+    for i in range(4):
+        n = KnowledgeNode(name=f"C{i}", name_key=f"c-{i}", description="x")
+        session.add(n)
+        session.flush()
+        session.add(KnowledgeEdge(from_id=connected.id, relation="child", to_id=n.id))
+        session.add(KnowledgeEdge(from_id=n.id, relation="parent", to_id=connected.id))
+    record_focus(session, user=user, node_id=lonely.id)
+    record_focus(session, user=user, node_id=connected.id)
+    record_events(
+        session,
+        user=user,
+        items=[
+            {"node_id": str(lonely.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(connected.id), "kind": "open", "payload": {"source": "graph"}},
+        ],
+    )
+    session.commit()
+
+    learns = {row["name"]: row for row in learn_job_scores(session)}
+    assert learns["Lonely"]["pack_count"] == 0
+    assert learns["Connected"]["pack_count"] == 0
+    assert learns["Connected"]["neighbor_count"] > learns["Lonely"]["neighbor_count"]
+    assert learns["Connected"]["score"] > learns["Lonely"]["score"]
 
 
 def test_cron_enqueues_and_persists(session, user):
