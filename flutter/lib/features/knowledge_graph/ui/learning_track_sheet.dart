@@ -10,6 +10,7 @@ import '../graph_controller.dart';
 import '../models.dart';
 import 'learn_card.dart';
 import 'learn_edge_dismiss.dart';
+import 'learning_track_support.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -62,6 +63,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   final _rng = math.Random();
   final Set<String> _trackedKinds = {};
   GraphController? _graph;
+  LearningTrackSupport? _support;
   var _listening = false;
   String? _watchedJobId;
   String? _generateNodeId;
@@ -72,8 +74,18 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   String? _error;
   String? _topicTitle;
   String? _nodeId;
+  String? _cardImageUrl;
   LearnDeckEntry? _entry;
   int _cardEpoch = 0;
+
+  LearningTrackSupport _supportFor(GraphController graph) {
+    final existing = _support;
+    if (existing != null && identical(_graph, graph)) return existing;
+    _graph = graph;
+    final next = LearningTrackSupport(graph);
+    _support = next;
+    return next;
+  }
 
   @override
   void initState() {
@@ -99,11 +111,20 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
 
   @override
   void dispose() {
+    _support?.cancelPrefetch();
     _stopListening();
     super.dispose();
   }
 
   String _trackKey(int packIndex, String kind) => '$packIndex:$kind';
+
+  Future<void> _setCardImage(LearningNext next) async {
+    final support = _support;
+    if (support == null) return;
+    final url = await support.resolveImageUrl(next);
+    if (!mounted) return;
+    setState(() => _cardImageUrl = url);
+  }
 
   Future<void> _loadNext(
     String seedId, {
@@ -111,12 +132,14 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     bool trackOpen = false,
   }) async {
     final graph = context.read<GraphController>();
-    _graph = graph;
+    final support = _supportFor(graph);
+    support.cancelPrefetch();
     setState(() {
       _loading = true;
       _error = null;
       _quizDone = false;
       _entry = null;
+      _cardImageUrl = null;
     });
     final next = await graph.fetchLearningNext(seedId);
     if (!mounted) return;
@@ -135,13 +158,17 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   }
 
   Future<void> _startGenerate(GraphController graph, String nodeId, String title) async {
+    final support = _supportFor(graph);
+    support.cancelPrefetch();
     setState(() {
       _loading = true;
       _generateNodeId = nodeId;
       _topicTitle = title;
       _nodeId = nodeId;
+      _cardImageUrl = null;
       _error = null;
     });
+    unawaited(_setCardImage(LearningNext(status: 'generate', nodeId: nodeId, title: title)));
     final queued = await graph.enqueueContent(nodeId, title: title);
     if (!mounted) return;
     if (queued == null && graph.jobForNode(nodeId, type: 'expand_content') == null) {
@@ -183,9 +210,12 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     final kind = available[_rng.nextInt(available.length)];
+    final support = _supportFor(graph);
+    final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, next.nodeId);
     setState(() {
       _nodeId = next.nodeId;
       _topicTitle = next.title;
+      _cardImageUrl = next.bestImageUrl ?? graphUrls.$1 ?? graphUrls.$2;
       _entry = LearnDeckEntry(pack: pack, checkKind: kind);
       _trackedKinds.clear();
       _quizDone = false;
@@ -193,7 +223,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _error = null;
       _generateNodeId = null;
       _cardEpoch += 1;
+      _advancing = false;
     });
+    unawaited(_setCardImage(next));
+    support.schedulePrefetch(next);
     if (trackOpen) {
       unawaited(
         graph.trackEvent(
@@ -278,26 +311,39 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     if (_advancing || !_quizDone) return;
     final seed = _nodeId;
     if (seed == null) return;
-    setState(() => _advancing = true);
+    final graph = context.read<GraphController>();
+    final support = _supportFor(graph);
+    setState(() {
+      _advancing = true;
+      _loading = true;
+      _error = null;
+      _quizDone = false;
+      _entry = null;
+      _cardImageUrl = null;
+    });
+
+    // Prefer the card prefetched while the user was on the previous one.
+    await support.awaitPrefetch();
+    if (!mounted) return;
+    final prefetched = support.prefetched;
+    support.cancelPrefetch();
+
+    if (prefetched != null) {
+      if (prefetched.needsGenerate) {
+        await _startGenerate(
+          graph,
+          prefetched.nodeId,
+          prefetched.title.isEmpty ? (_topicTitle ?? '') : prefetched.title,
+        );
+        if (mounted) setState(() => _advancing = false);
+        return;
+      }
+      _applyReady(graph, prefetched);
+      return;
+    }
+
     await _loadNext(seed, titleHint: _topicTitle);
     if (mounted) setState(() => _advancing = false);
-  }
-
-  (String?, String?) _imageUrls(GraphController graph, String? nodeId) {
-    if (nodeId == null) return (null, null);
-    final nodes = graph.categoryGraph?['nodes'];
-    if (nodes is! List) return (null, null);
-    for (final raw in nodes) {
-      if (raw is Map && raw['id']?.toString() == nodeId) {
-        final url = raw['image_url']?.toString().trim();
-        final thumb = raw['image_thumb_url']?.toString().trim();
-        return (
-          (url == null || url.isEmpty) ? null : url,
-          (thumb == null || thumb.isEmpty) ? null : thumb,
-        );
-      }
-    }
-    return (null, null);
   }
 
   @override
@@ -305,8 +351,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final graph = context.watch<GraphController>();
     final scheme = Theme.of(context).colorScheme;
     final padding = MediaQuery.paddingOf(context);
-    final urls = _imageUrls(graph, _nodeId);
-    final imageUrl = urls.$1 ?? urls.$2;
+    final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, _nodeId);
+    final imageUrl = _cardImageUrl ?? graphUrls.$1 ?? graphUrls.$2;
     final entry = _entry;
     final generating = _generateNodeId != null &&
         (graph.jobForNode(_generateNodeId!, type: 'expand_content') != null ||

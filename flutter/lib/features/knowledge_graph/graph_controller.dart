@@ -327,13 +327,43 @@ class GraphController extends ChangeNotifier {
   }
 
   /// Next unlearned atomic pack on seed or a neighbor (exploit / explore).
-  Future<LearningNext?> fetchLearningNext(String seedNodeId) async {
+  ///
+  /// Pass [excludeNodeId] + [excludePackIndex] to skip the on-screen pack when
+  /// prefetching the following card.
+  Future<LearningNext?> fetchLearningNext(
+    String seedNodeId, {
+    String? excludeNodeId,
+    int? excludePackIndex,
+  }) async {
     try {
-      final raw = await _get('/me/learning-next?seed_node_id=$seedNodeId');
+      final params = <String>['seed_node_id=$seedNodeId'];
+      if (excludeNodeId != null &&
+          excludeNodeId.isNotEmpty &&
+          excludePackIndex != null &&
+          excludePackIndex > 0) {
+        params.add('exclude_node_id=$excludeNodeId');
+        params.add('exclude_pack_index=$excludePackIndex');
+      }
+      final raw = await _get('/me/learning-next?${params.join('&')}');
       return LearningNext.fromJson(raw);
     } on ApiException catch (exc) {
       error = exc.message;
       notifyListeners();
+      return null;
+    }
+  }
+
+  /// Image metadata for a node not present in the current neighborhood graph.
+  Future<({String? imageUrl, String? imageThumbUrl})?> fetchNodeImageMeta(String nodeId) async {
+    try {
+      final raw = await _get('/knowledge/nodes/$nodeId/image');
+      final url = raw['image_url']?.toString().trim();
+      final thumb = raw['image_thumb_url']?.toString().trim();
+      return (
+        imageUrl: (url == null || url.isEmpty) ? null : url,
+        imageThumbUrl: (thumb == null || thumb.isEmpty) ? null : thumb,
+      );
+    } on ApiException {
       return null;
     }
   }

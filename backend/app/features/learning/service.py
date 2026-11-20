@@ -16,9 +16,19 @@ from app.features.content.service import (
     is_pack_complete,
 )
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
+from app.features.node_image.service import has_image, image_path_for, thumb_path_for
 from app.features.ranking.affinity import score_user_tiles
 
 _EPS = 1e-6
+
+
+def _image_fields(node: KnowledgeNode) -> dict[str, str | None]:
+    if not has_image(node):
+        return {"image_url": None, "image_thumb_url": None}
+    return {
+        "image_url": image_path_for(node.id),
+        "image_thumb_url": thumb_path_for(node.id),
+    }
 
 
 def _direct_neighbor_ids(session: Session, seed_id: UUID) -> set[UUID]:
@@ -33,6 +43,7 @@ def _eligible_packs(
     *,
     user_id: UUID,
     node_id: UUID,
+    exclude_pack_index: int | None = None,
 ) -> list[dict]:
     payload = content_for_node(session, node_id, user_id=user_id)
     completed = set(payload.get("completed_packs") or [])
@@ -42,6 +53,8 @@ def _eligible_packs(
             continue
         pack_index = int(pack.get("pack_index") or 0)
         if pack_index < 1:
+            continue
+        if exclude_pack_index is not None and pack_index == exclude_pack_index:
             continue
         if pack.get("incomplete") is True:
             continue
@@ -71,10 +84,16 @@ def learning_next(
     *,
     user: User,
     seed_node_id: UUID,
+    exclude_node_id: UUID | None = None,
+    exclude_pack_index: int | None = None,
     settings: Settings | None = None,
     rng: random.Random | None = None,
 ) -> dict:
-    """Return the next pack to learn, or a generate hint for the seed."""
+    """Return the next pack to learn, or a generate hint for the seed.
+
+    Optional exclude_* skips a pack still on-screen so the client can prefetch
+    the following card before the user finishes the current quiz.
+    """
     s = settings or get_settings()
     rng = rng or random.Random()
     seed = session.get(KnowledgeNode, seed_node_id)
@@ -95,7 +114,17 @@ def learning_next(
 
     eligible_by_node: dict[UUID, list[dict]] = {}
     for nid in candidate_ids:
-        packs = _eligible_packs(session, user_id=user.id, node_id=nid)
+        skip_pack = (
+            exclude_pack_index
+            if exclude_node_id is not None and nid == exclude_node_id
+            else None
+        )
+        packs = _eligible_packs(
+            session,
+            user_id=user.id,
+            node_id=nid,
+            exclude_pack_index=skip_pack,
+        )
         if packs:
             eligible_by_node[nid] = packs
 
@@ -104,6 +133,7 @@ def learning_next(
             "status": "generate",
             "node_id": str(seed_node_id),
             "title": seed.name,
+            **_image_fields(seed),
         }
 
     seed_has = seed_node_id in eligible_by_node
@@ -136,4 +166,5 @@ def learning_next(
         "completed_packs": completed_pack_indexes(
             session, user_id=user.id, node_id=chosen_id
         ),
+        **_image_fields(node),
     }

@@ -64,9 +64,16 @@ def test_learning_next_generate_when_no_packs(client, auth, session, user):
 
 
 def test_learning_next_returns_seed_pack(client, auth, session, user):
-    seed = KnowledgeNode(name="Seed", name_key="seed", description="x")
+    seed = KnowledgeNode(
+        name="Seed",
+        name_key="seed",
+        description="x",
+        image_url="/knowledge/nodes/placeholder/image/file",
+        image_bytes=b"fake-png",
+    )
     session.add(seed)
     session.flush()
+    seed.image_url = f"/knowledge/nodes/{seed.id}/image/file"
     _add_pack(session, seed.id)
     session.commit()
 
@@ -80,9 +87,34 @@ def test_learning_next_returns_seed_pack(client, auth, session, user):
     assert body["node_id"] == str(seed.id)
     assert body["pack_index"] == 1
     assert body["pack"]["pack_index"] == 1
+    assert body["image_url"] == f"/knowledge/nodes/{seed.id}/image/file"
+    assert body["image_thumb_url"] == f"/knowledge/nodes/{seed.id}/image/file?variant=thumb"
     kinds = {bit["kind"] for bit in body["pack"]["bits"]}
     assert "learn" in kinds
     assert kinds & {"check1", "check2", "check3"}
+
+
+def test_learning_next_exclude_skips_current_pack(client, auth, session, user):
+    seed = KnowledgeNode(name="Seed", name_key="seed-ex", description="x")
+    neighbor = KnowledgeNode(name="Neighbor", name_key="neighbor-ex", description="x")
+    session.add(seed)
+    session.add(neighbor)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=neighbor.id))
+    _add_pack(session, seed.id, pack_index=1)
+    _add_pack(session, neighbor.id, pack_index=1)
+    session.commit()
+
+    response = client.get(
+        f"/api/v1/me/learning-next?seed_node_id={seed.id}"
+        f"&exclude_node_id={seed.id}&exclude_pack_index=1",
+        headers=auth,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["node_id"] == str(neighbor.id)
+    assert body["pack_index"] == 1
 
 
 def test_learning_next_skips_completed_atomic_pack(session, user):

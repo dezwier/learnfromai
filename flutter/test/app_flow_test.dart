@@ -624,8 +624,11 @@ void main() {
     expect(quizVisible, isTrue);
     expect(find.textContaining('Dinosaurs are a learning topic'), findsWidgets);
 
-    // Answer the MC quiz → Next appears.
-    await tester.tap(find.textContaining('Dinosaurs are a learning topic').first);
+    // Answer the MC quiz → Next appears (choice may sit below the fold).
+    final choice = find.textContaining('Dinosaurs are a learning topic').first;
+    await tester.ensureVisible(choice);
+    await tester.pumpAndSettle();
+    await tester.tap(choice);
     await tester.pumpAndSettle();
     expect(find.text('Next'), findsOneWidget);
   });

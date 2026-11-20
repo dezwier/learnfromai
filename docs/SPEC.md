@@ -33,7 +33,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `PATCH /api/v1/me/preferences`
 - `POST /api/v1/me/events` `{events: [{node_id, kind, occurred_at?, payload?}]}` → `{recorded, ids}` (client `open` / learn / example / check; `open` payload `{source: graph|search|list}`; `focus` is written server-side on neighborhood open)
 - `GET /api/v1/me/topic-affinity?limit=24` → `{nodes, clusters, edges}` for the profile affinity map (each node: `rank`, `affinity`, `breakdown` `{focus,open,neighbor,new,recency}`)
-- `GET /api/v1/me/learning-next?seed_node_id=` → `{status: ready, node_id, title, pack_index, pack, affinity, completed_packs}` or `{status: generate, node_id, title}` when seed+neighbors have no unlearned packs
+- `GET /api/v1/me/learning-next?seed_node_id=` → `{status: ready, node_id, title, pack_index, pack, affinity, completed_packs, image_url, image_thumb_url}` or `{status: generate, node_id, title, image_url?, image_thumb_url?}` when seed+neighbors have no unlearned packs. Optional `exclude_node_id` + `exclude_pack_index` skip the on-screen pack for prefetch.
 - `GET /api/v1/knowledge/nodes/{id}/jobs` → active `expand_neighborhood` / `expand_content` / `generate_image` jobs for that node (any user); caller is attached as a watcher. Different job types may run in parallel; the same type coalesces across users.
 - `GET /api/v1/admin/cron-runs/latest` → last daily ranking cron summary (403 unless `is_admin`)
 - `POST /api/v1/admin/cron-runs/run` → run the ranking cron now and return its summary (403 unless `is_admin`)

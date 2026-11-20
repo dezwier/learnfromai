@@ -261,6 +261,8 @@ class LearningNext {
     this.pack,
     this.affinity = 0,
     this.completedPacks = const [],
+    this.imageUrl,
+    this.imageThumbUrl,
   });
 
   /// `ready` or `generate`.
@@ -271,9 +273,19 @@ class LearningNext {
   final TopicPack? pack;
   final double affinity;
   final List<int> completedPacks;
+  final String? imageUrl;
+  final String? imageThumbUrl;
 
   bool get needsGenerate => status == 'generate';
   bool get isReady => status == 'ready' && pack != null;
+
+  String? get bestImageUrl {
+    final thumb = imageThumbUrl?.trim();
+    if (thumb != null && thumb.isNotEmpty) return thumb;
+    final full = imageUrl?.trim();
+    if (full != null && full.isNotEmpty) return full;
+    return null;
+  }
 
   factory LearningNext.fromJson(Map<String, dynamic> raw) {
     final packRaw = raw['pack'];
@@ -290,6 +302,8 @@ class LearningNext {
           for (final row in completedRaw)
             if (row is num) row.toInt(),
       ],
+      imageUrl: raw['image_url']?.toString(),
+      imageThumbUrl: raw['image_thumb_url']?.toString(),
     );
   }
 }

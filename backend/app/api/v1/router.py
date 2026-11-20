@@ -199,10 +199,18 @@ def get_me_topic_affinity(
 @router.get("/me/learning-next")
 def get_me_learning_next(
     seed_node_id: UUID,
+    exclude_node_id: UUID | None = None,
+    exclude_pack_index: int | None = None,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    return learning_next(session, user=user, seed_node_id=seed_node_id)
+    return learning_next(
+        session,
+        user=user,
+        seed_node_id=seed_node_id,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+    )
 
 
 @router.get("/admin/cron-runs/latest")
