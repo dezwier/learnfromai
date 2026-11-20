@@ -450,6 +450,20 @@ def _enqueue(
     pack_index: int,
     missing: list[str],
 ) -> GenerationJob:
+    from app.features.platform.jobs import active_job_for_node
+
+    # One content job per node at a time (any pack / any user).
+    existing = active_job_for_node(session, job_type="expand_content", node_id=node.id)
+    if existing is not None:
+        ensure_watcher(
+            session,
+            job=existing,
+            user_id=user.id,
+            node_id=node.id,
+            title=node.name,
+        )
+        return existing
+
     need = "+".join(missing) if missing else "all"
     idempotency = (
         f"expand_content:{node.id}:recipe-{recipe_version}:band-{band}"

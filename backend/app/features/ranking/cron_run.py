@@ -123,8 +123,15 @@ def _enrich_neighbor_jobs(session: Session, rows: list) -> list[dict]:
 
 
 def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):
+    from app.features.platform.jobs import active_job_for_node
+
     node_id: UUID = row["node_id"]
     user_id: UUID = row["top_user_id"]
+    existing = active_job_for_node(
+        session, job_type="expand_neighborhood", node_id=node_id
+    )
+    if existing is not None:
+        return existing
     total = int(settings.cron_neighbor_budget_total)
     idempotency = f"expand_neighborhood:{node_id}:total-{total}"
     return enqueue(
@@ -147,8 +154,13 @@ def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):
 
 
 def _enqueue_learn(session: Session, *, row: dict):
+    from app.features.platform.jobs import active_job_for_node
+
     node_id: UUID = row["node_id"]
     user_id: UUID = row["top_user_id"]
+    existing = active_job_for_node(session, job_type="expand_content", node_id=node_id)
+    if existing is not None:
+        return existing
     pack_index = int(row["pack_index"])
     missing = list(row["missing_kinds"])
     band = DEFAULT_BAND

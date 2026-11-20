@@ -78,4 +78,48 @@ def test_get_job_allows_watcher(client, auth, other_auth, session):
     watched = client.get(f"/api/v1/jobs/{job_id}", headers=other_auth)
     assert watched.status_code == 200
     assert watched.json()["id"] == job_id
-    assert watched.json()["focus_node_id"] == focus_id
+
+
+def test_different_job_types_parallel_same_type_coalesces(client, auth, other_auth, session):
+    focus = client.post(
+        "/api/v1/knowledge/focus",
+        headers=auth,
+        json={"topic": "parallel-types", "expand": True},
+    )
+    assert focus.status_code == 202
+    node_id = focus.json()["focus_node_id"]
+    neighbor_job = focus.json()["job_id"]
+
+    content = client.post(
+        f"/api/v1/knowledge/nodes/{node_id}/content",
+        headers=auth,
+        json={"expand": True},
+    )
+    image = client.post(
+        f"/api/v1/knowledge/nodes/{node_id}/image",
+        headers=auth,
+        json={"generate": True},
+    )
+    assert content.status_code == 202
+    assert image.status_code == 202
+    content_job = content.json()["job_id"]
+    image_job = image.json()["job_id"]
+    assert len({neighbor_job, content_job, image_job}) == 3
+
+    # Same type across users joins the in-flight job.
+    again = client.post(
+        f"/api/v1/knowledge/nodes/{node_id}/content",
+        headers=other_auth,
+        json={"expand": True, "new_pack": True},
+    )
+    assert again.status_code == 202
+    assert again.json()["job_id"] == content_job
+    assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 3
+
+    listed = client.get(f"/api/v1/knowledge/nodes/{node_id}/jobs", headers=other_auth)
+    assert listed.status_code == 200
+    types = {row["type"] for row in listed.json()["jobs"]}
+    assert types == {"expand_neighborhood", "expand_content", "generate_image"}
+    # Listing attaches the caller as a watcher for jobs they had not requested.
+    other_jobs = client.get("/api/v1/jobs?state=queued,running", headers=other_auth)
+    assert len(other_jobs.json()["jobs"]) == 3

@@ -145,8 +145,9 @@ class _LearnSheetState extends State<LearnSheet> {
         _loading = false;
       });
     }
-    if (graph.jobForNode(widget.nodeId) != null) {
-      _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
+    final contentJob = graph.jobForNode(widget.nodeId, type: 'expand_content');
+    if (contentJob != null) {
+      _watchedJobId = contentJob.jobId;
       _listen(graph);
     }
   }
@@ -165,7 +166,7 @@ class _LearnSheetState extends State<LearnSheet> {
   void _onGraphChanged() {
     if (!mounted) return;
     final graph = _graph ?? context.read<GraphController>();
-    final active = graph.jobForNode(widget.nodeId);
+    final active = graph.jobForNode(widget.nodeId, type: 'expand_content');
     if (active != null) {
       _watchedJobId = active.jobId;
       setState(() {});
@@ -302,7 +303,7 @@ class _LearnSheetState extends State<LearnSheet> {
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
     final scheme = Theme.of(context).colorScheme;
-    final job = graph.jobForNode(widget.nodeId);
+    final job = graph.jobForNode(widget.nodeId, type: 'expand_content');
     final generating = job != null ||
         (_content != null && _content!.packs.isEmpty && _content!.incomplete);
     final urls = _imageUrls(graph);
@@ -358,7 +359,7 @@ class _LearnSheetState extends State<LearnSheet> {
             key: ValueKey('pack-${entry.packIndex}-${entry.checkKind}'),
             entry: entry,
             imageUrl: imageUrl,
-            imageLoading: graph.jobForNode(widget.nodeId)?.type == 'generate_image',
+            imageLoading: graph.isJobTypeActive(widget.nodeId, 'generate_image'),
             loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
             cachedBytes: graph.cachedImageBytes(imageUrl),
             completed: _completedPacks.contains(entry.packIndex),

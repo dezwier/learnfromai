@@ -38,8 +38,9 @@ from app.features.node_image.service import (
     image_or_generate,
 )
 from app.features.node_image.upload import upload_node_image
-from app.features.platform.jobs import list_watched_jobs, user_watches_job
+from app.features.platform.jobs import list_and_watch_node_jobs, list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
+from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.learning.service import learning_next
 from app.features.user_events.affinity import topic_affinity
@@ -277,6 +278,26 @@ def list_jobs(
     if not states:
         states = {"queued", "running"}
     return {"jobs": list_watched_jobs(session, user_id=user.id, states=states)}
+
+
+@router.get("/knowledge/nodes/{node_id}/jobs")
+def list_node_jobs(
+    node_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Active generate jobs for a node (any user); caller becomes a watcher."""
+    node = session.get(KnowledgeNode, node_id)
+    if node is None:
+        raise not_found("Topic not found")
+    jobs = list_and_watch_node_jobs(
+        session,
+        user_id=user.id,
+        node_id=node_id,
+        title=node.name,
+    )
+    session.commit()
+    return {"jobs": jobs}
 
 
 @router.get("/jobs/{job_id}")

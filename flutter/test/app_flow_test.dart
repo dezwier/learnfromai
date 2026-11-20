@@ -459,6 +459,42 @@ void main() {
     expect(graph.jobForNode('2')?.jobId, 'job-content-2');
   });
 
+  test('enqueueContent while image job active still posts', () async {
+    final posts = <String>[];
+    final graph = GraphController(
+      poster: (path, {body}) async {
+        posts.add(path);
+        if (path.endsWith('/image')) {
+          return {
+            'status': 'queued',
+            'job_id': 'job-image',
+            'focus_node_id': '2',
+            'progress': {'message': 'Creating…'},
+          };
+        }
+        return {
+          'status': 'queued',
+          'job_id': 'job-content',
+          'focus_node_id': '2',
+          'pack_index': 1,
+          'progress': {'message': 'Writing…'},
+        };
+      },
+      loader: (path) async => _compact(),
+      jobLoader: (jobId) async => {
+            'id': jobId,
+            'state': 'running',
+            'progress': {'message': 'Working…'},
+          },
+    )..categoryGraph = _compact();
+    await graph.enqueueImage('2', title: 'Dinosaurs');
+    await graph.enqueueContent('2', title: 'Dinosaurs');
+    expect(posts, ['/knowledge/nodes/2/image', '/knowledge/nodes/2/content']);
+    expect(graph.activeJobCount, 2);
+    expect(graph.jobForNode('2', type: 'generate_image')?.jobId, 'job-image');
+    expect(graph.jobForNode('2', type: 'expand_content')?.jobId, 'job-content');
+  });
+
   test('enqueueImage posts generate and tracks image job', () async {
     Map<String, dynamic>? lastBody;
     final graph = GraphController(

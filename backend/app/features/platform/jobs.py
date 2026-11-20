@@ -11,6 +11,75 @@ from app.core.errors import AppError
 from app.core.time import utcnow
 from app.features.platform.models import GenerationJob, GenerationJobWatcher
 
+ACTIVE_JOB_STATES = frozenset({"queued", "running"})
+
+
+def active_job_for_node(
+    session: Session,
+    *,
+    job_type: str,
+    node_id: UUID,
+) -> GenerationJob | None:
+    """Return the newest in-flight job of this type for the node (any user)."""
+    nid = str(node_id)
+    rows = session.exec(
+        select(GenerationJob)
+        .where(GenerationJob.type == job_type)
+        .where(col(GenerationJob.state).in_(sorted(ACTIVE_JOB_STATES)))
+        .order_by(col(GenerationJob.created_at).desc())
+    ).all()
+    for job in rows:
+        payload = job.payload or {}
+        if payload.get("node_id") == nid or payload.get("focus_id") == nid:
+            return job
+    return None
+
+
+def job_public_dict(job: GenerationJob, *, node_id: UUID | None = None, title: str | None = None) -> dict:
+    progress = job.progress if isinstance(job.progress, dict) else {}
+    payload = job.payload or {}
+    focus = payload.get("focus_id") or payload.get("node_id") or (str(node_id) if node_id else None)
+    return {
+        "id": str(job.id),
+        "type": job.type,
+        "state": job.state,
+        "progress": progress,
+        "focus_node_id": str(focus) if focus else None,
+        "title": title or payload.get("topic") or "Topic",
+        "error_code": job.error_code,
+        "error_message": job.error_message,
+    }
+
+
+def list_and_watch_node_jobs(
+    session: Session,
+    *,
+    user_id: UUID,
+    node_id: UUID,
+    title: str | None = None,
+) -> list[dict]:
+    """Active jobs for a node across users; attach the caller as a watcher."""
+    out: list[dict] = []
+    for job_type in ("expand_neighborhood", "expand_content", "generate_image"):
+        job = active_job_for_node(session, job_type=job_type, node_id=node_id)
+        if job is None:
+            continue
+        watcher = ensure_watcher(
+            session,
+            job=job,
+            user_id=user_id,
+            node_id=node_id,
+            title=title or (job.payload or {}).get("topic") or "Topic",
+        )
+        out.append(
+            job_public_dict(
+                job,
+                node_id=node_id,
+                title=watcher.title or title,
+            )
+        )
+    return out
+
 
 def enqueue(
     session: Session,

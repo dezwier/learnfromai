@@ -135,11 +135,46 @@ class GraphController extends ChangeNotifier {
     return trackedJobs.isEmpty ? null : trackedJobs.first.nodeId;
   }
 
-  TrackedJob? jobForNode(String nodeId) {
+  /// Active job for [nodeId]. When [type] is set, only that job kind matches.
+  TrackedJob? jobForNode(String nodeId, {String? type}) {
     for (final job in trackedJobs) {
-      if (job.nodeId == nodeId && job.isActive) return job;
+      if (!job.isActive || job.nodeId != nodeId) continue;
+      if (type == null || job.type == type) return job;
     }
     return null;
+  }
+
+  bool isJobTypeActive(String nodeId, String type) =>
+      jobForNode(nodeId, type: type) != null;
+
+  /// Pull active jobs for a node (any user) and track them so same-type actions can disable.
+  Future<void> syncNodeJobs(String id, {String? title}) async {
+    try {
+      final raw = await _get('/knowledge/nodes/$id/jobs');
+      final list = raw['jobs'];
+      if (list is! List) return;
+      for (final item in list) {
+        if (item is! Map) continue;
+        final jobId = item['id']?.toString();
+        final nodeId = item['focus_node_id']?.toString() ?? id;
+        if (jobId == null) continue;
+        final progress = item['progress'];
+        _upsertTracked(
+          TrackedJob(
+            jobId: jobId,
+            nodeId: nodeId,
+            title: item['title']?.toString() ?? title ?? _titleForNode(nodeId) ?? 'Topic',
+            state: item['state']?.toString() ?? 'queued',
+            type: item['type']?.toString() ?? 'expand_neighborhood',
+            progressMessage: progress is Map ? progress['message']?.toString() : null,
+            fraction: progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0,
+          ),
+        );
+      }
+      if (trackedJobs.any((j) => j.isActive)) _ensurePoller();
+    } on ApiException {
+      // Drawer still works from locally tracked jobs.
+    }
   }
 
   @override
@@ -309,7 +344,7 @@ class GraphController extends ChangeNotifier {
     String? title,
     bool newPack = false,
   }) async {
-    if (jobForNode(id) != null) {
+    if (isJobTypeActive(id, 'expand_content')) {
       _ensurePoller();
       return fetchContent(id);
     }
@@ -377,7 +412,7 @@ class GraphController extends ChangeNotifier {
 
   /// POST focus; if a job is returned, track it without awaiting completion.
   Future<void> enqueueNeighborhood(String id, {String? title}) async {
-    if (jobForNode(id) != null) {
+    if (isJobTypeActive(id, 'expand_neighborhood')) {
       _ensurePoller();
       return;
     }
@@ -669,7 +704,8 @@ class GraphController extends ChangeNotifier {
   }
 
   void _upsertTracked(TrackedJob job) {
-    final index = trackedJobs.indexWhere((j) => j.jobId == job.jobId || j.nodeId == job.nodeId);
+    // Key by jobId only so different types can run on the same node.
+    final index = trackedJobs.indexWhere((j) => j.jobId == job.jobId);
     if (index >= 0) {
       final previous = trackedJobs[index];
       if (previous.jobId == job.jobId &&

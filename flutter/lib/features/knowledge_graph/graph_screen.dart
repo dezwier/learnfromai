@@ -654,8 +654,11 @@ class _GraphScreenState extends State<GraphScreen>
 
   Future<void> _showTopicActionsSheet(PlacedNode node) async {
     final graph = context.read<GraphController>();
+    await graph.syncNodeJobs(node.id, title: node.title);
+    if (!mounted) return;
     final incomplete = _knownIncomplete(node.id, graph) == true;
-    final busy = graph.jobForNode(node.id) != null;
+    final neighborsBusy = graph.isJobTypeActive(node.id, 'expand_neighborhood');
+    final contentBusy = graph.isJobTypeActive(node.id, 'expand_content');
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -687,14 +690,14 @@ class _GraphScreenState extends State<GraphScreen>
                 ),
                 ListTile(
                   leading: const Icon(Icons.auto_awesome),
-                  title: const Text('Generate relations'),
-                  enabled: incomplete && !busy,
+                  title: Text(neighborsBusy ? 'Relations generating…' : 'Generate relations'),
+                  enabled: incomplete && !neighborsBusy,
                   onTap: () => Navigator.pop(context, 'neighbors'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.school_outlined),
-                  title: const Text('Generate atomic learning'),
-                  enabled: !busy,
+                  title: Text(contentBusy ? 'Learning generating…' : 'Generate atomic learning'),
+                  enabled: !contentBusy,
                   onTap: () => Navigator.pop(context, 'new_pack'),
                 ),
               ],
@@ -733,7 +736,7 @@ class _GraphScreenState extends State<GraphScreen>
   Future<void> _generateNewLearningPack(GraphController graph) async {
     final node = _highlighted;
     if (node == null) return;
-    if (graph.jobForNode(node.id) != null) return;
+    if (graph.isJobTypeActive(node.id, 'expand_content')) return;
     final existing = await graph.fetchContent(node.id);
     if (!mounted) return;
     // First pack uses expand; additional packs use new_pack.
@@ -831,6 +834,7 @@ class _GraphScreenState extends State<GraphScreen>
     final node = _highlighted;
     if (node == null) return;
     final hasImage = (node.imageUrl ?? '').trim().isNotEmpty;
+    final imageBusy = graph.isJobTypeActive(node.id, 'generate_image');
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -841,8 +845,13 @@ class _GraphScreenState extends State<GraphScreen>
             children: [
               ListTile(
                 leading: const Icon(Icons.auto_awesome_outlined),
-                title: Text(hasImage ? 'Regenerate with AI' : 'Generate with AI'),
-                onTap: () => Navigator.pop(context, 'generate'),
+                title: Text(
+                  imageBusy
+                      ? 'Image generating…'
+                      : (hasImage ? 'Regenerate with AI' : 'Generate with AI'),
+                ),
+                enabled: !imageBusy,
+                onTap: imageBusy ? null : () => Navigator.pop(context, 'generate'),
               ),
               ListTile(
                 leading: const Icon(Icons.upload_outlined),
@@ -856,6 +865,7 @@ class _GraphScreenState extends State<GraphScreen>
     );
     if (!mounted || choice == null) return;
     if (choice == 'generate') {
+      if (graph.isJobTypeActive(node.id, 'generate_image')) return;
       await graph.enqueueImage(node.id, title: node.title, regenerate: hasImage);
       return;
     }

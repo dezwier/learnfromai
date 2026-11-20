@@ -144,14 +144,14 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     });
     final queued = await graph.enqueueContent(nodeId, title: title);
     if (!mounted) return;
-    if (queued == null && graph.jobForNode(nodeId) == null) {
+    if (queued == null && graph.jobForNode(nodeId, type: 'expand_content') == null) {
       setState(() {
         _loading = false;
         _error = graph.error ?? 'Could not start content generation';
       });
       return;
     }
-    final job = graph.jobForNode(nodeId);
+    final job = graph.jobForNode(nodeId, type: 'expand_content');
     if (job != null) {
       _watchedJobId = job.jobId;
       _listen(graph);
@@ -210,7 +210,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final graph = _graph ?? context.read<GraphController>();
     final genId = _generateNodeId;
     if (genId == null) return;
-    final active = graph.jobForNode(genId);
+    final active = graph.jobForNode(genId, type: 'expand_content');
     if (active != null) {
       _watchedJobId = active.jobId;
       setState(() {});
@@ -309,7 +309,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final imageUrl = urls.$1 ?? urls.$2;
     final entry = _entry;
     final generating = _generateNodeId != null &&
-        (graph.jobForNode(_generateNodeId!) != null || entry == null);
+        (graph.jobForNode(_generateNodeId!, type: 'expand_content') != null ||
+            entry == null);
     final bottomFadeHeight = padding.bottom + 88 + ProfileTopFade.fadeExtension;
 
     final Widget cardBody;
@@ -325,7 +326,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         key: ValueKey('track-$_cardEpoch-${entry.packIndex}-${entry.checkKind}'),
         entry: entry,
         imageUrl: imageUrl,
-        imageLoading: graph.jobForNode(_nodeId ?? '')?.type == 'generate_image',
+        imageLoading: graph.isJobTypeActive(_nodeId ?? '', 'generate_image'),
         loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
         cachedBytes: graph.cachedImageBytes(imageUrl),
         onShown: () => _trackLearn(graph, entry),

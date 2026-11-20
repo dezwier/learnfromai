@@ -4,7 +4,7 @@ part of 'graph_controller.dart';
 extension GraphControllerImages on GraphController {
   /// Request shared topic image generation (or regeneration when [regenerate] is true).
   Future<bool> enqueueImage(String id, {String? title, bool regenerate = false}) async {
-    if (jobForNode(id) != null) {
+    if (isJobTypeActive(id, 'generate_image')) {
       _ensurePoller();
       return true;
     }

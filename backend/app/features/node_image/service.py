@@ -10,7 +10,7 @@ from app.core.errors import not_found
 from app.features.accounts.models import User
 from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.node_image.resize import prepare_node_images
-from app.features.platform.jobs import enqueue, ensure_watcher
+from app.features.platform.jobs import active_job_for_node, enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 
 
@@ -115,6 +115,17 @@ def _enqueue(
     node: KnowledgeNode,
     regenerate: bool,
 ) -> GenerationJob:
+    existing = active_job_for_node(session, job_type="generate_image", node_id=node.id)
+    if existing is not None:
+        ensure_watcher(
+            session,
+            job=existing,
+            user_id=user.id,
+            node_id=node.id,
+            title=node.name,
+        )
+        return existing
+
     idempotency = f"generate_image:{node.id}"
     job = enqueue(
         session,

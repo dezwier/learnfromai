@@ -14,7 +14,7 @@ from app.features.knowledge_graph.neighborhood import (
 )
 from app.features.knowledge_graph.node_models import KnowledgeRequest
 from app.features.knowledge_graph.preferences import neighborhood_counts
-from app.features.platform.jobs import enqueue, ensure_watcher
+from app.features.platform.jobs import active_job_for_node, enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.user_events.service import record_focus
@@ -105,7 +105,20 @@ def _enqueue_expand(
     counts: dict[str, int],
     from_existing_focus: bool = False,
 ) -> GenerationJob:
-    # One shared expand per focus+total budget across all users (shared graph).
+    # One neighborhood expand per focus at a time (any budget / any user).
+    existing = active_job_for_node(
+        session, job_type="expand_neighborhood", node_id=focus.id
+    )
+    if existing is not None:
+        ensure_watcher(
+            session,
+            job=existing,
+            user_id=user.id,
+            node_id=focus.id,
+            title=focus.name,
+        )
+        return existing
+
     idempotency = f"expand_neighborhood:{focus.id}:total-{counts['total']}"
     job = enqueue(
         session,
