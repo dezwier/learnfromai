@@ -12,7 +12,7 @@ class TopicAffinityNode {
 
   final String id;
   final String name;
-  final int affinity;
+  final double affinity;
   final int focusCount;
   final int openCount;
   final bool learned;
@@ -23,7 +23,7 @@ class TopicAffinityNode {
     return TopicAffinityNode(
       id: raw['id']?.toString() ?? '',
       name: raw['name']?.toString() ?? 'Topic',
-      affinity: (raw['affinity'] as num?)?.toInt() ?? 0,
+      affinity: (raw['affinity'] as num?)?.toDouble() ?? 0,
       focusCount: (raw['focus_count'] as num?)?.toInt() ?? 0,
       openCount: (raw['open_count'] as num?)?.toInt() ?? 0,
       learned: raw['learned'] == true,
@@ -43,7 +43,7 @@ class TopicAffinityCluster {
 
   final int id;
   final String seedNodeId;
-  final int totalAffinity;
+  final double totalAffinity;
   final List<String> nodeIds;
 
   factory TopicAffinityCluster.fromJson(Map<String, dynamic> raw) {
@@ -51,7 +51,7 @@ class TopicAffinityCluster {
     return TopicAffinityCluster(
       id: (raw['id'] as num?)?.toInt() ?? 0,
       seedNodeId: raw['seed_node_id']?.toString() ?? '',
-      totalAffinity: (raw['total_affinity'] as num?)?.toInt() ?? 0,
+      totalAffinity: (raw['total_affinity'] as num?)?.toDouble() ?? 0,
       nodeIds: [
         if (ids is List)
           for (final id in ids) id.toString(),

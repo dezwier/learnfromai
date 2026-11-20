@@ -194,6 +194,21 @@ def get_me_topic_affinity(
     return topic_affinity(session, user=user, limit=limit)
 
 
+@router.get("/admin/cron-runs/latest")
+def get_latest_cron_run(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    if not user.is_admin:
+        raise forbidden()
+    from app.features.ranking.cron_run import cron_run_payload, latest_cron_run
+
+    run = latest_cron_run(session)
+    if run is None:
+        return {"run": None}
+    return {"run": cron_run_payload(run)}
+
+
 @router.get("/me/preferences")
 def get_preferences(user: User = Depends(get_current_user)):
     return {
@@ -481,5 +496,6 @@ def _user_payload(user: User) -> dict:
         "full_name": profile["full_name"],
         "photo_url": profile["photo_url"],
         "timezone": user.timezone,
+        "is_admin": bool(user.is_admin),
         "preferences": {"neighborhood": neighborhood_counts(user)},
     }

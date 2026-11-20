@@ -17,6 +17,7 @@ from app.features.platform.models import (
     LlmUsage,
     WorkerHeartbeat,
 )
+from app.features.ranking.models import CronRun
 from app.features.user_events.models import UserTopicEvent
 
 
@@ -39,4 +40,5 @@ def register_models() -> None:
         KnowledgeRequestNode,
         KnowledgeBit,
         UserTopicEvent,
+        CronRun,
     )

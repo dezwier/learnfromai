@@ -1,4 +1,4 @@
-"""Per-user topic affinity scores and edge-based clusters."""
+"""Per-user topic affinity for the profile map (clusters on ranked tiles)."""
 
 from __future__ import annotations
 
@@ -8,15 +8,11 @@ from uuid import UUID
 from sqlmodel import Session, col, select
 
 from app.features.accounts.models import User
-from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
-from app.features.user_events.models import UserTopicEvent
+from app.features.knowledge_graph.node_models import KnowledgeEdge
+from app.features.ranking.affinity import score_user_tiles
 
 DEFAULT_LIMIT = 24
 MAX_LIMIT = 48
-FOCUS_POINTS = 1
-OPEN_POINTS = 2
-LEARNED_POINTS = 3
-LEARNED_KINDS = frozenset({"learn", "example", "check1", "check2", "check3"})
 
 
 def topic_affinity(
@@ -25,13 +21,16 @@ def topic_affinity(
     user: User,
     limit: int = DEFAULT_LIMIT,
 ) -> dict:
-    """Score topics from events, keep top-N, cluster by induced knowledge edges."""
+    """Score topics with the shared ranking formula, keep top-N, cluster by edges."""
     capped = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
-    scored = _score_nodes(session, user_id=user.id)
+    scored = score_user_tiles(session, user_id=user.id)
     if not scored:
         return {"nodes": [], "clusters": [], "edges": []}
 
-    ranked = sorted(scored.values(), key=lambda row: (-row["affinity"], row["name"].lower()))
+    ranked = sorted(
+        scored.values(),
+        key=lambda row: (-float(row["affinity"]), row["name"].lower()),
+    )
     top = ranked[:capped]
     ids = [row["id"] for row in top]
     id_set = set(ids)
@@ -43,7 +42,6 @@ def topic_affinity(
         )
     ).all()
 
-    # Undirected unique links for clustering (prefer one direction of each pair).
     undirected: list[tuple[UUID, UUID, str]] = []
     seen_pairs: set[tuple[UUID, UUID]] = set()
     for edge in edge_rows:
@@ -76,7 +74,7 @@ def topic_affinity(
     for nid in ids:
         components[find(nid)].append(nid)
 
-    affinity_by_id = {row["id"]: row["affinity"] for row in top}
+    affinity_by_id = {row["id"]: float(row["affinity"]) for row in top}
     cluster_specs: list[dict] = []
     for members in components.values():
         seed = max(members, key=lambda nid: (affinity_by_id[nid], -ids.index(nid)))
@@ -99,7 +97,7 @@ def topic_affinity(
             {
                 "id": index,
                 "seed_node_id": str(spec["seed_node_id"]),
-                "total_affinity": spec["total_affinity"],
+                "total_affinity": round(float(spec["total_affinity"]), 4),
                 "node_ids": [str(nid) for nid in spec["node_ids"]],
             }
         )
@@ -113,7 +111,7 @@ def topic_affinity(
             {
                 "id": str(nid),
                 "name": row["name"],
-                "affinity": row["affinity"],
+                "affinity": round(float(row["affinity"]), 4),
                 "focus_count": row["focus_count"],
                 "open_count": row["open_count"],
                 "learned": row["learned"],
@@ -128,53 +126,3 @@ def topic_affinity(
         {"source": str(a), "target": str(b), "type": relation} for a, b, relation in undirected
     ]
     return {"nodes": nodes_out, "clusters": clusters_out, "edges": edges_out}
-
-
-def _score_nodes(session: Session, *, user_id: UUID) -> dict[UUID, dict]:
-    events = session.exec(
-        select(UserTopicEvent).where(UserTopicEvent.user_id == user_id)
-    ).all()
-    if not events:
-        return {}
-
-    focus_counts: dict[UUID, int] = defaultdict(int)
-    open_counts: dict[UUID, int] = defaultdict(int)
-    learned_nodes: set[UUID] = set()
-    node_ids: set[UUID] = set()
-
-    for event in events:
-        node_ids.add(event.node_id)
-        if event.kind == "focus":
-            focus_counts[event.node_id] += 1
-        elif event.kind == "open":
-            open_counts[event.node_id] += 1
-        elif event.kind in LEARNED_KINDS:
-            learned_nodes.add(event.node_id)
-
-    if not node_ids:
-        return {}
-
-    nodes = session.exec(select(KnowledgeNode).where(col(KnowledgeNode.id).in_(node_ids))).all()
-    by_id = {node.id: node for node in nodes}
-
-    scored: dict[UUID, dict] = {}
-    for nid in node_ids:
-        node = by_id.get(nid)
-        if node is None:
-            continue
-        focus_n = focus_counts.get(nid, 0)
-        open_n = open_counts.get(nid, 0)
-        learned = nid in learned_nodes
-        affinity = focus_n * FOCUS_POINTS + open_n * OPEN_POINTS + (LEARNED_POINTS if learned else 0)
-        if affinity <= 0:
-            continue
-        scored[nid] = {
-            "id": nid,
-            "name": node.name,
-            "affinity": affinity,
-            "focus_count": focus_n,
-            "open_count": open_n,
-            "learned": learned,
-            "has_image": bool(node.image_url),
-        }
-    return scored

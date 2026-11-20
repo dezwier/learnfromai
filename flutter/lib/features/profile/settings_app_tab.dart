@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/theme_controller.dart';
+import '../auth/auth_controller.dart';
 import '../knowledge_graph/graph_controller.dart';
+import 'settings_cron_overview.dart';
 import 'settings_form_styles.dart';
 
 class SettingsAppTab extends StatelessWidget {
@@ -12,9 +14,11 @@ class SettingsAppTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final themes = context.watch<ThemeController>();
     final graph = context.watch<GraphController>();
+    final auth = context.watch<AuthController>();
     final theme = Theme.of(context);
     final outline = SettingsFormStyles.outlineBorder(context);
     final prefs = graph.prefs;
+    final isAdmin = auth.user?.isAdmin == true;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
@@ -118,6 +122,10 @@ class SettingsAppTab extends StatelessWidget {
             onChanged: (value) => graph.savePreferences(prefs.copyWith(extended: value)),
           ),
         ),
+        if (isAdmin) ...[
+          const SizedBox(height: 28),
+          const SettingsCronOverview(),
+        ],
       ],
     );
   }

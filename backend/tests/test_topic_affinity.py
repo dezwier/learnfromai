@@ -1,5 +1,7 @@
 """Topic affinity scoring and clustering for the profile map."""
 
+import pytest
+
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.user_events.models import UserTopicEvent
 from app.features.user_events.service import record_events, record_focus
@@ -40,26 +42,27 @@ def test_topic_affinity_scores_and_clusters(client, auth, session, user):
     body = response.json()
     by_name = {row["name"]: row for row in body["nodes"]}
 
-    # Attention: 2 focus (+2) + 2 open (+4) + learned (+3) = 9
-    assert by_name["Attention"]["affinity"] == 9
+    # Fresh nodes: engagement recency ≈ 1, newness ≈ +2.
+    # Attention: 2*1 + 2*2 + 3 + 2 = 11
+    assert by_name["Attention"]["affinity"] == pytest.approx(11.0, abs=0.05)
     assert by_name["Attention"]["focus_count"] == 2
     assert by_name["Attention"]["open_count"] == 2
     assert by_name["Attention"]["learned"] is True
 
-    # Softmax: 1 focus (+1) + 1 open (+2) + learned once (+3) = 6
-    assert by_name["Softmax"]["affinity"] == 6
+    # Softmax: 1 + 2 + 3 + 2 = 8
+    assert by_name["Softmax"]["affinity"] == pytest.approx(8.0, abs=0.05)
     assert by_name["Softmax"]["learned"] is True
 
-    # Embedding: 1 focus only = 1
-    assert by_name["Embedding"]["affinity"] == 1
+    # Embedding: 1 + 2 = 3
+    assert by_name["Embedding"]["affinity"] == pytest.approx(3.0, abs=0.05)
     assert by_name["Embedding"]["learned"] is False
 
     assert body["nodes"][0]["name"] == "Attention"
     assert len(body["clusters"]) == 2
     linked = next(c for c in body["clusters"] if set(c["node_ids"]) == {str(attention.id), str(softmax.id)})
     alone = next(c for c in body["clusters"] if c["node_ids"] == [str(embedding.id)])
-    assert linked["total_affinity"] == 15
-    assert alone["total_affinity"] == 1
+    assert linked["total_affinity"] == pytest.approx(19.0, abs=0.1)
+    assert alone["total_affinity"] == pytest.approx(3.0, abs=0.05)
     assert by_name["Attention"]["cluster_id"] == linked["id"]
     assert by_name["Softmax"]["cluster_id"] == linked["id"]
     assert by_name["Embedding"]["cluster_id"] == alone["id"]

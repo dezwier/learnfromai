@@ -62,6 +62,25 @@ class Settings(BaseSettings):
     wikidata_max_cloud_radius: int = 2
     wikidata_max_items_per_request: int = 200
 
+    # Ranking: user–tile affinity + job scores (weights only; no hard caps).
+    # affinity(u,t) = (w_focus*focus + w_open*open + w_learned*learned
+    #   + w_packs*packs_done + w_new*recency(node_age))
+    #   * recency(days_since_last_event)
+    # recency(d) = exp(-ln(2)*d/half_life_days)
+    # neighbor_score = tile_affinity / (1 + w_neighbor_penalty * neighbors)
+    # learn_score    = tile_affinity / (1 + w_pack_penalty * packs)
+    rank_w_focus: float = 1.0
+    rank_w_open: float = 2.0
+    rank_w_learned: float = 3.0
+    rank_w_packs: float = 1.0
+    rank_w_new: float = 2.0
+    rank_half_life_days: float = 14.0
+    rank_w_neighbor_penalty: float = 0.15
+    rank_w_pack_penalty: float = 0.5
+    cron_neighbor_jobs_per_day: int = 5
+    cron_learn_jobs_per_day: int = 10
+    cron_neighbor_budget_total: int = 16
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

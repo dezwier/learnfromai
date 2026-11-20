@@ -83,13 +83,14 @@ Backend tests use database `adaptive_mastery_test` on local Postgres. `tests/tes
 
 ## Deploy
 
-The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, worker, and web service. It does not share a project or variables with the other apps.
+The Railway project is `adaptive-mastery` (`1e9dd5da-db31-413a-a5d6-6924ce1d04f7`) in the production environment. It has its own Postgres, API, worker, daily ranking cron, and web service. It does not share a project or variables with the other apps.
 
-The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker does not run migrations. The worker uses Gemini and/or OpenAI based on user preference. A new `SECRET_KEY` was generated for this project.
+The API is at https://api-production-b1075.up.railway.app and `GET /health` returns `{"status":"ok"}`. Alembic runs once, as the API pre-deploy command. The worker and cron do not run migrations. The worker uses Gemini and/or OpenAI based on user preference. The cron service (`python -m app.cron`, `0 6 * * *`) only enqueues ranked jobs. A new `SECRET_KEY` was generated for this project.
 
 ```bash
 make deploy-api
 make deploy-worker
+make deploy-cron
 railway ssh --service api -- python -m scripts.seed
 ```
 

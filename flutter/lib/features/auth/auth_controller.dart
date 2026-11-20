@@ -13,6 +13,7 @@ class UserProfile {
     this.username,
     this.fullName,
     this.photoUrl,
+    this.isAdmin = false,
   });
 
   final String id;
@@ -22,6 +23,7 @@ class UserProfile {
   final String? username;
   final String? fullName;
   final String? photoUrl;
+  final bool isAdmin;
 
   String get hudName {
     final user = username?.trim();
@@ -46,6 +48,7 @@ class UserProfile {
       username: json['username']?.toString(),
       fullName: json['full_name']?.toString(),
       photoUrl: json['photo_url']?.toString(),
+      isAdmin: json['is_admin'] == true,
     );
   }
 
