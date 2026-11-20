@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
+
+import '../../../core/widgets/pulse_placeholder.dart';
 import '../graph_controller.dart';
 import '../models.dart';
 
@@ -81,5 +84,82 @@ class LearningTrackSupport {
       unawaited(_graph.fetchImageBytes(url, notify: false));
     }
     return url;
+  }
+}
+
+/// Card-sized pulse with an explicit generating label for the topic.
+class LearningTrackGeneratingCard extends StatelessWidget {
+  const LearningTrackGeneratingCard({
+    super.key,
+    required this.topicTitle,
+    this.progressMessage,
+  });
+
+  final String topicTitle;
+  final String? progressMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final detail = progressMessage?.trim();
+    return SizedBox(
+      height: 320,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const PulsePlaceholder.image(
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+            ),
+            ColoredBox(
+              color: scheme.surface.withValues(alpha: 0.82),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Generating learning',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: scheme.onSurface.withValues(alpha: 0.72),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      topicTitle,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramilas',
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 22,
+                        height: 1.2,
+                      ),
+                    ),
+                    if (detail != null && detail.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        detail,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: scheme.onSurface.withValues(alpha: 0.58),
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

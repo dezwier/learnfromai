@@ -354,13 +354,20 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, _nodeId);
     final imageUrl = _cardImageUrl ?? graphUrls.$1 ?? graphUrls.$2;
     final entry = _entry;
-    final generating = _generateNodeId != null &&
-        (graph.jobForNode(_generateNodeId!, type: 'expand_content') != null ||
-            entry == null);
+    final genId = _generateNodeId;
+    final genJob =
+        genId == null ? null : graph.jobForNode(genId, type: 'expand_content');
+    final generating = genId != null && (genJob != null || entry == null);
     final bottomFadeHeight = padding.bottom + 88 + ProfileTopFade.fadeExtension;
 
     final Widget cardBody;
-    if (_loading || generating || entry == null) {
+    if (generating) {
+      final tile = (_topicTitle ?? '').trim();
+      cardBody = LearningTrackGeneratingCard(
+        topicTitle: tile.isEmpty ? 'this topic' : tile,
+        progressMessage: genJob?.progressMessage,
+      );
+    } else if (_loading || entry == null) {
       cardBody = const SizedBox(
         height: 320,
         child: PulsePlaceholder.image(
