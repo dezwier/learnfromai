@@ -19,8 +19,8 @@ class LearnDeckEntry {
   int get packIndex => pack.packIndex;
 }
 
-/// Preferred image aspect (width / height). Back may shrink toward [_minImageHeight].
-const _imageAspect = 16 / 10;
+/// Preferred image aspect (width / height). Shrinks toward [_minImageHeight] for tall content.
+const _imageAspect = 1.0;
 const _minImageHeight = 100.0;
 const _bodyPadding = EdgeInsets.fromLTRB(16, 14, 16, 16);
 /// Until the first measure lands, keep the card tall enough to avoid overflow.
