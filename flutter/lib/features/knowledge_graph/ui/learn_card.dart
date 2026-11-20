@@ -146,36 +146,21 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
 
   Widget _frontBody() => LearnMarkdownBit(bit: widget.entry.pack.bit('learn'));
 
-  Widget _backBody(
-    ColorScheme scheme, {
+  Widget _backBody({
     required TextEditingController clozeController,
     bool interactive = true,
   }) {
     return GestureDetector(
       onTap: interactive ? () {} : null,
       behavior: HitTestBehavior.deferToChild,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Check',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.55),
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 8),
-          LearnCheckBit(
-            bit: widget.entry.pack.bit(widget.entry.checkKind),
-            selected: _selectedChoice,
-            revealed: _revealed,
-            clozeController: clozeController,
-            onSelectChoice: interactive ? _onSelectMc : (_) {},
-            onSelectBool: interactive ? _onSelectBool : (_) {},
-            onSubmitCloze: interactive ? _onSubmitCloze : () {},
-          ),
-        ],
+      child: LearnCheckBit(
+        bit: widget.entry.pack.bit(widget.entry.checkKind),
+        selected: _selectedChoice,
+        revealed: _revealed,
+        clozeController: clozeController,
+        onSelectChoice: interactive ? _onSelectMc : (_) {},
+        onSelectBool: interactive ? _onSelectBool : (_) {},
+        onSubmitCloze: interactive ? _onSubmitCloze : () {},
       ),
     );
   }
@@ -184,7 +169,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   Widget build(BuildContext context) {
     final pack = widget.entry.pack;
     final checkKind = widget.entry.checkKind;
-    final scheme = Theme.of(context).colorScheme;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -228,7 +212,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                       child: Padding(
                         padding: _bodyPadding,
                         child: _backBody(
-                          scheme,
                           clozeController: _measureClozeController,
                           interactive: false,
                         ),
@@ -266,7 +249,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                   completed: widget.completed,
                   imageHeight: backImageH,
                   child: _backBody(
-                    scheme,
                     clozeController: _clozeController,
                   ),
                 ),

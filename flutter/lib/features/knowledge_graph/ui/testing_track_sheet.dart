@@ -223,11 +223,22 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dist = _distribution;
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
-    final bottomClearance =
-        OverlayPanel.bottomClearance(context, hasBottom: false);
+    final showNext = _reviewing && _answered;
+    final bottomClearance = OverlayPanel.bottomClearance(
+      context,
+      hasBottom: showNext,
+    );
 
     return OverlayPanel(
       onDismiss: widget.onClose,
+      bottom: showNext
+          ? OverlayLessonFooter(
+              continueLabel:
+                  _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
+              continueEnabled: !_submitting,
+              onContinue: () => unawaited(_onNextCard()),
+            )
+          : null,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -408,31 +419,45 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final scheme = Theme.of(context).colorScheme;
     final imageUrl = _cardImageUrl(card.item, graph);
     final entry = LearnDeckEntry(pack: card.item.pack, checkKind: card.checkKind);
-    return Padding(
-      padding: studyPagePadding.copyWith(
-        top: OverlayPanel.closeSize + OverlayPanel.closeInset,
-        bottom: bottomClearance,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            card.item.title,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Align with OverlayCloseButton (top + closeInset, height closeSize).
+        Padding(
+          padding: EdgeInsets.only(
+            top: OverlayPanel.closeInset,
+            left: 20,
+            right: OverlayPanel.closeSize + OverlayPanel.closeInset + 14,
           ),
-          const SizedBox(height: 4),
-          Text(
-            '${_queueIndex + 1} / ${_queue.length}',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.55),
+          child: SizedBox(
+            height: OverlayPanel.closeSize,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    card.item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                 ),
+                const SizedBox(width: 10),
+                Text(
+                  '${_queueIndex + 1} / ${_queue.length}',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.55),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Expanded(
+        ),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(20, 4, 20, bottomClearance),
             child: SingleChildScrollView(
               child: LearnFlipCard(
                 key: ValueKey(
@@ -443,7 +468,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                 startOnCheck: true,
                 imageLoading:
                     graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
-                loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+                loadImageBytes: (url) =>
+                    graph.fetchImageBytes(url, notify: false),
                 cachedBytes: graph.cachedImageBytes(imageUrl),
                 onShown: () {},
                 onCheckAnswer: ({
@@ -464,20 +490,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _answered && !_submitting
-                ? () => unawaited(_onNextCard())
-                : null,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-            child: Text(
-              _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
