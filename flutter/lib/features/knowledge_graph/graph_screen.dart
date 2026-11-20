@@ -1100,16 +1100,6 @@ class _GraphScreenState extends State<GraphScreen>
         children: [
           Column(
             children: [
-              if (graph.error != null && !_profileOpen)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  child: StudyCard(
-                    dense: true,
-                    eyebrow: 'GRAPH',
-                    title: graph.error!,
-                    subtitle: 'Try another topic.',
-                  ),
-                ),
               Expanded(
                 child: _searchOpen
                     ? Listener(

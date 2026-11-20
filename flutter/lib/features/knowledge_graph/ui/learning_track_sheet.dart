@@ -70,7 +70,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   var _advancing = false;
   var _quizDone = false;
   var _dismissing = false;
-  String? _error;
   String? _topicTitle;
   String? _nodeId;
   String? _cardImageUrl;
@@ -135,7 +134,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     support.cancelPrefetch();
     setState(() {
       _loading = true;
-      _error = null;
       _quizDone = false;
       _entry = null;
       _cardImageUrl = null;
@@ -143,10 +141,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final next = await graph.fetchLearningNext(seedId);
     if (!mounted) return;
     if (next == null) {
-      setState(() {
-        _loading = false;
-        _error = graph.error ?? 'Could not load the next learning card';
-      });
+      graph.surfaceError(graph.error ?? 'Could not load the next learning card');
+      setState(() => _loading = false);
       return;
     }
     if (next.needsGenerate) {
@@ -172,7 +168,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _topicTitle = originTitle;
       _nodeId = originId;
       _cardImageUrl = null;
-      _error = null;
     });
     unawaited(
       _setCardImage(LearningNext(status: 'generate', nodeId: originId, title: originTitle)),
@@ -187,10 +182,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     if (queued == null) {
+      graph.surfaceError(graph.error ?? 'Could not start content generation');
       setState(() {
         _generateNodeId = null;
         _loading = false;
-        _error = graph.error ?? 'Could not start content generation';
       });
       return;
     }
@@ -201,20 +196,18 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _applyReady(graph, next);
       return;
     }
+    graph.surfaceError('No new learning pack could be started for $originTitle');
     setState(() {
       _generateNodeId = null;
       _loading = false;
-      _error = 'No new learning pack could be started for $originTitle';
     });
   }
 
   void _applyReady(GraphController graph, LearningNext next, {bool trackOpen = false}) {
     final pack = next.pack;
     if (pack == null) {
-      setState(() {
-        _loading = false;
-        _error = 'No learning pack available';
-      });
+      graph.surfaceError('No learning pack available');
+      setState(() => _loading = false);
       return;
     }
     final available = [
@@ -222,10 +215,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         if (pack.bit(kind) != null) kind,
     ];
     if (available.isEmpty) {
-      setState(() {
-        _loading = false;
-        _error = 'Pack has no quiz';
-      });
+      graph.surfaceError('Pack has no quiz');
+      setState(() => _loading = false);
       return;
     }
     final kind = available[_rng.nextInt(available.length)];
@@ -239,7 +230,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _trackedKinds.clear();
       _quizDone = false;
       _loading = false;
-      _error = null;
       _generateNodeId = null;
       _cardEpoch += 1;
       _advancing = false;
@@ -280,10 +270,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     _watchedJobId = null;
     // Failed jobs clear the tracker without setting lastCompleted*.
     if (!completedHere) {
+      graph.surfaceError(graph.error ?? 'Content generation failed');
       setState(() {
         _generateNodeId = null;
         _loading = false;
-        _error = graph.error ?? 'Content generation failed';
       });
       return;
     }
@@ -351,7 +341,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     setState(() {
       _advancing = true;
       _loading = true;
-      _error = null;
       _quizDone = false;
       _entry = null;
       _cardImageUrl = null;
@@ -394,8 +383,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
-    final scheme = Theme.of(context).colorScheme;
-    final padding = MediaQuery.paddingOf(context);
     final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, _nodeId);
     final imageUrl = _cardImageUrl ?? graphUrls.$1 ?? graphUrls.$2;
     final entry = _entry;
@@ -476,22 +463,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
               LearnSessionFloatingCta(
                 label: _advancing ? 'Loading…' : 'Next',
                 onPressed: _advancing ? null : () => unawaited(_onNext()),
-              ),
-            if (_error != null)
-              Positioned(
-                left: 20,
-                right: 20,
-                top: padding.top + LearnSessionCardStage.headerTop,
-                child: IgnorePointer(
-                  child: Text(
-                    _error!,
-                    style: TextStyle(
-                      color: scheme.error,
-                      height: 1.35,
-                      shadows: const [Shadow(blurRadius: 6, color: Colors.black45)],
-                    ),
-                  ),
-                ),
               ),
           ],
         ),

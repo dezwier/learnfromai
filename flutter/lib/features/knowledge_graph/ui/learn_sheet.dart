@@ -55,7 +55,6 @@ class LearnSheet extends StatefulWidget {
 class _LearnSheetState extends State<LearnSheet> {
   TopicContent? _content;
   var _loading = true;
-  String? _error;
   String? _watchedJobId;
   var _listening = false;
   GraphController? _graph;
@@ -122,17 +121,12 @@ class _LearnSheetState extends State<LearnSheet> {
   Future<void> _bootstrap() async {
     final graph = context.read<GraphController>();
     _graph = graph;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     final existing = await graph.fetchContent(widget.nodeId);
     if (!mounted) return;
     if (existing == null) {
-      setState(() {
-        _loading = false;
-        _error = graph.error ?? 'Could not load learning bits';
-      });
+      graph.surfaceError(graph.error ?? 'Could not load learning bits');
+      setState(() => _loading = false);
       return;
     }
     if (existing.packs.isNotEmpty) {
@@ -158,7 +152,6 @@ class _LearnSheetState extends State<LearnSheet> {
       _mergeCompletedFrom(content);
       _deck = _buildDeck(content);
       _loading = false;
-      _error = null;
       _trackedKinds.clear();
     });
   }
@@ -185,7 +178,7 @@ class _LearnSheetState extends State<LearnSheet> {
     final next = await graph.fetchContent(widget.nodeId);
     if (!mounted) return;
     if (next == null) {
-      setState(() => _error = graph.error ?? 'Could not load learning bits');
+      graph.surfaceError(graph.error ?? 'Could not load learning bits');
       return;
     }
     _applyContent(next);
@@ -437,24 +430,6 @@ class _LearnSheetState extends State<LearnSheet> {
                 ),
               ),
             ),
-            if (_error != null)
-              Positioned(
-                left: 20,
-                right: 20,
-                top: padding.top + 8,
-                child: IgnorePointer(
-                  child: Text(
-                    _error!,
-                    style: TextStyle(
-                      color: scheme.error,
-                      height: 1.35,
-                      shadows: const [
-                        Shadow(blurRadius: 6, color: Colors.black45),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),

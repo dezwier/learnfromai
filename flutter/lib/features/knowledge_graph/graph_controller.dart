@@ -40,6 +40,20 @@ class GraphController extends ChangeNotifier {
   bool loading = false;
   bool refreshing = false;
   String? error;
+
+  void clearError() {
+    if (error == null) return;
+    error = null;
+    notifyListeners();
+  }
+
+  /// Show [message] on the global status badge (replaces any prior notice).
+  void surfaceError(String message) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty || error == trimmed) return;
+    error = trimmed;
+    notifyListeners();
+  }
   List<TopicChoice> candidates = [];
   List<TopicChoice> suggestions = [];
   final List<String> focusHistory = [];

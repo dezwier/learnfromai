@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
+import 'core/widgets/app_status_badge.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/knowledge_graph/graph_controller.dart';
 import 'features/splash/branded_splash.dart';
@@ -135,6 +136,8 @@ class _AdaptiveMasteryAppState extends State<AdaptiveMasteryApp> {
                     color: splashDark ? BrandedSplash.paperDark : BrandedSplash.paperLight,
                   ),
                   if (child != null) child,
+                  // Above every route / drawer / sheet so limit notices stay readable.
+                  if (_ready) const AppStatusBadgeHost(),
                   if (!_ready)
                     Positioned.fill(
                       child: AbsorbPointer(

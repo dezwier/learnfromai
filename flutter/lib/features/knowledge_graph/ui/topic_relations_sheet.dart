@@ -14,46 +14,55 @@ Future<void> showTopicRelationsSheet(
     showDragHandle: true,
     isScrollControlled: true,
     builder: (context) {
+      // Leave headroom so the drag handle stays clear of the status bar.
+      final maxH = MediaQuery.sizeOf(context).height * 0.85;
       return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Relationships',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                node.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.55),
-                    ),
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: _RelationsList(
-                    node: node,
-                    layout: layout,
-                    focusId: focusId,
-                    onOpen: (related) {
-                      Navigator.pop(context);
-                      onOpenRelated(related);
-                    },
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxH),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Relationships',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  node.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.55),
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _RelationsList(
+                        node: node,
+                        layout: layout,
+                        focusId: focusId,
+                        onOpen: (related) {
+                          Navigator.pop(context);
+                          onOpenRelated(related);
+                        },
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -86,10 +95,10 @@ class _RelationsList extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     if (layout == null) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Text(
           'No linked topics in this view.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: scheme.onSurface.withValues(alpha: 0.45),
                 fontStyle: FontStyle.italic,
               ),
@@ -103,10 +112,10 @@ class _RelationsList extends StatelessWidget {
     ];
     if (sections.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Text(
           'No linked topics in this view.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: scheme.onSurface.withValues(alpha: 0.45),
                 fontStyle: FontStyle.italic,
               ),
@@ -158,21 +167,21 @@ class _RelationSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 2),
           child: Row(
             children: [
               Container(
-                width: 10,
-                height: 10,
+                width: 8,
+                height: 8,
                 decoration: BoxDecoration(
                   color: accent,
-                  borderRadius: BorderRadius.circular(3),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 7),
               Text(
                 relationSectionLabel(role),
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                       color: scheme.onSurface.withValues(alpha: 0.72),
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.2,
@@ -183,34 +192,38 @@ class _RelationSection extends StatelessWidget {
         ),
         for (final item in nodes)
           ListTile(
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+            minVerticalPadding: 0,
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             leading: Container(
-              width: 28,
-              height: 28,
+              width: 24,
+              height: 24,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: item.role == NodeRole.focus
                     ? accent
                     : nodeFill(item, scheme),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 _topicInitial(item.title),
                 style: TextStyle(
                   color: onAccent,
                   fontWeight: FontWeight.w700,
-                  fontSize: 12,
+                  fontSize: 11,
                 ),
               ),
             ),
             title: Text(
               item.title,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
             trailing: Icon(
               Icons.chevron_right,
-              size: 20,
+              size: 18,
               color: scheme.onSurface.withValues(alpha: 0.28),
             ),
             onTap: () => onOpen(item),
