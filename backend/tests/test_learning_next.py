@@ -1,8 +1,5 @@
 """Learning track: next atomic pack picker."""
 
-import random
-
-from app.core.config import get_settings
 from app.features.content.models import KnowledgeBit
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.learning.service import learning_next
@@ -141,22 +138,13 @@ def test_learning_next_skips_completed_atomic_pack(session, user):
     )
     session.commit()
 
-    # Force explore away from empty seed by making exploit never stick
-    # (seed has no eligible packs anyway).
-    settings = get_settings().model_copy(update={"learn_track_exploit_p": 1.0})
-    result = learning_next(
-        session,
-        user=user,
-        seed_node_id=seed.id,
-        settings=settings,
-        rng=random.Random(0),
-    )
+    result = learning_next(session, user=user, seed_node_id=seed.id)
     assert result["status"] == "ready"
     assert result["node_id"] == str(neighbor.id)
     assert result["pack_index"] == 1
 
 
-def test_learning_next_exploit_prefers_seed(session, user):
+def test_learning_next_prefers_focus_over_neighbor(session, user):
     seed = KnowledgeNode(name="Focus", name_key="focus-learn", description="x")
     neighbor = KnowledgeNode(name="Side", name_key="side-learn", description="x")
     session.add(seed)
@@ -168,13 +156,6 @@ def test_learning_next_exploit_prefers_seed(session, user):
     _add_pack(session, neighbor.id)
     session.commit()
 
-    settings = get_settings().model_copy(update={"learn_track_exploit_p": 1.0})
-    result = learning_next(
-        session,
-        user=user,
-        seed_node_id=seed.id,
-        settings=settings,
-        rng=random.Random(1),
-    )
+    result = learning_next(session, user=user, seed_node_id=seed.id)
     assert result["status"] == "ready"
     assert result["node_id"] == str(seed.id)
