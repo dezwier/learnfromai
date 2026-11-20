@@ -42,4 +42,35 @@ void main() {
     expect(result.text.contains('-'), isFalse);
     expect(result.fontSize, greaterThan(8));
   });
+
+  test('hyphenBreaks finds develop|mental and development|al', () {
+    final breaks = hyphenBreaks('Developmental');
+    expect(breaks, contains(7)); // Develop|mental
+    expect(breaks, contains(11)); // Development|al
+    expect(breaks, isNot(contains(12))); // never Developmenta|l
+  });
+
+  test('layoutTitle hyphenates long words instead of soft-wrapping a letter', () {
+    final result = layoutTitle(
+      text: 'Developmental Psychology',
+      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+      maxWidth: 96,
+      maxHeight: 120,
+      maxLines: 4,
+      minFontSize: 11,
+      maxFontSize: 28,
+      textScaler: TextScaler.noScaling,
+    );
+    expect(result.text.replaceAll('-', '').replaceAll('\n', ' '),
+        isNot(contains('Developmenta')));
+    if (result.text.contains('-')) {
+      expect(result.text.split('\n').where((l) => l.endsWith('-')), isNotEmpty);
+      // Never leave a single letter after a hyphen break.
+      for (final line in result.text.split('\n')) {
+        if (line.endsWith('-')) {
+          expect(line.length, greaterThan(2));
+        }
+      }
+    }
+  });
 }

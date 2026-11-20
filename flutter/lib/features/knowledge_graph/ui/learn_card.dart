@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
 import '../models.dart';
@@ -17,6 +18,16 @@ class LearnDeckEntry {
 
   int get packIndex => pack.packIndex;
 }
+
+/// Preferred image aspect (width / height). Back may shrink toward [_minImageHeight].
+const _imageAspect = 16 / 10;
+const _minImageHeight = 100.0;
+const _bodyPadding = EdgeInsets.fromLTRB(16, 14, 16, 16);
+/// Until the first measure lands, keep the card tall enough to avoid overflow.
+const _provisionalFrontBodyH = 110.0;
+const _provisionalBackBodyH = 200.0;
+/// Extra room applied immediately on reveal so explanation/additions don't overflow a frame.
+const _revealBodyBoost = 88.0;
 
 class LearnFlipCard extends StatefulWidget {
   const LearnFlipCard({
@@ -54,6 +65,10 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   var _revealed = false;
   var _trackedLearn = false;
   final _clozeController = TextEditingController();
+  /// Separate controller so offstage height measurement never shares a TextField.
+  final _measureClozeController = TextEditingController();
+  double _frontBodyH = 0;
+  double _backBodyH = 0;
 
   @override
   void initState() {
@@ -68,17 +83,24 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   @override
   void dispose() {
     _clozeController.dispose();
+    _measureClozeController.dispose();
     super.dispose();
+  }
+
+  void _markRevealed() {
+    setState(() {
+      _revealed = true;
+      // Grow immediately; offstage measure corrects on the next frame.
+      _backBodyH = (_backBodyH < 1 ? _provisionalBackBodyH : _backBodyH) + _revealBodyBoost;
+    });
   }
 
   void _onSelectMc(int choiceIndex) {
     if (_revealed) return;
     final bit = widget.entry.pack.bit(widget.entry.checkKind);
     final answerIndex = (bit?.body['answer_index'] as num?)?.toInt() ?? 0;
-    setState(() {
-      _selectedChoice = choiceIndex;
-      _revealed = true;
-    });
+    _selectedChoice = choiceIndex;
+    _markRevealed();
     widget.onCheckAnswer(
       correct: choiceIndex == answerIndex,
       choiceIndex: choiceIndex,
@@ -89,10 +111,8 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     if (_revealed) return;
     final bit = widget.entry.pack.bit(widget.entry.checkKind);
     final answer = bit?.body['answer'] == true;
-    setState(() {
-      _selectedChoice = value ? 1 : 0;
-      _revealed = true;
-    });
+    _selectedChoice = value ? 1 : 0;
+    _markRevealed();
     widget.onCheckAnswer(
       correct: value == answer,
       answerBool: value,
@@ -105,8 +125,55 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     if (bit == null) return;
     final text = _clozeController.text;
     final correct = gradeCloze(bit, text);
-    setState(() => _revealed = true);
+    _measureClozeController.text = text;
+    _markRevealed();
     widget.onCheckAnswer(correct: correct, answerText: text.trim());
+  }
+
+  void _onFrontBodySize(Size size) {
+    if ((size.height - _frontBodyH).abs() < 0.5) return;
+    setState(() => _frontBodyH = size.height);
+  }
+
+  void _onBackBodySize(Size size) {
+    if ((size.height - _backBodyH).abs() < 0.5) return;
+    setState(() => _backBodyH = size.height);
+  }
+
+  Widget _frontBody() => LearnMarkdownBit(bit: widget.entry.pack.bit('learn'));
+
+  Widget _backBody(
+    ColorScheme scheme, {
+    required TextEditingController clozeController,
+    bool interactive = true,
+  }) {
+    return GestureDetector(
+      onTap: interactive ? () {} : null,
+      behavior: HitTestBehavior.deferToChild,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Check',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: 0.55),
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 8),
+          LearnCheckBit(
+            bit: widget.entry.pack.bit(widget.entry.checkKind),
+            selected: _selectedChoice,
+            revealed: _revealed,
+            clozeController: clozeController,
+            onSelectChoice: interactive ? _onSelectMc : (_) {},
+            onSelectBool: interactive ? _onSelectBool : (_) {},
+            onSubmitCloze: interactive ? _onSubmitCloze : () {},
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -115,53 +182,93 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     final checkKind = widget.entry.checkKind;
     final scheme = Theme.of(context).colorScheme;
 
-    return TurnableYAxisCard(
-      resetIdentity: '${pack.packIndex}-$checkKind',
-      dismissKeyboardOnInteraction: true,
-      // Only the visible face stays in the tree so quiz taps hit the back.
-      prelayoutFacesForHeight: false,
-      front: _LearnCardFace(
-        imageUrl: widget.imageUrl,
-        cachedBytes: widget.cachedBytes,
-        imageLoading: widget.imageLoading,
-        loadImageBytes: widget.loadImageBytes,
-        completed: widget.completed,
-        child: LearnMarkdownBit(bit: pack.bit('learn')),
-      ),
-      back: _LearnCardFace(
-        imageUrl: widget.imageUrl,
-        cachedBytes: widget.cachedBytes,
-        imageLoading: widget.imageLoading,
-        loadImageBytes: widget.loadImageBytes,
-        completed: widget.completed,
-        child: GestureDetector(
-          // Absorb card-level flip taps over interactive quiz controls.
-          onTap: () {},
-          behavior: HitTestBehavior.deferToChild,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Check',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.55),
-                      fontWeight: FontWeight.w700,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final defaultImageH = width > 0 ? width / _imageAspect : _minImageHeight;
+        final frontBodyH =
+            _frontBodyH > 0 ? _frontBodyH : _provisionalFrontBodyH;
+        final backBodyH = _backBodyH > 0 ? _backBodyH : _provisionalBackBodyH;
+        // Shared face height: prefer front natural size; grow if back needs more
+        // even after shrinking its image to the minimum.
+        final cardH = [
+          defaultImageH + frontBodyH,
+          _minImageHeight + backBodyH,
+        ].reduce((a, b) => a > b ? a : b);
+        // Fill leftover whitespace by growing the image (back may still shrink
+        // toward [_minImageHeight] when the quiz body is tall).
+        final frontImageH = (cardH - frontBodyH).clamp(_minImageHeight, cardH);
+        final backImageH = (cardH - backBodyH).clamp(_minImageHeight, cardH);
+
+        // Offstage measures body heights without painting (OverflowBox was
+        // painting a second quiz/explanation over the visible card).
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Offstage(
+              offstage: true,
+              child: SizedBox(
+                width: width,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _MeasureSize(
+                      onChange: _onFrontBodySize,
+                      child: Padding(
+                        padding: _bodyPadding,
+                        child: _frontBody(),
+                      ),
                     ),
+                    _MeasureSize(
+                      onChange: _onBackBodySize,
+                      child: Padding(
+                        padding: _bodyPadding,
+                        child: _backBody(
+                          scheme,
+                          clozeController: _measureClozeController,
+                          interactive: false,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-              LearnCheckBit(
-                bit: pack.bit(checkKind),
-                selected: _selectedChoice,
-                revealed: _revealed,
-                clozeController: _clozeController,
-                onSelectChoice: _onSelectMc,
-                onSelectBool: _onSelectBool,
-                onSubmitCloze: _onSubmitCloze,
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: TurnableYAxisCard(
+                resetIdentity: '${pack.packIndex}-$checkKind',
+                dismissKeyboardOnInteraction: true,
+                prelayoutFacesForHeight: false,
+                fixedFaceHeight: cardH,
+                front: _LearnCardFace(
+                  imageUrl: widget.imageUrl,
+                  cachedBytes: widget.cachedBytes,
+                  imageLoading: widget.imageLoading,
+                  loadImageBytes: widget.loadImageBytes,
+                  completed: widget.completed,
+                  imageHeight: frontImageH,
+                  child: _frontBody(),
+                ),
+                back: _LearnCardFace(
+                  imageUrl: widget.imageUrl,
+                  cachedBytes: widget.cachedBytes,
+                  imageLoading: widget.imageLoading,
+                  loadImageBytes: widget.loadImageBytes,
+                  completed: widget.completed,
+                  imageHeight: backImageH,
+                  child: _backBody(
+                    scheme,
+                    clozeController: _clozeController,
+                  ),
+                ),
               ),
-            ],
-          ),
-        ),
-      ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -170,6 +277,7 @@ class _LearnCardFace extends StatelessWidget {
   const _LearnCardFace({
     required this.child,
     required this.loadImageBytes,
+    required this.imageHeight,
     this.imageUrl,
     this.cachedBytes,
     this.imageLoading = false,
@@ -181,6 +289,7 @@ class _LearnCardFace extends StatelessWidget {
   final Uint8List? cachedBytes;
   final bool imageLoading;
   final bool completed;
+  final double imageHeight;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
   @override
@@ -190,7 +299,6 @@ class _LearnCardFace extends StatelessWidget {
       color: scheme.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
         children: [
           Stack(
             children: [
@@ -198,6 +306,7 @@ class _LearnCardFace extends StatelessWidget {
                 imageUrl: imageUrl,
                 cachedBytes: cachedBytes,
                 loading: imageLoading,
+                height: imageHeight,
                 loadImageBytes: loadImageBytes,
               ),
               if (completed)
@@ -213,9 +322,10 @@ class _LearnCardFace extends StatelessWidget {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            padding: _bodyPadding,
             child: child,
           ),
+          const Spacer(),
         ],
       ),
     );
@@ -225,6 +335,7 @@ class _LearnCardFace extends StatelessWidget {
 class _LearnCardImage extends StatefulWidget {
   const _LearnCardImage({
     required this.loadImageBytes,
+    required this.height,
     this.imageUrl,
     this.cachedBytes,
     this.loading = false,
@@ -233,6 +344,7 @@ class _LearnCardImage extends StatefulWidget {
   final String? imageUrl;
   final Uint8List? cachedBytes;
   final bool loading;
+  final double height;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
   @override
@@ -313,8 +425,11 @@ class _LearnCardImageState extends State<_LearnCardImage> {
     const radius = BorderRadius.vertical(top: Radius.circular(16));
     final bytes = _bytes;
     final showPlaceholder = bytes == null && (widget.loading || _loadingBytes);
-    return AspectRatio(
-      aspectRatio: 16 / 10,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      height: widget.height,
+      width: double.infinity,
       child: ClipRRect(
         borderRadius: radius,
         child: showPlaceholder
@@ -336,5 +451,41 @@ class _LearnCardImageState extends State<_LearnCardImage> {
                   ),
       ),
     );
+  }
+}
+
+/// Reports child layout size after each layout pass.
+class _MeasureSize extends SingleChildRenderObjectWidget {
+  const _MeasureSize({
+    required this.onChange,
+    required Widget child,
+  }) : super(child: child);
+
+  final ValueChanged<Size> onChange;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderMeasureSize(onChange);
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasureSize renderObject) {
+    renderObject.onChange = onChange;
+  }
+}
+
+class _RenderMeasureSize extends RenderProxyBox {
+  _RenderMeasureSize(this.onChange);
+
+  ValueChanged<Size> onChange;
+  Size? _oldSize;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final next = child?.size ?? Size.zero;
+    if (_oldSize == next) return;
+    _oldSize = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onChange(next));
   }
 }

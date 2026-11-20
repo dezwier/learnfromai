@@ -1,6 +1,13 @@
 import 'package:flutter/painting.dart';
 
-/// Layout label text: shrink to keep whole words; optionally hyphenate at min size.
+/// Layout width fudge: Text paint is often slightly wider than TextPainter.
+const _wrapWidthFactor = 0.84;
+
+/// Layout label text: shrink to keep whole words; when a word must break,
+/// wrap at syllable boundaries with a visible hyphen (newspaper-style).
+///
+/// The returned [text] already contains `\n` (and `-` where needed). Display it
+/// with `softWrap: false` so Flutter cannot re-break mid-word without a hyphen.
 ({String text, double fontSize}) layoutTitle({
   required String text,
   required TextStyle style,
@@ -17,6 +24,8 @@ import 'package:flutter/painting.dart';
     return (text: trimmed, fontSize: minFontSize);
   }
 
+  final wrapWidth = maxWidth * _wrapWidthFactor;
+
   var lo = minFontSize;
   var hi = maxFontSize;
   var best = minFontSize;
@@ -26,7 +35,7 @@ import 'package:flutter/painting.dart';
     if (_fitsWholeWords(
       text: trimmed,
       style: style.copyWith(fontSize: mid),
-      maxWidth: maxWidth,
+      maxWidth: wrapWidth,
       maxHeight: maxHeight,
       maxLines: maxLines,
       textScaler: textScaler,
@@ -38,22 +47,21 @@ import 'package:flutter/painting.dart';
       hi = mid;
     }
   }
-  if (found) {
-    return (text: trimmed, fontSize: best);
-  }
-  if (!hyphenateAtMinSize) {
-    return (text: trimmed, fontSize: minFontSize);
+
+  final fontSize = found ? best : minFontSize;
+  if (!found && !hyphenateAtMinSize) {
+    return (text: trimmed, fontSize: fontSize);
   }
 
-  // Min size still can't keep whole words on lines → wrap with hard hyphens.
+  // Always pre-wrap at the chosen size. Callers must use softWrap: false.
   final wrapped = wrapTitleWithHyphens(
     text: trimmed,
-    style: style.copyWith(fontSize: minFontSize),
-    maxWidth: maxWidth,
+    style: style.copyWith(fontSize: fontSize),
+    maxWidth: wrapWidth,
     maxLines: maxLines,
     textScaler: textScaler,
   );
-  return (text: wrapped, fontSize: minFontSize);
+  return (text: wrapped, fontSize: fontSize);
 }
 
 bool _fitsWholeWords({
@@ -64,10 +72,9 @@ bool _fitsWholeWords({
   required int maxLines,
   required TextScaler textScaler,
 }) {
-  final limit = maxWidth * 0.96;
   for (final word in text.split(RegExp(r'\s+'))) {
     if (word.isEmpty) continue;
-    if (_measure(word, style, textScaler) > limit) return false;
+    if (_measure(word, style, textScaler) > maxWidth) return false;
   }
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
@@ -152,8 +159,6 @@ String wrapTitleWithHyphens({
         textScaler: textScaler,
       );
       if (breakAt == null) {
-        // Even the shortest syllable break is too wide — still advance with a
-        // hard hyphen so the next line can continue the word.
         breakAt = _forcedBreak(rest, style, maxWidth, textScaler);
       }
       if (breakAt == null || lastLine) {
@@ -175,17 +180,20 @@ String wrapTitleWithHyphens({
 }
 
 /// Break indices: split BEFORE this character index (so left = substring(0, i)).
+/// Never leaves a single letter alone on either side.
 List<int> hyphenBreaks(String word) {
   if (word.length < 4) return const [];
   final lower = word.toLowerCase();
   final breaks = <int>{};
 
   bool isVowel(String ch) => 'aeiouy'.contains(ch.toLowerCase());
-  bool allowed(int i) => i >= 2 && word.length - i >= 3;
+  // Default: ≥2 on the left, ≥3 on the right (avoids parenti|ng).
+  bool allowed(int i, {int minRight = 3}) =>
+      i >= 2 && word.length - i >= minRight;
 
-  // Classic VC|CV syllable boundary → parenting → paren|ting.
-  for (var i = 2; i <= word.length - 3; i++) {
-    if (i + 1 >= word.length) continue;
+  // Classic VC|CV syllable boundary → parenting → paren|ting,
+  // developmental → develop|mental.
+  for (var i = 2; i + 1 < word.length; i++) {
     final a = word[i - 2];
     final b = word[i - 1];
     final c = word[i];
@@ -195,14 +203,14 @@ List<int> hyphenBreaks(String word) {
     }
   }
 
-  // After a vowel before a consonant (never leave 1–2 letters stranded).
-  for (var i = 2; i <= word.length - 3; i++) {
+  // After a vowel before a consonant.
+  for (var i = 2; i < word.length; i++) {
     if (!allowed(i)) continue;
     if (!isVowel(word[i - 1]) || isVowel(word[i])) continue;
     breaks.add(i);
   }
 
-  // Common English suffixes.
+  // Common English suffixes (short ones like "al" may leave 2 letters on the right).
   const suffixes = [
     'tion',
     'sion',
@@ -221,6 +229,8 @@ List<int> hyphenBreaks(String word) {
     'less',
     'able',
     'ible',
+    'ical',
+    'ology',
     'al',
     'ic',
     'ly',
@@ -230,7 +240,8 @@ List<int> hyphenBreaks(String word) {
   for (final suffix in suffixes) {
     if (!lower.endsWith(suffix)) continue;
     final i = word.length - suffix.length;
-    if (allowed(i)) breaks.add(i);
+    final minRight = suffix.length >= 3 ? 3 : 2;
+    if (allowed(i, minRight: minRight)) breaks.add(i);
   }
 
   final sorted = breaks.toList()..sort();
@@ -252,7 +263,7 @@ int? _bestBreak({
   return null;
 }
 
-/// Widest prefix (≥1) that fits with '-', else 1 so layout always progresses.
+/// Widest prefix that fits with '-', preferring ≥2 letters on each side.
 int? _forcedBreak(
   String word,
   TextStyle style,
@@ -260,6 +271,11 @@ int? _forcedBreak(
   TextScaler textScaler,
 ) {
   if (word.length < 2) return null;
+  for (var i = word.length - 2; i >= 2; i--) {
+    if (_measure('${word.substring(0, i)}-', style, textScaler) <= maxWidth) {
+      return i;
+    }
+  }
   for (var i = word.length - 1; i >= 1; i--) {
     if (_measure('${word.substring(0, i)}-', style, textScaler) <= maxWidth) {
       return i;

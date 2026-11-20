@@ -371,7 +371,8 @@ class _NodeCard extends StatelessWidget {
                         Text(
                           titleLaid.text,
                           textAlign: TextAlign.center,
-                          softWrap: true,
+                          // layoutTitle already inserted `\n` / `-`; don't re-break letters.
+                          softWrap: false,
                           maxLines: titleMaxLines,
                           overflow: TextOverflow.ellipsis,
                           style: titleStyle,
@@ -516,7 +517,8 @@ class _FittingLabel extends StatelessWidget {
             child: Text(
               laidOut.text,
               textAlign: TextAlign.center,
-              softWrap: true,
+              // layoutTitle already inserted `\n` / `-`; don't re-break letters.
+              softWrap: false,
               maxLines: maxLines,
               overflow: TextOverflow.ellipsis,
               style: style.copyWith(fontSize: laidOut.fontSize),

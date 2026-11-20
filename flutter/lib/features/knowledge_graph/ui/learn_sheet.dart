@@ -137,13 +137,10 @@ class _LearnSheetState extends State<LearnSheet> {
       });
       return;
     }
-    if (existing.packs.isNotEmpty && !existing.incomplete) {
-      _applyContent(existing);
-      return;
-    }
     if (existing.packs.isNotEmpty) {
       _applyContent(existing);
     } else {
+      // No auto-generate — packs are started from the topic action drawer.
       setState(() {
         _content = existing;
         _deck = const [];
@@ -153,22 +150,7 @@ class _LearnSheetState extends State<LearnSheet> {
     if (graph.jobForNode(widget.nodeId) != null) {
       _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
       _listen(graph);
-      return;
     }
-    if (!existing.incomplete) return;
-    final queued = await graph.enqueueContent(widget.nodeId, title: widget.title);
-    if (!mounted) return;
-    if (queued == null) {
-      setState(() => _error = graph.error ?? 'Could not start content generation');
-      return;
-    }
-    if (queued.packs.isNotEmpty && !queued.incomplete) {
-      _applyContent(queued);
-      return;
-    }
-    _watchedJobId = graph.jobForNode(widget.nodeId)?.jobId;
-    _listen(graph);
-    setState(() => _content = queued);
   }
 
   void _applyContent(TopicContent content) {

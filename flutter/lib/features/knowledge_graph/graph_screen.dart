@@ -322,14 +322,14 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _selectNode(PlacedNode node) {
     final graph = context.read<GraphController>();
-    // Focus tile: open learning cards directly.
+    // Focus tile: cards if packs exist, otherwise the action drawer (no auto-generate).
     if (node.id == graph.focusId) {
       _dwellTimer?.cancel();
       setState(() {
         _highlighted = node;
         _profileOpen = false;
       });
-      unawaited(_openLearn(node, source: 'graph'));
+      unawaited(_openFocusPrimary(node, source: 'graph'));
       return;
     }
     _panTargetId = node.id;
@@ -585,6 +585,18 @@ class _GraphScreenState extends State<GraphScreen>
     return null;
   }
 
+  /// Focus/search: open cards when packs exist; otherwise the action drawer.
+  Future<void> _openFocusPrimary(PlacedNode node, {required String source}) async {
+    final graph = context.read<GraphController>();
+    final content = await graph.fetchContent(node.id);
+    if (!mounted) return;
+    if (content == null || content.packs.isEmpty) {
+      await _showTopicActionsSheet(node);
+      return;
+    }
+    await _openLearn(node, source: source);
+  }
+
   Future<void> _openLearn(PlacedNode node, {required String source}) async {
     final graph = context.read<GraphController>();
     unawaited(
@@ -623,6 +635,13 @@ class _GraphScreenState extends State<GraphScreen>
       _syncHighlightedFromLayout(graph.focusId);
     }
     if (!mounted) return;
+    await _showTopicActionsSheet(_highlighted ?? node);
+  }
+
+  Future<void> _showTopicActionsSheet(PlacedNode node) async {
+    final graph = context.read<GraphController>();
+    final incomplete = _knownIncomplete(node.id, graph) == true;
+    final busy = graph.jobForNode(node.id) != null;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -633,28 +652,29 @@ class _GraphScreenState extends State<GraphScreen>
             children: [
               ListTile(
                 leading: const Icon(Icons.image_outlined),
-                title: const Text('Image'),
+                title: const Text('Upload or generate an image'),
                 onTap: () => Navigator.pop(context, 'image'),
               ),
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit'),
-                onTap: () => Navigator.pop(context, 'edit'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline),
-                title: const Text('Delete'),
-                onTap: () => Navigator.pop(context, 'delete'),
+                title: const Text('Manage topic'),
+                onTap: () => Navigator.pop(context, 'manage'),
               ),
               ListTile(
                 leading: const Icon(Icons.hub_outlined),
-                title: const Text('Show relationships'),
+                title: const Text('Show relations'),
                 onTap: () => Navigator.pop(context, 'relations'),
               ),
               ListTile(
-                leading: const Icon(Icons.auto_awesome_outlined),
-                title: const Text('Generate new learning pack'),
-                enabled: graph.jobForNode(node.id) == null,
+                leading: const Icon(Icons.auto_awesome),
+                title: const Text('Generate relations'),
+                enabled: incomplete && !busy,
+                onTap: () => Navigator.pop(context, 'neighbors'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.school_outlined),
+                title: const Text('Generate atomic learning'),
+                enabled: !busy,
                 onTap: () => Navigator.pop(context, 'new_pack'),
               ),
             ],
@@ -667,10 +687,8 @@ class _GraphScreenState extends State<GraphScreen>
     switch (choice) {
       case 'image':
         await _chooseImageAction(g);
-      case 'edit':
-        await _editHighlighted(g);
-      case 'delete':
-        await _confirmDeleteHighlighted(g);
+      case 'manage':
+        await _manageHighlighted(g);
       case 'relations':
         final target = _highlighted;
         if (target == null) return;
@@ -683,6 +701,8 @@ class _GraphScreenState extends State<GraphScreen>
         );
       case 'new_pack':
         await _generateNewLearningPack(g);
+      case 'neighbors':
+        await _requestNeighbors(g);
     }
   }
 
@@ -690,10 +710,14 @@ class _GraphScreenState extends State<GraphScreen>
     final node = _highlighted;
     if (node == null) return;
     if (graph.jobForNode(node.id) != null) return;
+    final existing = await graph.fetchContent(node.id);
+    if (!mounted) return;
+    // First pack uses expand; additional packs use new_pack.
+    final hasPacks = existing != null && existing.packs.isNotEmpty;
     final queued = await graph.enqueueContent(
       node.id,
       title: node.title,
-      newPack: true,
+      newPack: hasPacks,
     );
     if (!mounted) return;
     if (queued == null) {
@@ -702,16 +726,17 @@ class _GraphScreenState extends State<GraphScreen>
     }
   }
 
-  Future<void> _editHighlighted(GraphController graph) async {
+  Future<void> _manageHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null) return;
     final titleCtrl = TextEditingController(text: node.title);
     final descCtrl = TextEditingController(text: (node.description ?? '').trim());
-    final saved = await showDialog<bool>(
+    final result = await showDialog<String>(
       context: context,
       builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
         return AlertDialog(
-          title: const Text('Edit topic'),
+          title: const Text('Manage topic'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -733,8 +758,13 @@ class _GraphScreenState extends State<GraphScreen>
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: scheme.error),
+              onPressed: () => Navigator.pop(context, 'delete'),
+              child: const Text('Delete'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save')),
           ],
         );
       },
@@ -743,7 +773,12 @@ class _GraphScreenState extends State<GraphScreen>
     final description = descCtrl.text.trim();
     titleCtrl.dispose();
     descCtrl.dispose();
-    if (saved != true || !mounted || title.isEmpty) return;
+    if (!mounted || result == null) return;
+    if (result == 'delete') {
+      await _confirmDeleteHighlighted(graph);
+      return;
+    }
+    if (result != 'save' || title.isEmpty) return;
     final ok = await graph.updateNode(id: node.id, title: title, description: description);
     if (!ok || !mounted) return;
     setState(() {
@@ -915,7 +950,7 @@ class _GraphScreenState extends State<GraphScreen>
     _syncHighlightedFromLayout(graph.focusId);
     final node = _highlighted;
     if (node != null) {
-      unawaited(_openLearn(node, source: 'search'));
+      unawaited(_openFocusPrimary(node, source: 'search'));
     }
   }
 
@@ -929,7 +964,7 @@ class _GraphScreenState extends State<GraphScreen>
     _syncHighlightedFromLayout(graph.focusId);
     final node = _highlighted;
     if (node != null) {
-      unawaited(_openLearn(node, source: 'search'));
+      unawaited(_openFocusPrimary(node, source: 'search'));
     }
   }
 
@@ -976,14 +1011,7 @@ class _GraphScreenState extends State<GraphScreen>
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
     final highlight = _highlighted;
-    final knownIncomplete =
-        highlight == null ? null : _knownIncomplete(highlight.id, graph);
     final overlayOpen = _profileOpen || _learnOpen;
-    final canRequestNeighbors = !_searchOpen &&
-        !overlayOpen &&
-        highlight != null &&
-        knownIncomplete == true &&
-        graph.jobForNode(highlight.id) == null;
     final openingRelated =
         _openingRelatedId != null && _openingRelatedId == highlight?.id;
     final canGoToHighlight = !_searchOpen &&
@@ -1195,21 +1223,7 @@ class _GraphScreenState extends State<GraphScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      if (canRequestNeighbors) ...[
-                        FloatingActionButton.small(
-                          heroTag: 'graph-request',
-                          tooltip: 'Request neighbors',
-                          backgroundColor: scheme.primary,
-                          foregroundColor: scheme.onPrimary,
-                          elevation: 1.5,
-                          focusElevation: 2,
-                          hoverElevation: 2,
-                          highlightElevation: 2,
-                          onPressed: () => unawaited(_requestNeighbors(graph)),
-                          child: const Icon(Icons.auto_awesome, size: 20),
-                        ),
-                        const SizedBox(height: 6),
-                      ] else if (canGoToHighlight) ...[
+                      if (canGoToHighlight) ...[
                         FloatingActionButton.small(
                           heroTag: 'graph-go',
                           tooltip: 'Go to topic',
