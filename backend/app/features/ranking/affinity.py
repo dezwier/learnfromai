@@ -1,6 +1,7 @@
 """Weighted user–tile affinity (single measure for HUD + cron).
 
 Affinity uses focus + open engagement only (not learn/check/pack walks).
+Direct graph neighbors contribute a fraction of their focus/open engagement.
 """
 
 from __future__ import annotations
@@ -10,11 +11,12 @@ from collections import defaultdict
 from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
 from app.core.config import Settings, get_settings
 from app.core.time import utcnow
-from app.features.knowledge_graph.node_models import KnowledgeNode
+from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.user_events.models import UserTopicEvent
 
 # Still reported on the profile map for UI; not used in the affinity score.
@@ -43,6 +45,7 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "affinity_w_focus": s.affinity_w_focus,
         "affinity_w_open": s.affinity_w_open,
         "affinity_w_new": s.affinity_w_new,
+        "affinity_w_neighbor": s.affinity_w_neighbor,
         "affinity_half_life_days": s.affinity_half_life_days,
         "cron_neighbor_w_count_penalty": s.cron_neighbor_w_count_penalty,
         "cron_learn_w_pack_penalty": s.cron_learn_w_pack_penalty,
@@ -52,6 +55,37 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "cron_learn_jobs_per_day": s.cron_learn_jobs_per_day,
         "cron_neighbor_budget_total": s.cron_neighbor_budget_total,
     }
+
+
+def _own_engagement(
+    *,
+    focus_n: int,
+    open_n: int,
+    settings: Settings,
+) -> float:
+    return settings.affinity_w_focus * focus_n + settings.affinity_w_open * open_n
+
+
+def _undirected_neighbors(
+    session: Session, node_ids: set[UUID]
+) -> dict[UUID, set[UUID]]:
+    """Map each node → direct neighbors (either edge direction)."""
+    if not node_ids:
+        return {}
+    ids = list(node_ids)
+    edges = session.exec(
+        select(KnowledgeEdge).where(
+            or_(
+                col(KnowledgeEdge.from_id).in_(ids),
+                col(KnowledgeEdge.to_id).in_(ids),
+            )
+        )
+    ).all()
+    neighbors: dict[UUID, set[UUID]] = defaultdict(set)
+    for edge in edges:
+        neighbors[edge.from_id].add(edge.to_id)
+        neighbors[edge.to_id].add(edge.from_id)
+    return neighbors
 
 
 def score_user_tiles(
@@ -98,6 +132,7 @@ def score_user_tiles(
         select(KnowledgeNode).where(col(KnowledgeNode.id).in_(list(engaged_ids)))
     ).all()
     by_id = {node.id: node for node in nodes}
+    neighbor_map = _undirected_neighbors(session, engaged_ids)
 
     scored: dict[UUID, dict] = {}
     for nid in engaged_ids:
@@ -106,11 +141,19 @@ def score_user_tiles(
             continue
         focus_n = focus_counts.get(nid, 0)
         open_n = open_counts.get(nid, 0)
+        own = _own_engagement(focus_n=focus_n, open_n=open_n, settings=s)
+        neighbor_spill = 0.0
+        for nb in neighbor_map.get(nid, ()):
+            neighbor_spill += _own_engagement(
+                focus_n=focus_counts.get(nb, 0),
+                open_n=open_counts.get(nb, 0),
+                settings=s,
+            )
         node_age = age_days(node.created_at, now=current)
         event_age = age_days(last_engage_at.get(nid), now=current)
         base = (
-            s.affinity_w_focus * focus_n
-            + s.affinity_w_open * open_n
+            own
+            + s.affinity_w_neighbor * neighbor_spill
             + s.affinity_w_new
             * recency(node_age, half_life_days=s.affinity_half_life_days)
         )

@@ -70,8 +70,9 @@ class Settings(BaseSettings):
 
     # --- Affinity (profile map + base tile score for cron) ---
     # Only focus + open (not learn/check/packs). Soft newness + event recency.
-    # affinity(u,t) = (w_focus*focus + w_open*open + w_new*recency(node_age))
+    # affinity(u,t) = (own + w_neighbor * sum_neighbors(own) + w_new*recency(node_age))
     #                 * recency(days_since_last_focus_or_open)
+    # where own = w_focus*focus + w_open*open
     affinity_w_focus: float = Field(
         default=1.0, validation_alias=_env("affinity_w_focus", "AFFINITY_W_FOCUS", "RANK_W_FOCUS")
     )
@@ -80,6 +81,11 @@ class Settings(BaseSettings):
     )
     affinity_w_new: float = Field(
         default=2.0, validation_alias=_env("affinity_w_new", "AFFINITY_W_NEW", "RANK_W_NEW")
+    )
+    # Fraction of each direct neighbor's focus/open engagement that spills into this tile.
+    affinity_w_neighbor: float = Field(
+        default=0.1,
+        validation_alias=_env("affinity_w_neighbor", "AFFINITY_W_NEIGHBOR"),
     )
     affinity_half_life_days: float = Field(
         default=14.0,

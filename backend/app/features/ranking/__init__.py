@@ -2,7 +2,7 @@
 
 Weights live on Settings, grouped by use case:
 
-  Affinity:      AFFINITY_W_* / AFFINITY_HALF_LIFE_DAYS
+  Affinity:      AFFINITY_W_* (focus/open/new/neighbor spill) / AFFINITY_HALF_LIFE_DAYS
   Neighbor cron: CRON_NEIGHBOR_W_COUNT_PENALTY (+ jobs/day, budget)
   Pack cron:     CRON_LEARN_W_PACK_PENALTY, CRON_LEARN_W_NEIGHBOR_BOOST
   Learn track:   LEARN_TRACK_EXPLOIT_P
