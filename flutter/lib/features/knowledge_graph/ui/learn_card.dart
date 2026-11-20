@@ -229,6 +229,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
               duration: const Duration(milliseconds: 240),
               curve: Curves.easeOutCubic,
               alignment: Alignment.topCenter,
+              clipBehavior: Clip.none,
               child: TurnableYAxisCard(
                 resetIdentity: '${pack.packIndex}-$checkKind',
                 dismissKeyboardOnInteraction: true,

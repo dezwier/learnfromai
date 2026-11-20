@@ -5,11 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
-import '../../profile/profile_hud.dart';
 import '../graph_controller.dart';
-import '../models.dart';
 import 'learn_card.dart';
 import 'learn_edge_dismiss.dart';
+import 'learn_session_chrome.dart';
 import 'learning_track_support.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
@@ -404,7 +403,9 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final genJob =
         genId == null ? null : graph.jobForNode(genId, type: 'expand_content');
     final generating = genId != null && (genJob != null || entry == null);
-    final bottomFadeHeight = padding.bottom + 88 + ProfileTopFade.fadeExtension;
+    final showNext = _quizDone && entry != null && !generating;
+    final bottomClearance =
+        LearnSessionFloatingCta.clearance(context, visible: showNext);
 
     final Widget cardBody;
     if (generating) {
@@ -447,95 +448,40 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       );
     }
 
+    final title = (_topicTitle ?? '').trim().isEmpty ? 'Learn' : _topicTitle!.trim();
+
     return Material(
       type: MaterialType.transparency,
       child: LearnEdgeSwipeToDismiss(
         onDismiss: _dismiss,
         child: Stack(
+          fit: StackFit.expand,
           children: [
-            Positioned.fill(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  padding.top + 12,
-                  20,
-                  padding.bottom + (_quizDone ? 88 : 24),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if ((_topicTitle ?? '').trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Text(
-                          _topicTitle!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                            shadows: const [Shadow(blurRadius: 6, color: Colors.black45)],
-                          ),
-                        ),
-                      ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: cardBody,
-                      ),
-                    ),
-                  ],
-                ),
+            SafeArea(
+              bottom: false,
+              child: LearnSessionCardStage(
+                title: title,
+                bottomClearance: bottomClearance,
+                titleColor: Colors.white,
+                metaColor: Colors.white.withValues(alpha: 0.75),
+                titleShadows: const [
+                  Shadow(blurRadius: 8, color: Color(0x88000000)),
+                  Shadow(blurRadius: 2, color: Color(0xAA000000)),
+                ],
+                onClose: _dismiss,
+                card: cardBody,
               ),
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: ProfileTopFade.height(context),
-              child: const ProfileTopFade(),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: bottomFadeHeight,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [
-                        scheme.surface.withValues(alpha: 0.94),
-                        scheme.surface.withValues(alpha: 0.72),
-                        scheme.surface.withValues(alpha: 0.28),
-                        scheme.surface.withValues(alpha: 0.0),
-                      ],
-                      stops: const [0.0, 0.35, 0.72, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (_quizDone && entry != null)
-              Positioned(
-                left: 20,
-                right: 20,
-                bottom: padding.bottom + 16,
-                child: FilledButton(
-                  onPressed: _advancing ? null : () => unawaited(_onNext()),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-                  ),
-                  child: Text(_advancing ? 'Loading…' : 'Next'),
-                ),
+            if (showNext)
+              LearnSessionFloatingCta(
+                label: _advancing ? 'Loading…' : 'Next',
+                onPressed: _advancing ? null : () => unawaited(_onNext()),
               ),
             if (_error != null)
               Positioned(
                 left: 20,
                 right: 20,
-                top: padding.top + 8,
+                top: padding.top + LearnSessionCardStage.headerTop,
                 child: IgnorePointer(
                   child: Text(
                     _error!,

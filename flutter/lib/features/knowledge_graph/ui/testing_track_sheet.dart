@@ -10,6 +10,7 @@ import '../../../core/widgets/study_card.dart';
 import '../../profile/overlay_panel_chrome.dart';
 import '../graph_controller.dart';
 import 'learn_card.dart';
+import 'learn_session_chrome.dart';
 import 'leitner_distribution_card.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
@@ -242,16 +243,17 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
     final showNext = _reviewing && _answered;
-    final media = MediaQuery.of(context);
-    final keyboardInset = media.viewInsets.bottom;
-    final safeBottom = media.padding.bottom;
-    // Floating button only — no fade bar. Keep scroll clear of the pill.
-    final bottomClearance = showNext
-        ? safeBottom + keyboardInset + 72
-        : OverlayPanel.bottomClearance(context, hasBottom: false) + keyboardInset;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomClearance = LearnSessionFloatingCta.clearance(
+          context,
+          visible: showNext,
+        ) +
+        (showNext ? 0 : keyboardInset);
 
     return OverlayPanel(
       onDismiss: widget.onClose,
+      // Review paints its own close under the flip card so the turn covers chrome.
+      showCloseButton: !_reviewing,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -292,27 +294,11 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                       ),
           ),
           if (showNext)
-            Positioned(
-              left: 20,
-              right: 20,
-              bottom: safeBottom + keyboardInset + 16,
-              child: FilledButton(
-                onPressed: (!_submitting && _continueArmed)
-                    ? () => unawaited(_onNextCard())
-                    : null,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                  elevation: 4,
-                  shadowColor: Colors.black.withValues(alpha: 0.28),
-                  textStyle: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                child: Text(
-                  _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-                ),
-              ),
+            LearnSessionFloatingCta(
+              label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
+              onPressed: (!_submitting && _continueArmed)
+                  ? () => unawaited(_onNextCard())
+                  : null,
             ),
         ],
       ),
@@ -452,87 +438,47 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   Widget _buildReview(BuildContext context, double bottomClearance) {
     final graph = context.watch<GraphController>();
     final card = _queue[_queueIndex];
-    final scheme = Theme.of(context).colorScheme;
     final imageUrl = _cardImageUrl(card.item, graph);
     final entry = LearnDeckEntry(pack: card.item.pack, checkKind: card.checkKind);
-    const titleShadows = [
-      Shadow(blurRadius: 8, color: Color(0x66000000)),
-      Shadow(blurRadius: 2, color: Color(0x88000000)),
-    ];
-    // Card sits under a transparent top chrome so the flip can show through.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Positioned.fill(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(20, OverlayPanel.closeInset, 20, bottomClearance),
-            child: SingleChildScrollView(
-              child: LearnFlipCard(
-                key: ValueKey(
-                  'review-$_queueIndex-${card.item.nodeId}-${card.item.packIndex}-${card.checkKind}',
-                ),
-                entry: entry,
-                imageUrl: imageUrl,
-                startOnCheck: true,
-                imageLoading:
-                    graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
-                loadImageBytes: (url) =>
-                    graph.fetchImageBytes(url, notify: false),
-                cachedBytes: graph.cachedImageBytes(imageUrl),
-                onShown: () {},
-                onCheckAnswer: ({
-                  required bool correct,
-                  int? choiceIndex,
-                  bool? answerBool,
-                  String? answerText,
-                }) {
-                  unawaited(
-                    _onAnswer(
-                      correct: correct,
-                      choiceIndex: choiceIndex,
-                      answerBool: answerBool,
-                      answerText: answerText,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
+    return LearnSessionCardStage(
+      title: card.item.title,
+      meta: '${_queueIndex + 1} / ${_queue.length}',
+      bottomClearance: bottomClearance,
+      onClose: () {
+        final panel = OverlayPanel.maybeOf(context);
+        if (panel != null) {
+          panel.dismiss();
+        } else {
+          widget.onClose();
+        }
+      },
+      card: LearnFlipCard(
+        key: ValueKey(
+          'review-$_queueIndex-${card.item.nodeId}-${card.item.packIndex}-${card.checkKind}',
         ),
-        Positioned(
-          top: OverlayPanel.closeInset,
-          left: 20,
-          right: OverlayPanel.closeSize + OverlayPanel.closeInset + 14,
-          height: OverlayPanel.closeSize,
-          child: IgnorePointer(
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    card.item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: scheme.onSurface,
-                          shadows: titleShadows,
-                        ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  '${_queueIndex + 1} / ${_queue.length}',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.75),
-                        fontWeight: FontWeight.w600,
-                        shadows: titleShadows,
-                      ),
-                ),
-              ],
+        entry: entry,
+        imageUrl: imageUrl,
+        startOnCheck: true,
+        imageLoading: graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
+        loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+        cachedBytes: graph.cachedImageBytes(imageUrl),
+        onShown: () {},
+        onCheckAnswer: ({
+          required bool correct,
+          int? choiceIndex,
+          bool? answerBool,
+          String? answerText,
+        }) {
+          unawaited(
+            _onAnswer(
+              correct: correct,
+              choiceIndex: choiceIndex,
+              answerBool: answerBool,
+              answerText: answerText,
             ),
-          ),
-        ),
-      ],
+          );
+        },
+      ),
     );
   }
 }

@@ -11,11 +11,15 @@ class OverlayPanel extends StatefulWidget {
     required this.onDismiss,
     required this.child,
     this.bottom,
+    this.showCloseButton = true,
   });
 
   final VoidCallback onDismiss;
   final Widget child;
   final Widget? bottom;
+
+  /// When false, the caller paints its own close control (e.g. under a flip card).
+  final bool showCloseButton;
 
   static const double closeSize = 44;
   static const double closeInset = 10;
@@ -26,11 +30,14 @@ class OverlayPanel extends StatefulWidget {
     return OverlayLessonFooter.height(context) + 24;
   }
 
+  static OverlayPanelState? maybeOf(BuildContext context) =>
+      context.findAncestorStateOfType<OverlayPanelState>();
+
   @override
-  State<OverlayPanel> createState() => _OverlayPanelState();
+  State<OverlayPanel> createState() => OverlayPanelState();
 }
 
-class _OverlayPanelState extends State<OverlayPanel>
+class OverlayPanelState extends State<OverlayPanel>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   var _dragPx = 0.0;
@@ -133,8 +140,8 @@ class _OverlayPanelState extends State<OverlayPanel>
     widget.onDismiss();
   }
 
-  void _closePressed() {
-    unawaited(_animateDismiss(velocity: 1600));
+  void dismiss({double velocity = 1600}) {
+    unawaited(_animateDismiss(velocity: velocity));
   }
 
   @override
@@ -185,11 +192,12 @@ class _OverlayPanelState extends State<OverlayPanel>
                       color: Colors.black.withValues(alpha: 0.08 * (1 - progress)),
                     ),
                   ),
-                Positioned(
-                  top: top + OverlayPanel.closeInset,
-                  right: OverlayPanel.closeInset + 2,
-                  child: OverlayCloseButton(onPressed: _closePressed),
-                ),
+                if (widget.showCloseButton)
+                  Positioned(
+                    top: top + OverlayPanel.closeInset,
+                    right: OverlayPanel.closeInset + 2,
+                    child: OverlayCloseButton(onPressed: dismiss),
+                  ),
               ],
             ),
           ),
