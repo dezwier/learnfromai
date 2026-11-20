@@ -35,6 +35,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/me/topic-affinity?limit=24` → `{nodes, clusters, edges}` for the profile affinity map (`affinity` is a float)
 - `GET /api/v1/me/learning-next?seed_node_id=` → `{status: ready, node_id, title, pack_index, pack, affinity, completed_packs}` or `{status: generate, node_id, title}` when seed+neighbors have no unlearned packs
 - `GET /api/v1/admin/cron-runs/latest` → last daily ranking cron summary (403 unless `is_admin`)
+- `POST /api/v1/admin/cron-runs/run` → run the ranking cron now and return its summary (403 unless `is_admin`)
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes?q=` existing-topic autocomplete (no LLM)
 - `GET /api/v1/knowledge/nodes/{node_id}/content` → `{pack_count, packs: [{pack_index, incomplete, title, bits}], completed_packs, incomplete}` (`completed_packs` = pack indexes where the user logged learn + any one check; `incomplete` when no packs or any pack content-incomplete)

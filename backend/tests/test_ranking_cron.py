@@ -195,6 +195,34 @@ def test_admin_cron_latest(client, auth, session, user):
     assert body["neighbor_jobs"][0]["name"] == "UniqueCronTile"
 
 
+def test_admin_cron_run_now(client, auth, session, user):
+    blocked = client.post("/api/v1/admin/cron-runs/run", headers=auth)
+    assert blocked.status_code == 403
+
+    user.is_admin = True
+    session.add(user)
+    session.commit()
+
+    # Seed a tile so the cron has something to rank.
+    node = KnowledgeNode(name="CronNow", name_key="cron-now", description="x")
+    session.add(node)
+    session.flush()
+    record_focus(session, user=user, node_id=node.id)
+    record_events(
+        session,
+        user=user,
+        items=[{"node_id": str(node.id), "kind": "open", "payload": {"source": "graph"}}],
+    )
+    session.commit()
+
+    response = client.post("/api/v1/admin/cron-runs/run", headers=auth)
+    assert response.status_code == 200
+    body = response.json()["run"]
+    assert body["status"] == "succeeded"
+    assert isinstance(body["neighbor_jobs"], list)
+    assert isinstance(body["learn_jobs"], list)
+
+
 def test_me_includes_is_admin(client, auth, user, session):
     response = client.get("/api/v1/me", headers=auth)
     assert response.status_code == 200

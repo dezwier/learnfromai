@@ -17,6 +17,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
   static const _placeholderHeight = 120.0;
 
   var _loading = true;
+  var _running = false;
   String? _error;
   _CronRunSummary? _run;
 
@@ -50,15 +51,67 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
     }
   }
 
+  Future<void> _runNow() async {
+    if (_running) return;
+    final api = context.read<AuthController>().api;
+    setState(() {
+      _running = true;
+      _error = null;
+    });
+    try {
+      final raw = Map<String, dynamic>.from(
+        await api.post('/admin/cron-runs/run', body: {}) as Map,
+      );
+      final runRaw = raw['run'];
+      final run = runRaw is Map ? _CronRunSummary.fromJson(Map<String, dynamic>.from(runRaw)) : null;
+      if (!mounted) return;
+      setState(() {
+        _run = run;
+        _running = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            run == null
+                ? 'Cron finished.'
+                : 'Cron ${run.status}: ${run.neighborJobs.length} neighbor, ${run.learnJobs.length} pack jobs.',
+          ),
+        ),
+      );
+    } catch (exc) {
+      if (!mounted) return;
+      setState(() {
+        _error = exc.toString();
+        _running = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Daily ranking cron',
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Daily ranking cron',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+            FilledButton.tonal(
+              onPressed: (_loading || _running) ? null : _runNow,
+              child: _running
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Run now'),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text(

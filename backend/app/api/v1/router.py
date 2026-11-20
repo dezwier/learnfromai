@@ -219,6 +219,25 @@ def get_latest_cron_run(
     return {"run": cron_run_payload(session, run)}
 
 
+@router.post("/admin/cron-runs/run")
+def post_run_cron(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Admin: enqueue the daily ranking cron immediately (same as the scheduled job)."""
+    if not user.is_admin:
+        raise forbidden()
+    from app.features.ranking.cron_run import cron_run_payload, run_daily_cron
+
+    try:
+        run = run_daily_cron(session)
+        session.commit()
+        return {"run": cron_run_payload(session, run)}
+    except Exception:
+        session.commit()
+        raise
+
+
 @router.get("/me/preferences")
 def get_preferences(user: User = Depends(get_current_user)):
     return {
