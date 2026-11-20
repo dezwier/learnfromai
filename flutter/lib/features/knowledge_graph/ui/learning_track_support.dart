@@ -21,16 +21,23 @@ class LearningTrackSupport {
     prefetchInFlight = null;
   }
 
-  void schedulePrefetch(LearningNext current) {
+  void schedulePrefetch(
+    LearningNext current, {
+    required String originNodeId,
+    String? originTitle,
+  }) {
     final seedId = current.nodeId;
     final packIndex = current.packIndex ?? current.pack?.packIndex;
     if (seedId.isEmpty || packIndex == null || packIndex < 1) return;
+    if (originNodeId.isEmpty) return;
     final gen = ++_prefetchGen;
     prefetched = null;
     prefetchInFlight = _prefetchBody(
       gen: gen,
       seedId: seedId,
       excludePackIndex: packIndex,
+      originNodeId: originNodeId,
+      originTitle: originTitle,
     );
   }
 
@@ -38,6 +45,8 @@ class LearningTrackSupport {
     required int gen,
     required String seedId,
     required int excludePackIndex,
+    required String originNodeId,
+    String? originTitle,
   }) async {
     final next = await _graph.fetchLearningNext(
       seedId,
@@ -49,16 +58,21 @@ class LearningTrackSupport {
     _warmImage(next);
     if (next == null || !next.needsGenerate) return;
 
-    // No unlearned pack left — start generating while the user finishes this card.
-    final title = next.title.isEmpty ? 'Topic' : next.title;
-    await _graph.enqueueContentForTrack(next.nodeId, title: title);
+    // Always generate for the topic where the track started, not a wandered neighbor.
+    final title = (originTitle ?? '').trim().isNotEmpty
+        ? originTitle!.trim()
+        : (next.title.isEmpty ? 'Topic' : next.title);
+    await _graph.enqueueContentForTrack(originNodeId, title: title);
     if (gen != _prefetchGen) return;
 
+    // After generate, pick from the origin (exclude the on-screen pack if it is on origin).
+    final excludeOriginPack = seedId == originNodeId ? excludePackIndex : null;
     final ready = await _awaitGeneratedPack(
       gen: gen,
-      nodeId: next.nodeId,
-      seedId: seedId,
-      excludePackIndex: excludePackIndex,
+      nodeId: originNodeId,
+      seedId: originNodeId,
+      excludeNodeId: excludeOriginPack == null ? null : originNodeId,
+      excludePackIndex: excludeOriginPack,
     );
     if (gen != _prefetchGen || ready == null) return;
     prefetched = ready;
@@ -72,12 +86,13 @@ class LearningTrackSupport {
     }
   }
 
-  /// Wait for the content job, then re-fetch the next pack (excluding the on-screen one).
+  /// Wait for the content job, then re-fetch the next pack from [seedId].
   Future<LearningNext?> _awaitGeneratedPack({
     required int gen,
     required String nodeId,
     required String seedId,
-    required int excludePackIndex,
+    String? excludeNodeId,
+    int? excludePackIndex,
   }) async {
     var sawJob = _graph.isJobTypeActive(nodeId, 'expand_content');
     for (var i = 0; i < 180; i++) {
@@ -88,7 +103,7 @@ class LearningTrackSupport {
       } else {
         final again = await _graph.fetchLearningNext(
           seedId,
-          excludeNodeId: seedId,
+          excludeNodeId: excludeNodeId,
           excludePackIndex: excludePackIndex,
         );
         if (gen != _prefetchGen) return null;

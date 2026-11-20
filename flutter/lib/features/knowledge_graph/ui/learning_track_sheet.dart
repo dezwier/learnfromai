@@ -151,7 +151,12 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     if (next.needsGenerate) {
-      await _startGenerate(graph, next.nodeId, next.title.isEmpty ? (titleHint ?? '') : next.title);
+      // Always generate for the topic where this track was opened.
+      await _startGenerate(
+        graph,
+        widget.seedNodeId,
+        widget.seedTitle.isEmpty ? (titleHint ?? next.title) : widget.seedTitle,
+      );
       return;
     }
     _applyReady(graph, next, trackOpen: trackOpen);
@@ -160,18 +165,22 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   Future<void> _startGenerate(GraphController graph, String nodeId, String title) async {
     final support = _supportFor(graph);
     support.cancelPrefetch();
+    final originId = widget.seedNodeId;
+    final originTitle = widget.seedTitle.isEmpty ? title : widget.seedTitle;
     setState(() {
       _loading = true;
-      _generateNodeId = nodeId;
-      _topicTitle = title;
-      _nodeId = nodeId;
+      _generateNodeId = originId;
+      _topicTitle = originTitle;
+      _nodeId = originId;
       _cardImageUrl = null;
       _error = null;
     });
-    unawaited(_setCardImage(LearningNext(status: 'generate', nodeId: nodeId, title: title)));
-    final queued = await graph.enqueueContentForTrack(nodeId, title: title);
+    unawaited(
+      _setCardImage(LearningNext(status: 'generate', nodeId: originId, title: originTitle)),
+    );
+    final queued = await graph.enqueueContentForTrack(originId, title: originTitle);
     if (!mounted) return;
-    final job = graph.jobForNode(nodeId, type: 'expand_content');
+    final job = graph.jobForNode(originId, type: 'expand_content');
     if (job != null) {
       _watchedJobId = job.jobId;
       _listen(graph);
@@ -187,7 +196,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     // 200 with existing content — try once more; do not loop generate forever.
-    final next = await graph.fetchLearningNext(nodeId);
+    final next = await graph.fetchLearningNext(originId);
     if (!mounted) return;
     if (next != null && next.isReady) {
       _applyReady(graph, next);
@@ -196,7 +205,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     setState(() {
       _generateNodeId = null;
       _loading = false;
-      _error = 'No new learning pack could be started for $title';
+      _error = 'No new learning pack could be started for $originTitle';
     });
   }
 
@@ -237,7 +246,11 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _advancing = false;
     });
     unawaited(_setCardImage(next));
-    support.schedulePrefetch(next);
+    support.schedulePrefetch(
+      next,
+      originNodeId: widget.seedNodeId,
+      originTitle: widget.seedTitle,
+    );
     if (trackOpen) {
       unawaited(
         graph.trackEvent(
@@ -349,9 +362,9 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final peek = support.prefetched;
     if (peek != null && peek.needsGenerate) {
       setState(() {
-        _generateNodeId = peek.nodeId;
-        _nodeId = peek.nodeId;
-        if (peek.title.trim().isNotEmpty) _topicTitle = peek.title;
+        _generateNodeId = widget.seedNodeId;
+        _nodeId = widget.seedNodeId;
+        _topicTitle = widget.seedTitle.isEmpty ? peek.title : widget.seedTitle;
       });
     }
 
@@ -365,8 +378,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       if (prefetched.needsGenerate) {
         await _startGenerate(
           graph,
-          prefetched.nodeId,
-          prefetched.title.isEmpty ? (_topicTitle ?? '') : prefetched.title,
+          widget.seedNodeId,
+          widget.seedTitle.isEmpty ? (_topicTitle ?? '') : widget.seedTitle,
         );
         if (mounted) setState(() => _advancing = false);
         return;
