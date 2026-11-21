@@ -97,7 +97,6 @@ class _McCheck extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final question = bit.body['question']?.toString() ?? '';
     final choicesRaw = bit.body['choices'];
     final choices = [
@@ -105,7 +104,6 @@ class _McCheck extends StatelessWidget {
         for (final row in choicesRaw) row.toString(),
     ];
     final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
-    final explanation = bit.body['explanation']?.toString().trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -125,16 +123,6 @@ class _McCheck extends StatelessWidget {
             revealed: revealed,
             correct: i == answerIndex,
             onTap: () => onSelect(i),
-          ),
-        ],
-        if (revealed && explanation != null && explanation.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            explanation,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.72),
-                  height: 1.4,
-                ),
           ),
         ],
       ],
@@ -157,12 +145,10 @@ class _TrueFalseCheck extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final statement = bit.body['statement']?.toString() ??
         bit.body['question']?.toString() ??
         '';
     final answer = bit.body['answer'] == true;
-    final explanation = bit.body['explanation']?.toString().trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -189,16 +175,6 @@ class _TrueFalseCheck extends StatelessWidget {
           correct: !answer,
           onTap: () => onSelect(false),
         ),
-        if (revealed && explanation != null && explanation.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            explanation,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.72),
-                  height: 1.4,
-                ),
-          ),
-        ],
       ],
     );
   }
@@ -223,7 +199,6 @@ class _ClozeCheck extends StatelessWidget {
     final prompt = bit.body['prompt']?.toString() ??
         bit.body['question']?.toString() ??
         '';
-    final explanation = bit.body['explanation']?.toString().trim();
     final correct = revealed && gradeCloze(bit, controller.text);
     final dark = scheme.brightness == Brightness.dark;
     final resultColor =
@@ -265,38 +240,21 @@ class _ClozeCheck extends StatelessWidget {
             fillColor: revealed ? resultColor.withValues(alpha: dark ? 0.22 : 0.12) : null,
           ),
         ),
-        if (!revealed) ...[
-          const SizedBox(height: 10),
-          Align(
+        const SizedBox(height: 10),
+        // Keep Check row height so reveal doesn't resize the card.
+        Visibility(
+          visible: !revealed,
+          maintainSize: true,
+          maintainAnimation: true,
+          maintainState: true,
+          child: Align(
             alignment: Alignment.centerRight,
             child: FilledButton(
               onPressed: onSubmit,
               child: const Text('Check'),
             ),
           ),
-        ],
-        if (revealed) ...[
-          const SizedBox(height: 12),
-          Text(
-            correct
-                ? 'Correct'
-                : 'Answer: ${bit.body['answer']?.toString() ?? ''}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: resultColor,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          if (explanation != null && explanation.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              explanation,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurface.withValues(alpha: 0.72),
-                    height: 1.4,
-                  ),
-            ),
-          ],
-        ],
+        ),
       ],
     );
   }

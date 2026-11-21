@@ -9,9 +9,11 @@ import '../../auth/auth_controller.dart';
 import '../graph_controller.dart';
 import 'admin_content_delete.dart';
 import 'learn_card.dart';
+import 'learn_check_bits.dart';
 import 'learn_edge_dismiss.dart';
 import 'learn_session_chrome.dart';
 import 'learning_track_support.dart';
+import 'quiz_feedback_badge.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -74,6 +76,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   var _advancing = false;
   var _quizDone = false;
   var _dismissing = false;
+  bool? _feedbackCorrect;
+  String? _feedbackExplanation;
+  String? _feedbackDetail;
+  var _feedbackDismissed = false;
   String? _topicTitle;
   String? _nodeId;
   String? _cardImageUrl;
@@ -141,6 +147,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _quizDone = false;
       _entry = null;
       _cardImageUrl = null;
+      _clearFeedback();
     });
     final next = await graph.fetchLearningNext(seedId);
     if (!mounted) return;
@@ -233,6 +240,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _entry = LearnDeckEntry(pack: pack, checkKind: kind);
       _trackedKinds.clear();
       _quizDone = false;
+      _clearFeedback();
       _loading = false;
       _generateNodeId = null;
       _cardEpoch += 1;
@@ -333,7 +341,32 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         },
       ),
     );
-    setState(() => _quizDone = true);
+    setState(() {
+      _quizDone = true;
+      _showFeedback(correct: correct, entry: entry);
+    });
+  }
+
+  void _clearFeedback() {
+    _feedbackCorrect = null;
+    _feedbackExplanation = null;
+    _feedbackDetail = null;
+    _feedbackDismissed = false;
+  }
+
+  void _showFeedback({required bool correct, required LearnDeckEntry entry}) {
+    final bit = entry.pack.bit(entry.checkKind);
+    final body = bit?.body;
+    final type = checkTypeOf(bit);
+    String? detail;
+    if (!correct && type == 'cloze') {
+      final expected = quizExpectedAnswerOf(body);
+      if (expected != null) detail = 'Answer: $expected';
+    }
+    _feedbackCorrect = correct;
+    _feedbackExplanation = quizExplanationOf(body);
+    _feedbackDetail = detail;
+    _feedbackDismissed = false;
   }
 
   Future<void> _onNext() async {
@@ -346,6 +379,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _advancing = true;
       _loading = true;
       _quizDone = false;
+      _clearFeedback();
       _entry = null;
       _cardImageUrl = null;
     });
@@ -482,6 +516,17 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
                 card: cardBody,
               ),
             ),
+            if (_quizDone &&
+                !_feedbackDismissed &&
+                _feedbackCorrect != null &&
+                entry != null &&
+                !generating)
+              QuizFeedbackBadge(
+                correct: _feedbackCorrect!,
+                explanation: _feedbackExplanation,
+                detail: _feedbackDetail,
+                onDismiss: () => setState(() => _feedbackDismissed = true),
+              ),
             if (showNext)
               LearnSessionFloatingCta(
                 label: _advancing ? 'Loading…' : 'Next',

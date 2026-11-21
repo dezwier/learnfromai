@@ -26,9 +26,6 @@ const _bodyPadding = EdgeInsets.fromLTRB(16, 14, 16, 16);
 /// Until the first measure lands, keep the card tall enough to avoid overflow.
 const _provisionalFrontBodyH = 110.0;
 const _provisionalBackBodyH = 200.0;
-/// Extra room applied immediately on reveal so explanation/additions don't overflow a frame.
-const _revealBodyBoost = 88.0;
-
 class LearnFlipCard extends StatefulWidget {
   const LearnFlipCard({
     super.key,
@@ -92,11 +89,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   }
 
   void _markRevealed() {
-    setState(() {
-      _revealed = true;
-      // Grow immediately; offstage measure corrects on the next frame.
-      _backBodyH = (_backBodyH < 1 ? _provisionalBackBodyH : _backBodyH) + _revealBodyBoost;
-    });
+    setState(() => _revealed = true);
   }
 
   void _onSelectMc(int choiceIndex) {

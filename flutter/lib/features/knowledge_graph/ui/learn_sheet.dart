@@ -9,7 +9,9 @@ import '../../profile/profile_hud.dart';
 import '../graph_controller.dart';
 import '../models.dart';
 import 'learn_card.dart';
+import 'learn_check_bits.dart';
 import 'learn_edge_dismiss.dart';
+import 'quiz_feedback_badge.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 const _overscrollDismissDistance = 96.0;
@@ -65,6 +67,10 @@ class _LearnSheetState extends State<LearnSheet> {
   final _rng = math.Random();
   var _overscrollPull = 0.0;
   var _dismissing = false;
+  bool? _feedbackCorrect;
+  String? _feedbackExplanation;
+  String? _feedbackDetail;
+  var _feedbackDismissed = false;
 
   void _mergeCompletedFrom(TopicContent content) {
     _completedPacks.addAll(content.completedPacks);
@@ -269,6 +275,20 @@ class _LearnSheetState extends State<LearnSheet> {
       ),
     );
     _maybeMarkPackCompleted(entry.packIndex, entry.checkKind);
+    final bit = entry.pack.bit(entry.checkKind);
+    final body = bit?.body;
+    final type = checkTypeOf(bit);
+    String? detail;
+    if (!correct && type == 'cloze') {
+      final expected = quizExpectedAnswerOf(body);
+      if (expected != null) detail = 'Answer: $expected';
+    }
+    setState(() {
+      _feedbackCorrect = correct;
+      _feedbackExplanation = quizExplanationOf(body);
+      _feedbackDetail = detail;
+      _feedbackDismissed = false;
+    });
   }
 
   (String?, String?) _imageUrls(GraphController graph) {
@@ -431,6 +451,13 @@ class _LearnSheetState extends State<LearnSheet> {
                 ),
               ),
             ),
+            if (_feedbackCorrect != null && !_feedbackDismissed)
+              QuizFeedbackBadge(
+                correct: _feedbackCorrect!,
+                explanation: _feedbackExplanation,
+                detail: _feedbackDetail,
+                onDismiss: () => setState(() => _feedbackDismissed = true),
+              ),
           ],
         ),
       ),
