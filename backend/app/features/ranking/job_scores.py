@@ -1,4 +1,4 @@
-"""Neighbor and learn job rankings from aggregated tile affinity."""
+"""Neighbor and learn job rankings from aggregated tile affinity + fill term."""
 
 from __future__ import annotations
 
@@ -33,31 +33,43 @@ def _pack_count(
     return len(pack_indexes(session, node_id, band=band, recipe_version=recipe_version))
 
 
+def _fill_factor(have: int, desired: int) -> float:
+    """(desired - have) / desired, clamped to [0, 1]."""
+    if desired <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (desired - have) / float(desired)))
+
+
 def neighbor_job_scores(
     session: Session,
     *,
     settings: Settings | None = None,
 ) -> list[dict]:
-    """Rank tiles for expand_neighborhood. Soft neighbor-count penalty; skip if complete."""
+    """Rank tiles for expand_neighborhood.
+
+    score = aggregated_affinity + w_fill * (desired_neighbors - n) / desired_neighbors
+    """
     s = settings or get_settings()
-    budget = int(s.cron_neighbor_budget_total)
+    desired = int(s.cron_neighbor_budget_total)
     aggregated = aggregate_tile_affinity(session, settings=s)
     ranked: list[dict] = []
     for nid, row in aggregated.items():
         neighbors = _direct_neighbor_count(session, nid)
-        if neighbors >= budget:
+        if neighbors >= desired:
             continue
-        score = float(row["affinity"]) / (
-            1.0 + s.cron_neighbor_w_count_penalty * neighbors
-        )
+        affinity = float(row["affinity"])
+        fill = _fill_factor(neighbors, desired)
+        fill_term = float(s.cron_neighbor_w_fill * fill)
         ranked.append(
             {
                 "node_id": nid,
                 "name": row["name"],
-                "tile_affinity": float(row["affinity"]),
+                "tile_affinity": affinity,
                 "neighbor_count": neighbors,
+                "fill_factor": round(fill, 6),
+                "fill_term": round(fill_term, 6),
                 "top_user_id": row["top_user_id"],
-                "score": score,
+                "score": affinity + fill_term,
             }
         )
     ranked.sort(key=lambda r: (-r["score"], r["name"].lower()))
@@ -71,8 +83,12 @@ def learn_job_scores(
     band: str = DEFAULT_BAND,
     recipe_version: int = RECIPE_VERSION,
 ) -> list[dict]:
-    """Rank tiles for expand_content. Soft pack-count penalty; include next pack target."""
+    """Rank tiles for expand_content.
+
+    score = aggregated_affinity + w_fill * (desired_packs - packs) / desired_packs
+    """
     s = settings or get_settings()
+    desired_packs = int(s.cron_learn_desired_packs)
     aggregated = aggregate_tile_affinity(session, settings=s)
     ranked: list[dict] = []
     for nid, row in aggregated.items():
@@ -105,11 +121,8 @@ def learn_job_scores(
             continue
         neighbors = _direct_neighbor_count(session, nid)
         affinity = float(row["affinity"])
-        score = (
-            affinity
-            * (1.0 + s.cron_learn_w_neighbor_boost * neighbors)
-            / (1.0 + s.cron_learn_w_pack_penalty * packs)
-        )
+        fill = _fill_factor(packs, desired_packs)
+        fill_term = float(s.cron_learn_w_fill * fill)
         ranked.append(
             {
                 "node_id": nid,
@@ -120,8 +133,10 @@ def learn_job_scores(
                 "pack_index": pack_index,
                 "missing_kinds": missing,
                 "new_pack": new_pack,
+                "fill_factor": round(fill, 6),
+                "fill_term": round(fill_term, 6),
                 "top_user_id": row["top_user_id"],
-                "score": score,
+                "score": affinity + fill_term,
             }
         )
     ranked.sort(key=lambda r: (-r["score"], r["name"].lower()))

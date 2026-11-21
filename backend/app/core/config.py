@@ -98,34 +98,32 @@ class Settings(BaseSettings):
     )
 
     # --- Cron: expand-neighborhood job ranking ---
-    # neighbor_score = affinity / (1 + w_count_penalty * neighbor_count)
-    cron_neighbor_w_count_penalty: float = Field(
-        default=3.0,
-        validation_alias=_env(
-            "cron_neighbor_w_count_penalty",
-            "CRON_NEIGHBOR_W_COUNT_PENALTY",
-            "RANK_W_NEIGHBOR_PENALTY",
-        ),
+    # Same aggregated affinity as the profile map, plus a fill term:
+    # score = affinity + w_fill * (desired_neighbors - n) / desired_neighbors
+    cron_neighbor_w_fill: float = Field(
+        default=1.0,
+        validation_alias=_env("cron_neighbor_w_fill", "CRON_NEIGHBOR_W_FILL"),
     )
     cron_neighbor_jobs_per_day: int = 5
-    cron_neighbor_budget_total: int = 16
-
-    # --- Cron: expand-content (atomic packs) job ranking ---
-    # learn_score = affinity * (1 + w_neighbor_boost * neighbors)
-    #               / (1 + w_pack_penalty * packs)
-    cron_learn_w_pack_penalty: float = Field(
-        default=8.0,
+    # Desired direct-neighbor count (also used as the fill denominator).
+    cron_neighbor_budget_total: int = Field(
+        default=16,
         validation_alias=_env(
-            "cron_learn_w_pack_penalty", "CRON_LEARN_W_PACK_PENALTY", "RANK_W_PACK_PENALTY"
+            "cron_neighbor_budget_total",
+            "CRON_NEIGHBOR_BUDGET_TOTAL",
+            "CRON_DESIRED_NEIGHBORS",
         ),
     )
-    cron_learn_w_neighbor_boost: float = Field(
-        default=0.25,
-        validation_alias=_env(
-            "cron_learn_w_neighbor_boost",
-            "CRON_LEARN_W_NEIGHBOR_BOOST",
-            "RANK_W_LEARN_NEIGHBOR_BOOST",
-        ),
+
+    # --- Cron: expand-content (atomic packs) job ranking ---
+    # score = affinity + w_fill * (desired_packs - packs) / desired_packs
+    cron_learn_w_fill: float = Field(
+        default=1.0,
+        validation_alias=_env("cron_learn_w_fill", "CRON_LEARN_W_FILL"),
+    )
+    cron_learn_desired_packs: int = Field(
+        default=20,
+        validation_alias=_env("cron_learn_desired_packs", "CRON_LEARN_DESIRED_PACKS"),
     )
     cron_learn_jobs_per_day: int = 10
 

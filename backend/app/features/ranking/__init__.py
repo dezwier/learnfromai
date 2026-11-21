@@ -3,13 +3,12 @@
 Weights live on Settings, grouped by use case:
 
   Affinity:      AFFINITY_W_INTEREST / NEIGHBOR / RECENCY + RECENCY_SPAN_DAYS
-  Neighbor cron: CRON_NEIGHBOR_W_COUNT_PENALTY (+ jobs/day, budget)
-  Pack cron:     CRON_LEARN_W_PACK_PENALTY, CRON_LEARN_W_NEIGHBOR_BOOST
+  Neighbor cron: CRON_NEIGHBOR_W_FILL + CRON_NEIGHBOR_BUDGET_TOTAL (+ jobs/day)
+  Pack cron:     CRON_LEARN_W_FILL + CRON_LEARN_DESIRED_PACKS (+ jobs/day)
   Learn track:   LEARN_TRACK_EXPLOIT_P
 
-  neighbor_score = affinity / (1 + cron_neighbor_w_count_penalty * neighbors)
-  learn_score    = affinity * (1 + cron_learn_w_neighbor_boost * neighbors)
-                   / (1 + cron_learn_w_pack_penalty * packs)
+  neighbor_score = affinity + w_fill * (desired_neighbors - n) / desired_neighbors
+  learn_score    = affinity + w_fill * (desired_packs - packs) / desired_packs
 
 Collaborative filtering can later replace affinity(u,t) behind the same interface.
 """

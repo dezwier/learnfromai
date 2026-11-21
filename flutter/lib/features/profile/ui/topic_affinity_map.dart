@@ -200,12 +200,11 @@ Color _inkFor(Color base, int index, int total, ColorScheme scheme) {
 String _compactScore(double value) {
   if (value == 0) return '0';
   if (value >= 10) return value.toStringAsFixed(0);
-  if (value >= 1) {
-    final one = value.toStringAsFixed(1);
-    return one.endsWith('.0') ? one.substring(0, one.length - 2) : one;
-  }
-  // Normalized factors are often well below 1 — keep two decimals.
-  return value.toStringAsFixed(2);
+  // Keep two decimals so total matches i+n+r (e.g. 0.01+0.15+1.00 → 1.16).
+  final two = value.toStringAsFixed(2);
+  if (two.endsWith('00')) return value.toStringAsFixed(0);
+  if (two.endsWith('0')) return value.toStringAsFixed(1);
+  return two;
 }
 
 String _breakdownLine(TopicAffinityBreakdown b) {

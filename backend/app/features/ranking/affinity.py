@@ -6,7 +6,7 @@ Per-user normalized factors (each in a bounded range), then weighted sum:
                       where interest = focus + open (equal)
   neighbor_norm[t]  = Σ_direct_neighbors interest / Σ_tiles interest
   recency[t]        = linear map of days since last focus/open
-                      today → 1.0, ≥ span (default 90d) → 0.5
+                      today → 1.0, ≥ span (default 30d) → 0.5
 
 affinity = w_interest * interest_norm
          + w_neighbor * neighbor_norm
@@ -67,13 +67,13 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "affinity_w_neighbor": s.affinity_w_neighbor,
         "affinity_w_recency": s.affinity_w_recency,
         "affinity_recency_span_days": s.affinity_recency_span_days,
-        "cron_neighbor_w_count_penalty": s.cron_neighbor_w_count_penalty,
-        "cron_learn_w_pack_penalty": s.cron_learn_w_pack_penalty,
-        "cron_learn_w_neighbor_boost": s.cron_learn_w_neighbor_boost,
+        "cron_neighbor_w_fill": s.cron_neighbor_w_fill,
+        "cron_neighbor_budget_total": s.cron_neighbor_budget_total,
+        "cron_learn_w_fill": s.cron_learn_w_fill,
+        "cron_learn_desired_packs": s.cron_learn_desired_packs,
         "learn_track_exploit_p": s.learn_track_exploit_p,
         "cron_neighbor_jobs_per_day": s.cron_neighbor_jobs_per_day,
         "cron_learn_jobs_per_day": s.cron_learn_jobs_per_day,
-        "cron_neighbor_budget_total": s.cron_neighbor_budget_total,
     }
 
 

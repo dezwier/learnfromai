@@ -23,13 +23,13 @@ def test_recency_linear_span():
     assert recency(60, span_days=30) == pytest.approx(0.5, abs=1e-6)
 
 
-def test_neighbor_and_learn_scores_penalize(session, user):
+def test_neighbor_and_learn_scores_prefer_deficit(session, user):
     rich = KnowledgeNode(name="Rich", name_key="rich", description="x")
     sparse = KnowledgeNode(name="Sparse", name_key="sparse", description="x")
     session.add(rich)
     session.add(sparse)
     session.flush()
-    # Give Rich many neighbors so it is scored lower / skipped when at budget.
+    # Give Rich many neighbors so its fill factor is lower.
     for i in range(3):
         n = KnowledgeNode(name=f"N{i}", name_key=f"n-{i}", description="x")
         session.add(n)
@@ -62,45 +62,52 @@ def test_neighbor_and_learn_scores_penalize(session, user):
     neighbors = {row["name"]: row for row in neighbor_job_scores(session)}
     assert "Sparse" in neighbors
     assert "Rich" in neighbors
+    assert neighbors["Sparse"]["fill_factor"] > neighbors["Rich"]["fill_factor"]
     assert neighbors["Sparse"]["score"] > neighbors["Rich"]["score"]
 
     learns = {row["name"]: row for row in learn_job_scores(session)}
     assert learns["Sparse"]["pack_count"] == 0
     assert learns["Rich"]["pack_count"] == 1
-    # Pack penalty still dominates when Sparse has zero packs.
+    assert learns["Sparse"]["fill_factor"] > learns["Rich"]["fill_factor"]
     assert learns["Sparse"]["score"] > learns["Rich"]["score"]
 
 
-def test_learn_scores_boost_with_neighbors(session, user):
-    """Equal packs: more neighbors → higher learn score."""
-    lonely = KnowledgeNode(name="Lonely", name_key="lonely", description="x")
-    connected = KnowledgeNode(name="Connected", name_key="connected", description="x")
-    session.add(lonely)
-    session.add(connected)
+def test_learn_scores_prefer_fewer_packs(session, user):
+    """Fewer packs → higher fill term → higher learn score when affinity is equal."""
+    empty = KnowledgeNode(name="Empty", name_key="empty", description="x")
+    one_pack = KnowledgeNode(name="OnePack", name_key="one-pack", description="x")
+    session.add(empty)
+    session.add(one_pack)
     session.flush()
-    for i in range(4):
-        n = KnowledgeNode(name=f"C{i}", name_key=f"c-{i}", description="x")
-        session.add(n)
-        session.flush()
-        session.add(KnowledgeEdge(from_id=connected.id, relation="child", to_id=n.id))
-        session.add(KnowledgeEdge(from_id=n.id, relation="parent", to_id=connected.id))
-    record_focus(session, user=user, node_id=lonely.id)
-    record_focus(session, user=user, node_id=connected.id)
+    session.add(
+        KnowledgeBit(
+            node_id=one_pack.id,
+            kind="learn",
+            pack_index=1,
+            band="default",
+            recipe_version=1,
+            position=0,
+            body={"title": "t", "markdown": "m"},
+        )
+    )
+    record_focus(session, user=user, node_id=empty.id)
+    record_focus(session, user=user, node_id=one_pack.id)
     record_events(
         session,
         user=user,
         items=[
-            {"node_id": str(lonely.id), "kind": "open", "payload": {"source": "graph"}},
-            {"node_id": str(connected.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(empty.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(one_pack.id), "kind": "open", "payload": {"source": "graph"}},
         ],
     )
     session.commit()
 
     learns = {row["name"]: row for row in learn_job_scores(session)}
-    assert learns["Lonely"]["pack_count"] == 0
-    assert learns["Connected"]["pack_count"] == 0
-    assert learns["Connected"]["neighbor_count"] > learns["Lonely"]["neighbor_count"]
-    assert learns["Connected"]["score"] > learns["Lonely"]["score"]
+    assert learns["Empty"]["pack_count"] == 0
+    assert learns["OnePack"]["pack_count"] == 1
+    assert learns["Empty"]["fill_factor"] == pytest.approx(1.0)
+    assert learns["OnePack"]["fill_factor"] == pytest.approx(19 / 20)
+    assert learns["Empty"]["score"] > learns["OnePack"]["score"]
 
 
 def test_cron_enqueues_and_persists(session, user):
