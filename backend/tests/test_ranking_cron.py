@@ -17,10 +17,10 @@ from app.features.user_events.service import record_events, record_focus
 
 
 def test_recency_linear_span():
-    assert recency(0, span_days=90) == pytest.approx(1.0)
-    assert recency(45, span_days=90) == pytest.approx(0.75, abs=1e-6)
-    assert recency(90, span_days=90) == pytest.approx(0.5, abs=1e-6)
-    assert recency(180, span_days=90) == pytest.approx(0.5, abs=1e-6)
+    assert recency(0, span_days=30) == pytest.approx(1.0)
+    assert recency(15, span_days=30) == pytest.approx(0.75, abs=1e-6)
+    assert recency(30, span_days=30) == pytest.approx(0.5, abs=1e-6)
+    assert recency(60, span_days=30) == pytest.approx(0.5, abs=1e-6)
 
 
 def test_neighbor_and_learn_scores_penalize(session, user):

@@ -86,9 +86,9 @@ class Settings(BaseSettings):
         default=1.0,
         validation_alias=_env("affinity_w_recency", "AFFINITY_W_RECENCY"),
     )
-    # Days over which recency falls linearly from 1.0 to 0.5 (≈3 months).
+    # Days over which recency falls linearly from 1.0 to 0.5 (default 30).
     affinity_recency_span_days: float = Field(
-        default=90.0,
+        default=30.0,
         validation_alias=_env(
             "affinity_recency_span_days",
             "AFFINITY_RECENCY_SPAN_DAYS",

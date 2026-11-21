@@ -200,17 +200,21 @@ Color _inkFor(Color base, int index, int total, ColorScheme scheme) {
 String _compactScore(double value) {
   if (value == 0) return '0';
   if (value >= 10) return value.toStringAsFixed(0);
-  final one = value.toStringAsFixed(1);
-  return one.endsWith('.0') ? one.substring(0, one.length - 2) : one;
+  if (value >= 1) {
+    final one = value.toStringAsFixed(1);
+    return one.endsWith('.0') ? one.substring(0, one.length - 2) : one;
+  }
+  // Normalized factors are often well below 1 — keep two decimals.
+  return value.toStringAsFixed(2);
 }
 
 String _breakdownLine(TopicAffinityBreakdown b) {
   final parts = <String>[
-    if (b.interest > 0) 'i${_compactScore(b.interest)}',
-    if (b.neighbor > 0) 'n${_compactScore(b.neighbor)}',
-    if (b.recency > 0) 'r${_compactScore(b.recency)}',
+    'i${_compactScore(b.interest)}',
+    'n${_compactScore(b.neighbor)}',
+    'r${_compactScore(b.recency)}',
   ];
-  return parts.isEmpty ? '—' : parts.join(' · ');
+  return parts.join(' · ');
 }
 
 class _TopicBadge extends StatelessWidget {

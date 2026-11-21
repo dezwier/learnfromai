@@ -17,10 +17,26 @@ class TopicAffinityBreakdown {
         recency: 0,
       );
     }
+    final interest = (raw['interest'] as num?)?.toDouble();
+    // Legacy API sent separate focus/open terms — treat their sum as interest.
+    final legacyFocus = (raw['focus'] as num?)?.toDouble() ?? 0;
+    final legacyOpen = (raw['open'] as num?)?.toDouble() ?? 0;
     return TopicAffinityBreakdown(
-      interest: (raw['interest'] as num?)?.toDouble() ?? 0,
+      interest: interest ?? (legacyFocus + legacyOpen),
       neighbor: (raw['neighbor'] as num?)?.toDouble() ?? 0,
       recency: (raw['recency'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  TopicAffinityBreakdown copyWith({
+    double? interest,
+    double? neighbor,
+    double? recency,
+  }) {
+    return TopicAffinityBreakdown(
+      interest: interest ?? this.interest,
+      neighbor: neighbor ?? this.neighbor,
+      recency: recency ?? this.recency,
     );
   }
 }
@@ -65,6 +81,21 @@ class TopicAffinityNode {
         breakdownRaw is Map ? Map<String, dynamic>.from(breakdownRaw) : null,
       ),
       imageThumbUrl: raw['image_thumb_url']?.toString(),
+    );
+  }
+
+  TopicAffinityNode copyWith({TopicAffinityBreakdown? breakdown}) {
+    return TopicAffinityNode(
+      id: id,
+      name: name,
+      rank: rank,
+      affinity: affinity,
+      focusCount: focusCount,
+      openCount: openCount,
+      learned: learned,
+      clusterId: clusterId,
+      breakdown: breakdown ?? this.breakdown,
+      imageThumbUrl: imageThumbUrl,
     );
   }
 }
@@ -130,15 +161,34 @@ class TopicAffinityPayload {
   bool get isEmpty => nodes.isEmpty;
 
   factory TopicAffinityPayload.fromJson(Map<String, dynamic> raw) {
-    final nodes = raw['nodes'];
+    final nodesRaw = raw['nodes'];
     final clusters = raw['clusters'];
     final edges = raw['edges'];
+    final parsed = [
+      if (nodesRaw is List)
+        for (final row in nodesRaw)
+          if (row is Map) TopicAffinityNode.fromJson(Map<String, dynamic>.from(row)),
+    ];
+    // If the API omitted normalized interest, rebuild it from focus/open counts.
+    final totalInterest = parsed.fold<int>(
+      0,
+      (sum, node) => sum + node.focusCount + node.openCount,
+    );
+    final nodes = totalInterest <= 0
+        ? parsed
+        : [
+            for (final node in parsed)
+              node.breakdown.interest > 0
+                  ? node
+                  : node.copyWith(
+                      breakdown: node.breakdown.copyWith(
+                        interest:
+                            (node.focusCount + node.openCount) / totalInterest,
+                      ),
+                    ),
+          ];
     return TopicAffinityPayload(
-      nodes: [
-        if (nodes is List)
-          for (final row in nodes)
-            if (row is Map) TopicAffinityNode.fromJson(Map<String, dynamic>.from(row)),
-      ],
+      nodes: nodes,
       clusters: [
         if (clusters is List)
           for (final row in clusters)

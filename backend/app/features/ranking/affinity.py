@@ -191,9 +191,9 @@ def score_user_tiles(
             "learned": nid in learned_nodes,
             "has_image": bool(node.image_url),
             "breakdown": {
-                "interest": round(interest_term, 4),
-                "neighbor": round(neighbor_term, 4),
-                "recency": round(recency_term, 4),
+                "interest": round(interest_term, 6),
+                "neighbor": round(neighbor_term, 6),
+                "recency": round(recency_term, 6),
             },
         }
     return scored
