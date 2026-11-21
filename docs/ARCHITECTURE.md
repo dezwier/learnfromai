@@ -23,7 +23,7 @@ A separate Railway **cron** service (`python -m app.cron`, schedule `0 6 * * *`)
 
 ## Expand orchestrator
 
-One `expand_neighborhood` job. Shared boxes: **retrieve** (deterministic), **Sameness LLM** (`sameness_v3`), **Neighborhood LLM** (`neighborhood_v5`), **Under budget**, **Write**, **Done**.
+One `expand_neighborhood` job. Shared boxes: **retrieve** (deterministic), **Sameness LLM** (`sameness_v3`), **Neighborhood LLM** (`neighborhood_v6`), **Under budget**, **Write**, **Done**.
 
 ```mermaid
 flowchart TD

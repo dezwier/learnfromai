@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.features.knowledge_graph.identity import canonical_key_for
 from app.features.platform.llm_usage_pricing import usage_from_tokens
 
-PROMPT_NEIGHBORHOOD = "neighborhood_v5"
+PROMPT_NEIGHBORHOOD = "neighborhood_v6"
 PROMPT_SAMENESS = "sameness_v3"
 
 BUCKETS = ("parents", "siblings", "children", "acquaintances")
@@ -60,7 +60,6 @@ def _distribute(total: int, min_per: int) -> dict[str, int]:
 
 def build_neighborhood_prompt(topic: str, counts: dict) -> str:
     total = int(counts.get("total") or 16)
-    min_per = int(counts.get("min_per_bucket") or 2)
     prefer = counts.get("prefer_buckets") if isinstance(counts.get("prefer_buckets"), list) else []
     exclude_titles = [
         str(title).strip()
@@ -70,45 +69,35 @@ def build_neighborhood_prompt(topic: str, counts: dict) -> str:
     prefer_line = ""
     if prefer:
         prefer_line = (
-            f" Prefer putting new topics into these underfilled roles when they fit: {', '.join(map(str, prefer))}."
+            f" Prefer adding into these underfilled roles when they fit: "
+            f"{', '.join(map(str, prefer))}."
         )
     exclude_line = ""
     if exclude_titles:
         exclude_line = (
-            " Do not repeat any of these existing neighbor titles (or near-variants of them): "
+            " Do not repeat these existing neighbor titles (or near-variants): "
             + ", ".join(exclude_titles)
             + "."
         )
     return (
-        "Build a learning neighborhood for one topic. Return JSON only with keys "
+        "Build a learning neighborhood around one topic. Return JSON only with keys "
         "focus, parents, siblings, children, acquaintances. "
         "focus is {name, description}. Each other key is an array of {name, description}. "
-        f"Return about {total} related topics in total across the four arrays "
-        f"(sum of array lengths ≈ {total}). "
-        f"Include at least {min_per} item(s) in each of parents, siblings, children, and acquaintances "
-        "when the total allows; otherwise at least one in each role you can justify. "
-        "You choose how many go in each bucket — a bit of everything, weighted toward what fits the topic "
-        "(e.g. more children for a broad subject, more acquaintances for a cross-cutting one)."
+        f"Aim for about {total} related topics in total. "
+        "You decide how many go in each role: vaguely a bit of everything, "
+        "usually most as children, otherwise whatever best covers a cloud of related topics."
         f"{prefer_line}{exclude_line} "
-        "Names are the single best canonical standalone title for each concept (Wikipedia-style page title). "
-        "Prefer the common group name over near-variants: one node for Dinosaur/Dinosaurs/Dinosauria, "
-        "one for Ornithischia/Ornithischians, one for Theropoda/Theropods (and other -oda/-ods pairs), "
-        "one for a work and the same title with a medium qualifier "
-        "(The Last Dance, not also The Last Dance Documentary). "
-        "Never emit singular and plural, vernacular and scientific taxon labels, British/American spelling "
-        "pairs (Paleontology/Palaeontology, Archaeology/Archeology), or title-vs-title+Documentary/"
-        "Film/Series/Album/Podcast/Show as separate topics in this response. Prefer the simpler/"
-        "American spelling when both exist. "
-        "Descriptions are one short sentence that stands alone and must not refer to the seed topic by name "
-        "or as 'this topic'. Keep names short. "
-        "Parents are broader subjects. Siblings are peer subjects under a shared broader class. "
-        "Children are narrower subjects. Acquaintances are clearly related but not parent/sibling/child. "
-        "No duplicates across buckets. Seed topic: "
+        "Parents = broader. Siblings = peers under a shared broader class. "
+        "Children = narrower. Acquaintances = related but not parent/sibling/child. "
+        "Names: short Wikipedia-style titles; one node per concept "
+        "(no singular/plural pairs, British/American spelling pairs, or title vs "
+        "title+Documentary/Film/Series). "
+        "Descriptions: one short standalone sentence; do not name the seed topic. "
+        "No duplicates across buckets. Seed: "
         + json.dumps(
             {
                 "topic": topic,
                 "total": total,
-                "min_per_bucket": min_per,
                 "exclude_titles": exclude_titles,
             }
         )
@@ -166,7 +155,7 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
         }
     }
     exclude = _exclude_keys(counts)
-    cleaned_buckets: dict[str, list[dict]] = {}
+    kept: dict[str, list[dict]] = {}
     for bucket in BUCKETS:
         rows = raw.get(bucket) if isinstance(raw.get(bucket), list) else []
         cleaned = []
@@ -176,29 +165,27 @@ def _normalize_neighborhood(raw: dict, counts: dict[str, int]) -> dict:
             name = str(row.get("name") or "").strip()
             if not name or canonical_key_for(name) in exclude:
                 continue
-            cleaned.append({"name": name, "description": str(row.get("description") or "").strip() or None})
-        cleaned_buckets[bucket] = cleaned
+            cleaned.append(
+                {
+                    "name": name,
+                    "description": str(row.get("description") or "").strip() or None,
+                }
+            )
+        kept[bucket] = cleaned
 
-    total = int(counts.get("total") or sum(len(v) for v in cleaned_buckets.values()) or 16)
-    min_per = int(counts.get("min_per_bucket") or 0)
-    # When filling a deficit, do not force a per-bucket floor above what need allows.
-    if exclude or total < min_per * len(BUCKETS):
-        min_per = min(min_per, max(0, total // len(BUCKETS)))
-    # Keep a floor per bucket, then round-robin the rest up to total.
-    kept: dict[str, list[dict]] = {bucket: [] for bucket in BUCKETS}
-    for bucket in BUCKETS:
-        floor = min(min_per, len(cleaned_buckets[bucket]))
-        kept[bucket].extend(cleaned_buckets[bucket][:floor])
-        cleaned_buckets[bucket] = cleaned_buckets[bucket][floor:]
+    # Preserve the model's mix; only drop excluded titles and cap at total.
+    total = int(counts.get("total") or sum(len(v) for v in kept.values()) or 16)
     used = sum(len(v) for v in kept.values())
-    while used < total:
+    # Trim extras while preferring to keep children.
+    trim_order = ("parents", "siblings", "acquaintances", "children")
+    while used > total:
         progressed = False
-        for bucket in BUCKETS:
-            if used >= total:
+        for bucket in trim_order:
+            if used <= total:
                 break
-            if cleaned_buckets[bucket]:
-                kept[bucket].append(cleaned_buckets[bucket].pop(0))
-                used += 1
+            if kept[bucket]:
+                kept[bucket].pop()
+                used -= 1
                 progressed = True
         if not progressed:
             break
