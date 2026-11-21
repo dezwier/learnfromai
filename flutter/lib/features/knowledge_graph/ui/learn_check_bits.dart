@@ -242,16 +242,17 @@ class _ClozeCheck extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         // Keep Check row height so reveal doesn't resize the card.
-        Visibility(
-          visible: !revealed,
-          maintainSize: true,
-          maintainAnimation: true,
-          maintainState: true,
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              onPressed: onSubmit,
-              child: const Text('Check'),
+        // Disable (don't remove) so the Check tap can't retarget onto Next/Done.
+        Align(
+          alignment: Alignment.centerRight,
+          child: Opacity(
+            opacity: revealed ? 0 : 1,
+            child: IgnorePointer(
+              ignoring: revealed,
+              child: FilledButton(
+                onPressed: revealed ? null : onSubmit,
+                child: const Text('Check'),
+              ),
             ),
           ),
         ),

@@ -40,6 +40,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   var _answered = false;
   /// Prevents the cloze Check / keyboard Done tap from also hitting Next/Done.
   var _continueArmed = false;
+  /// Wall-clock gate so a residual pointer-up after keyboard dismiss can't hit Done.
+  DateTime _nextAllowedAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _hubLoadGen = 0;
   int _reviewSessionGen = 0;
 
@@ -197,9 +199,9 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _answered = true;
       _continueArmed = false;
     });
-    // Submit and settle in parallel; keep Next disarmed until the keyboard is gone
-    // so Check / Done can't fall through onto Done and dump us back on the hub.
-    await Future.wait<void>([
+    // Submit in the background; keep Next completely unmounted until the
+    // answering gesture + keyboard are gone (cloze Done sits where Done is).
+    unawaited(
       graph
           .submitReview(
             nodeId: card.item.nodeId,
@@ -211,25 +213,28 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
             answerText: answerText,
           )
           .then((_) {}),
-      Future<void>.delayed(const Duration(milliseconds: 320)),
-    ]);
-    if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
-    // Wait out keyboard dismiss before arming (cloze Done otherwise hits Next).
-    for (var i = 0; i < 24; i++) {
+    );
+    // Wait out keyboard dismiss.
+    for (var i = 0; i < 40; i++) {
       if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
       if (MediaQuery.viewInsetsOf(context).bottom <= 0.5) break;
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
     if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
+    // Extra beat after insets clear — residual pointer-up still arrives then.
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
     setState(() {
       _submitting = false;
       _continueArmed = true;
+      _nextAllowedAt = DateTime.now().add(const Duration(milliseconds: 350));
     });
   }
 
   Future<void> _onNextCard() async {
     if (!_answered || !_continueArmed || _submitting) return;
     if (MediaQuery.viewInsetsOf(context).bottom > 0.5) return;
+    if (DateTime.now().isBefore(_nextAllowedAt)) return;
     if (_queueIndex + 1 >= _queue.length) {
       await _loadHub();
       return;
@@ -329,10 +334,17 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
-          if (reserveNext)
+          // Eat taps while settling so keyboard Done / Check can't hit through.
+          if (reserveNext && !nextReady)
+            const Positioned.fill(
+              child: AbsorbPointer(
+                child: ColoredBox(color: Color(0x00000000)),
+              ),
+            ),
+          // Mount CTA only when safe — avoids IgnorePointer fall-through into Done.
+          if (nextReady)
             LearnSessionFloatingCta(
               label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-              visible: nextReady,
               onPressed: () => unawaited(_onNextCard()),
             ),
         ],

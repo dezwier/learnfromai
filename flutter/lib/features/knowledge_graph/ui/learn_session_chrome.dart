@@ -37,8 +37,10 @@ class LearnSessionFloatingCta extends StatelessWidget {
       left: 20,
       right: 20,
       bottom: media.padding.bottom + media.viewInsets.bottom + 16,
-      child: IgnorePointer(
-        ignoring: !visible || onPressed == null,
+      // Absorb (don't ignore) while hidden so leftover keyboard/Check taps
+      // can't fall through to whatever sits under this slot.
+      child: AbsorbPointer(
+        absorbing: !visible || onPressed == null,
         child: AnimatedOpacity(
           opacity: visible && onPressed != null ? 1 : 0,
           duration: const Duration(milliseconds: 180),
