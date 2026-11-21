@@ -197,20 +197,29 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _answered = true;
       _continueArmed = false;
     });
-    // Submit and gesture/keyboard settle in parallel — CTA fades in once ready
-    // (avoids a disabled Next that later "flickers" on).
+    // Submit and settle in parallel; keep Next disarmed until the keyboard is gone
+    // so Check / Done can't fall through onto Done and dump us back on the hub.
     await Future.wait<void>([
-      graph.submitReview(
-        nodeId: card.item.nodeId,
-        packIndex: card.item.packIndex,
-        correct: correct,
-        checkKind: card.checkKind,
-        choiceIndex: choiceIndex,
-        answerBool: answerBool,
-        answerText: answerText,
-      ).then((_) {}),
-      Future<void>.delayed(const Duration(milliseconds: 220)),
+      graph
+          .submitReview(
+            nodeId: card.item.nodeId,
+            packIndex: card.item.packIndex,
+            correct: correct,
+            checkKind: card.checkKind,
+            choiceIndex: choiceIndex,
+            answerBool: answerBool,
+            answerText: answerText,
+          )
+          .then((_) {}),
+      Future<void>.delayed(const Duration(milliseconds: 320)),
     ]);
+    if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
+    // Wait out keyboard dismiss before arming (cloze Done otherwise hits Next).
+    for (var i = 0; i < 24; i++) {
+      if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
+      if (MediaQuery.viewInsetsOf(context).bottom <= 0.5) break;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
     if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
     setState(() {
       _submitting = false;
@@ -220,6 +229,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
 
   Future<void> _onNextCard() async {
     if (!_answered || !_continueArmed || _submitting) return;
+    if (MediaQuery.viewInsetsOf(context).bottom > 0.5) return;
     if (_queueIndex + 1 >= _queue.length) {
       await _loadHub();
       return;
@@ -268,7 +278,9 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final canReview = dueCount > 0 && !_loading;
     // Reserve CTA space during review (even before Next appears) so the card fits.
     final reserveNext = _reviewing && _answered;
-    final nextReady = reserveNext && _continueArmed && !_submitting;
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0.5;
+    final nextReady =
+        reserveNext && _continueArmed && !_submitting && !keyboardOpen;
     final bottomClearance = LearnSessionFloatingCta.clearance(
       context,
       reserveCta: _reviewing,

@@ -181,23 +181,30 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
         final frontBodyH =
             _frontBodyH > 0 ? _frontBodyH : _provisionalFrontBodyH;
         final backBodyH = _backBodyH > 0 ? _backBodyH : _provisionalBackBodyH;
-        // Preferred: square + learn, or min image + quiz body.
+        // Natural size: square image + body on each face (shared height = max).
+        // Cap to the slot; only then shrink images / scroll — don't stretch taller
+        // than content just to reach the Next button.
         final preferred = [
           squareImageH + frontBodyH,
-          minImageH + backBodyH,
+          squareImageH + backBodyH,
         ].reduce((a, b) => a > b ? a : b);
-        final cardH = maxH.isFinite ? math.min(preferred, maxH) : preferred;
+        final rawH = maxH.isFinite ? math.min(preferred, maxH) : preferred;
+        final cardH = rawH.isFinite ? math.max(0.0, rawH) : preferred;
+        if (cardH <= 0) {
+          return const SizedBox.shrink();
+        }
 
-        // Shrink image first on both faces; scroll body only at min image height.
+        // 1) Keep image as large as possible (≤ square) so body fits without scroll.
+        // 2) Only at min image (¼ width) allow the body to scroll.
         (double, bool) imageAndScroll(double bodyH) {
           final room = cardH - bodyH;
           if (room >= squareImageH) {
             return (squareImageH, false);
           }
           if (room >= minImageH) {
-            return (room, false);
+            return (math.max(0.0, room), false);
           }
-          return (math.min(minImageH, cardH), true);
+          return (math.max(0.0, math.min(minImageH, cardH)), true);
         }
 
         final frontLayout = imageAndScroll(frontBodyH);
@@ -246,12 +253,14 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
               ),
               SizedBox(
                 width: width.isFinite ? width : null,
-                height: cardH.isFinite ? cardH : null,
+                height: cardH,
                 child: TurnableYAxisCard(
+                  // Parent owns height — avoid outer padding eating face space.
+                  outerPadding: EdgeInsets.zero,
                   resetIdentity: '${pack.packIndex}-$checkKind',
                   dismissKeyboardOnInteraction: true,
                   prelayoutFacesForHeight: false,
-                  fixedFaceHeight: cardH.isFinite ? cardH : null,
+                  fixedFaceHeight: cardH,
                   initialBackFaceVisible: widget.startOnCheck,
                   interactionEnabled: !widget.startOnCheck || _revealed,
                   front: _LearnCardFace(
@@ -359,10 +368,9 @@ class _LearnCardFace extends StatelessWidget {
             Expanded(
               child: SingleChildScrollView(child: body),
             )
-          else ...[
+          else
+            // No Spacer — Column already fills the tight face height.
             body,
-            const Spacer(),
-          ],
         ],
       ),
     );

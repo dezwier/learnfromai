@@ -142,7 +142,14 @@ class LearnSessionCardStage extends StatelessWidget {
           right: 20,
           bottom: bottomClearance,
           // Bounded height so the card can shrink its image to fit.
-          child: card,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxHeight <= 0) {
+                return const SizedBox.shrink();
+              }
+              return card;
+            },
+          ),
         ),
       ],
     );
