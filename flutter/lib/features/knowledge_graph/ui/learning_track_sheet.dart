@@ -24,7 +24,9 @@ Future<void> showLearningTrack(
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       opaque: false,
-      barrierDismissible: true,
+      // Graph taps share a gesture with InteractiveViewer; a dismissible barrier
+      // eats the lift and pops the route on first open.
+      barrierDismissible: false,
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 220),
       reverseTransitionDuration: const Duration(milliseconds: 280),
@@ -437,9 +439,11 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       );
       final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
       final nodeId = _nodeId;
-      cardBody = (isAdmin && _quizDone && nodeId != null)
-          ? GestureDetector(
-              onLongPress: () async {
+      // Always wrap — toggling GestureDetector after answer remounts the card
+      // and clears the revealed selection.
+      cardBody = GestureDetector(
+        onLongPress: (isAdmin && _quizDone && nodeId != null)
+            ? () async {
                 final deleted = await showAdminContentDeleteMenu(
                   context,
                   nodeId: nodeId,
@@ -448,10 +452,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
                 );
                 if (!deleted || !mounted) return;
                 await _onNext();
-              },
-              child: flip,
-            )
-          : flip;
+              }
+            : null,
+        child: flip,
+      );
     }
 
     final title = (_topicTitle ?? '').trim().isEmpty ? 'Learn' : _topicTitle!.trim();

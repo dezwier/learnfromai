@@ -214,58 +214,55 @@ class _TopicBadge extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: isMain ? 12 : 10,
-            vertical: isMain ? 9 : 7,
+            vertical: isMain ? 7 : 6,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    rank > 0 ? '#$rank' : '·',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: isMain ? 12 : 11,
-                      height: 1.1,
-                      color: muted,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 148),
-                    child: Text(
-                      title,
-                      softWrap: true,
-                      style: TextStyle(
-                        fontFamily: 'tt_ramilas',
-                        fontWeight: isMain ? FontWeight.w700 : FontWeight.w600,
-                        fontSize: isMain ? 15 : 13,
-                        height: 1.15,
-                        color: ink,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _compactScore(affinity),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: isMain ? 12.5 : 11.5,
-                      height: 1.1,
-                      color: ink,
-                    ),
-                  ),
-                ],
+              Text(
+                rank > 0 ? '#$rank' : '·',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: isMain ? 12 : 11,
+                  height: 1.1,
+                  color: muted,
+                  letterSpacing: 0.2,
+                ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 148),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontFamily: 'tt_ramilas',
+                    fontWeight: isMain ? FontWeight.w700 : FontWeight.w600,
+                    fontSize: isMain ? 15 : 13,
+                    height: 1.15,
+                    color: ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _compactScore(affinity),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: isMain ? 12.5 : 11.5,
+                  height: 1.1,
+                  color: ink,
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(
                 _breakdownLine(breakdown),
                 style: TextStyle(
                   fontSize: 10.5,
-                  height: 1.15,
+                  height: 1.1,
                   fontWeight: FontWeight.w500,
                   color: muted,
                   letterSpacing: 0.15,

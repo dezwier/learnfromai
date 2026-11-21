@@ -604,12 +604,14 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _openLearningTrack(PlacedNode node, {required String source}) async {
-    if (!_learnOpen || _jobsPanelOpen) {
-      setState(() {
-        _learnOpen = true;
-        _jobsPanelOpen = false;
-      });
-    }
+    if (_learnOpen) return;
+    setState(() {
+      _learnOpen = true;
+      _jobsPanelOpen = false;
+    });
+    // Let the graph tap / InteractiveViewer gesture finish before pushing.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     try {
       await showLearningTrack(
         context,
@@ -638,6 +640,7 @@ class _GraphScreenState extends State<GraphScreen>
 
   /// Multi-pack review deck for one topic (action drawer → Show atomic learning).
   Future<void> _openAtomicReview(PlacedNode node, {required String source}) async {
+    if (_learnOpen) return;
     final graph = context.read<GraphController>();
     unawaited(
       graph.trackEvent(
@@ -646,12 +649,12 @@ class _GraphScreenState extends State<GraphScreen>
         payload: {'source': source},
       ),
     );
-    if (!_learnOpen || _jobsPanelOpen) {
-      setState(() {
-        _learnOpen = true;
-        _jobsPanelOpen = false;
-      });
-    }
+    setState(() {
+      _learnOpen = true;
+      _jobsPanelOpen = false;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     try {
       await showLearnSheet(context, nodeId: node.id, title: node.title);
     } finally {

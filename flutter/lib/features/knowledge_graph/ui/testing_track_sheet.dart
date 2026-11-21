@@ -464,14 +464,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       title: card.item.title,
       meta: '${_queueIndex + 1} / ${_queue.length}',
       bottomClearance: bottomClearance,
-      onClose: () {
-        final panel = OverlayPanel.maybeOf(context);
-        if (panel != null) {
-          panel.dismiss();
-        } else {
-          widget.onClose();
-        }
-      },
+      // Leave the review card, stay on the Leitner hub (bin screen).
+      onClose: () => unawaited(_loadHub()),
       card: Builder(
         builder: (context) {
           final flip = LearnFlipCard(
@@ -502,18 +496,21 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
             },
           );
           final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
-          if (!isAdmin || !_answered) return flip;
+          // Always wrap — inserting GestureDetector only after answer remounts
+          // LearnFlipCard and resets the quiz to unanswered.
           return GestureDetector(
-            onLongPress: () async {
-              final deleted = await showAdminContentDeleteMenu(
-                context,
-                nodeId: card.item.nodeId,
-                pack: card.item.pack,
-                checkKind: card.checkKind,
-              );
-              if (!deleted || !mounted) return;
-              await _afterAdminDelete();
-            },
+            onLongPress: (isAdmin && _answered)
+                ? () async {
+                    final deleted = await showAdminContentDeleteMenu(
+                      context,
+                      nodeId: card.item.nodeId,
+                      pack: card.item.pack,
+                      checkKind: card.checkKind,
+                    );
+                    if (!deleted || !mounted) return;
+                    await _afterAdminDelete();
+                  }
+                : null,
             child: flip,
           );
         },

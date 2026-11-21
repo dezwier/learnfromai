@@ -23,7 +23,8 @@ Future<void> showLearnSheet(
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       opaque: false,
-      barrierDismissible: true,
+      // Same as learning track: don't let the opening tap dismiss via the barrier.
+      barrierDismissible: false,
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 220),
       reverseTransitionDuration: const Duration(milliseconds: 280),
