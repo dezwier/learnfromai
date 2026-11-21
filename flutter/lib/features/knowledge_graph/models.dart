@@ -30,52 +30,30 @@ class LlmProviderPref {
       provider == openai ? 'ChatGPT' : 'Gemini';
 }
 
+/// Global neighborhood sizes (not per-user).
 class NeighborhoodPrefs {
   const NeighborhoodPrefs({
-    this.total = 16,
-    this.extended = 12,
+    this.total = defaultTotal,
+    this.extended = defaultExtended,
   });
 
-  /// Total direct neighbors to fetch; the model chooses parents/siblings/children/related.
+  static const defaultTotal = 16;
+  static const defaultExtended = 16;
+
+  /// Direct neighbors to generate around a focus.
   final int total;
-  /// How many neighbors-of-neighbors to show around the focus (0–24).
+  /// Neighbors-of-neighbors to show around the focus.
   final int extended;
 
-  factory NeighborhoodPrefs.fromJson(Map<String, dynamic>? raw) {
-    if (raw == null) return const NeighborhoodPrefs();
-    final total = (raw['total'] as num?)?.toInt();
-    if (total != null) {
-      return NeighborhoodPrefs(
-        total: total.clamp(8, 32),
-        extended: (raw['extended'] as num?)?.toInt() ?? 12,
-      );
-    }
-    // Legacy per-bucket prefs → sum into a total budget.
-    final legacy = (raw['parents'] as num?)?.toInt() ?? 0;
-    final siblings = (raw['siblings'] as num?)?.toInt() ?? 0;
-    final children = (raw['children'] as num?)?.toInt() ?? 0;
-    final acquaintances = (raw['acquaintances'] as num?)?.toInt() ?? 0;
-    final summed = legacy + siblings + children + acquaintances;
-    return NeighborhoodPrefs(
-      total: (summed > 0 ? summed : 16).clamp(8, 32),
-      extended: (raw['extended'] as num?)?.toInt() ?? 12,
-    );
+  factory NeighborhoodPrefs.fromJson(Map<String, dynamic>? _) {
+    // API may still echo sizes; always use globals.
+    return const NeighborhoodPrefs();
   }
 
   Map<String, int> toJson() => {
         'total': total,
         'extended': extended,
       };
-
-  NeighborhoodPrefs copyWith({
-    int? total,
-    int? extended,
-  }) {
-    return NeighborhoodPrefs(
-      total: total ?? this.total,
-      extended: extended ?? this.extended,
-    );
-  }
 }
 
 class TopicBit {

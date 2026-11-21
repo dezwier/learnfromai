@@ -61,7 +61,7 @@ void main() {
           return {
             'neighborhood': {
               'total': 16,
-              'extended': 12,
+              'extended': 16,
             },
           };
         }
@@ -199,7 +199,7 @@ void main() {
           return {
             'neighborhood': {
               'total': 16,
-              'extended': 12,
+              'extended': 16,
             },
           };
         }

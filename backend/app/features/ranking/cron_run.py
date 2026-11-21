@@ -9,7 +9,7 @@ from sqlmodel import Session, col, select
 from app.core.config import Settings, get_settings
 from app.core.time import utcnow
 from app.features.content.models import DEFAULT_BAND, RECIPE_VERSION
-from app.features.knowledge_graph.preferences import min_per_bucket
+from app.features.knowledge_graph.preferences import min_per_bucket, neighborhood_counts
 from app.features.platform.jobs import enqueue
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
@@ -236,6 +236,7 @@ def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):
     )
     if existing is not None:
         return existing
+    counts = neighborhood_counts()
     total = int(settings.cron_neighbor_budget_total)
     idempotency = f"expand_neighborhood:{node_id}:total-{total}"
     return enqueue(
@@ -250,7 +251,7 @@ def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):
             "requested_by": str(user_id),
             "total": total,
             "min_per_bucket": min_per_bucket(total),
-            "extended": 12,
+            "extended": counts["extended"],
             "from_existing_focus": True,
             "source": "cron",
         },

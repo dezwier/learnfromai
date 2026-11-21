@@ -18,15 +18,16 @@ def _run_queued(session):
     return session.get(GenerationJob, job.id)
 
 
-def test_preferences_defaults_and_clamp(client, auth, user, session):
+def test_preferences_neighborhood_is_global(client, auth, user, session):
     response = client.get("/api/v1/me/preferences", headers=auth)
     assert response.status_code == 200
     body = response.json()["neighborhood"]
     assert body["total"] == 16
-    assert body["extended"] == 12
+    assert body["extended"] == 16
     assert body["min_per_bucket"] == 2
-    assert response.json()["llm_provider"] == "gemini"
+    assert response.json()["llm_provider"] == "openai"
 
+    # Personal neighborhood patches are ignored; sizes stay global.
     patched = client.patch(
         "/api/v1/me/preferences",
         headers=auth,
@@ -34,13 +35,17 @@ def test_preferences_defaults_and_clamp(client, auth, user, session):
     )
     assert patched.status_code == 200
     assert patched.json()["neighborhood"] == {
-        "total": 32,
-        "extended": 24,
+        "total": 16,
+        "extended": 16,
         "min_per_bucket": 2,
     }
-    assert patched.json()["llm_provider"] == "gemini"
     session.refresh(user)
-    assert neighborhood_counts(user)["total"] == 32
+    assert "neighborhood" not in (user.preferences or {})
+    assert neighborhood_counts(user) == {
+        "total": 16,
+        "extended": 16,
+        "min_per_bucket": 2,
+    }
 
 
 def test_llm_provider_preference(client, auth, user, session):
@@ -73,15 +78,22 @@ def test_llm_provider_preference(client, auth, user, session):
     assert back.json()["llm_provider"] == "gemini"
 
 
-def test_legacy_bucket_prefs_sum_to_total(client, auth, user, session):
+def test_stored_personal_neighborhood_ignored(client, auth, user, session):
     user.preferences = {
-        "neighborhood": {"parents": 2, "siblings": 3, "children": 4, "acquaintances": 4, "extended": 12}
+        "neighborhood": {
+            "parents": 2,
+            "siblings": 3,
+            "children": 4,
+            "acquaintances": 4,
+            "extended": 12,
+            "total": 14,
+        }
     }
     session.add(user)
     session.commit()
     counts = neighborhood_counts(user)
-    assert counts["total"] == 13
-    assert counts["extended"] == 12
+    assert counts["total"] == 16
+    assert counts["extended"] == 16
 
 
 def test_dinosaurs_expand_merge_and_bidirectional_edges(client, auth, session):
@@ -149,18 +161,6 @@ def test_focus_without_expand_does_not_enqueue(client, auth, session):
     assert by_id.status_code == 200
     assert by_id.json()["incomplete"] is True
     assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
-
-
-def test_higher_total_reenqueues(client, auth, session):
-    first = client.post("/api/v1/knowledge/focus", headers=auth, json={"topic": "dinosaurs", "expand": True})
-    assert first.status_code == 202
-    focus_id = first.json()["focus_node_id"]
-    _run_queued(session)
-
-    client.patch("/api/v1/me/preferences", headers=auth, json={"neighborhood": {"total": 24}})
-    again = client.post("/api/v1/knowledge/focus", headers=auth, json={"node_id": focus_id, "expand": True})
-    assert again.status_code == 202
-    assert again.json()["job_id"]
 
 
 def test_resume_empty_and_latest(client, auth, other_auth, session):

@@ -1553,7 +1553,7 @@ class _GraphScreenState extends State<GraphScreen>
       graph.categoryGraph,
       focusId: graph.focusId,
       viewport: viewport,
-      maxExtended: graph.prefs.extended,
+      maxExtended: NeighborhoodPrefs.defaultExtended,
     );
   }
 }

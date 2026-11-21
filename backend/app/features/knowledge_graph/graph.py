@@ -155,7 +155,7 @@ def _enqueue_expand(
             "requested_by": str(user.id),
             "total": counts["total"],
             "min_per_bucket": counts.get("min_per_bucket", 2),
-            "extended": counts.get("extended", 12),
+            "extended": counts.get("extended", 16),
             # Known tile expand skips focus retrieve/sameness; new topic does not.
             "from_existing_focus": from_existing_focus,
         },

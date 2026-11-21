@@ -62,7 +62,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     counts = {
         "total": total,
         "min_per_bucket": int(payload.get("min_per_bucket") or min_per_bucket(total)),
-        "extended": int(payload.get("extended") or 12),
+        "extended": int(payload.get("extended") or 16),
     }
     focus_id = parse_uuid(payload.get("focus_id"))
     topic = str(payload.get("topic") or "").strip() or None
@@ -145,7 +145,7 @@ def expand_neighborhood(session: Session, job: GenerationJob) -> dict:
     gen_counts = {
         "total": need,
         "min_per_bucket": int(counts.get("min_per_bucket") or 2),
-        "extended": int(counts.get("extended") or 12),
+        "extended": int(counts.get("extended") or 16),
         "exclude_titles": exclude_titles,
     }
     if exclude_titles and prefer_buckets:
@@ -269,7 +269,7 @@ def _persist_request(
     payload = build_subgraph(
         session,
         focus,
-        max_extended=int(counts.get("extended") or 12),
+        max_extended=int(counts.get("extended") or 16),
         counts=counts,
     )
     # Audit columns: parents holds the total budget; siblings holds min-per-bucket.

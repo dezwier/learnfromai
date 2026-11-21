@@ -17,7 +17,6 @@ class SettingsAppTab extends StatelessWidget {
     final auth = context.watch<AuthController>();
     final theme = Theme.of(context);
     final outline = SettingsFormStyles.outlineBorder(context);
-    final prefs = graph.prefs;
     final isAdmin = auth.user?.isAdmin == true;
 
     return ListView(
@@ -84,42 +83,6 @@ class SettingsAppTab extends StatelessWidget {
             onSelected: (value) {
               if (value != null) graph.saveLlmProvider(value);
             },
-          ),
-        ),
-        const SizedBox(height: 28),
-        Text(
-          'Neighborhood size',
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'How many related topics to fetch around a focus. The model picks a mix of broader, peer, narrower, and related topics.',
-          style: SettingsFormStyles.finePrintStyle(context),
-        ),
-        const SizedBox(height: 16),
-        SettingsFormStyles.settingsRow(
-          context: context,
-          label: 'Related topics',
-          description: 'Total neighbors to generate around the focus.',
-          controlWidth: 120,
-          control: SettingsFormStyles.stepperControl(
-            value: prefs.total,
-            min: 8,
-            max: 32,
-            onChanged: (value) => graph.savePreferences(prefs.copyWith(total: value)),
-          ),
-        ),
-        const SizedBox(height: 16),
-        SettingsFormStyles.settingsRow(
-          context: context,
-          label: 'Outer ring',
-          description: 'Neighbors of neighbors to show (if present).',
-          controlWidth: 120,
-          control: SettingsFormStyles.stepperControl(
-            value: prefs.extended,
-            min: 0,
-            max: 24,
-            onChanged: (value) => graph.savePreferences(prefs.copyWith(extended: value)),
           ),
         ),
         if (isAdmin) ...[

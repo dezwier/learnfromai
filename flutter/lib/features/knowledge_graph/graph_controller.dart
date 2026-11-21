@@ -756,25 +756,6 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  Future<void> savePreferences(NeighborhoodPrefs next) async {
-    prefs = next;
-    notifyListeners();
-    try {
-      final raw = await _patch('/me/preferences', body: {
-        'neighborhood': next.toJson(),
-        'llm_provider': llmProvider,
-      });
-      _applyPreferencesPayload(raw);
-      final id = focusId;
-      if (id != null && !refreshing && !loading) {
-        await openExisting(id);
-      }
-    } on ApiException catch (exc) {
-      error = exc.message;
-      notifyListeners();
-    }
-  }
-
   Future<void> saveLlmProvider(String next) async {
     final provider = LlmProviderPref.normalize(next);
     llmProvider = provider;
@@ -782,7 +763,6 @@ class GraphController extends ChangeNotifier {
     try {
       final raw = await _patch('/me/preferences', body: {
         'llm_provider': provider,
-        'neighborhood': prefs.toJson(),
       });
       _applyPreferencesPayload(raw);
     } on ApiException catch (exc) {
@@ -792,10 +772,7 @@ class GraphController extends ChangeNotifier {
   }
 
   void _applyPreferencesPayload(Map<String, dynamic> raw) {
-    final neighborhood = raw['neighborhood'];
-    if (neighborhood is Map<String, dynamic>) {
-      prefs = NeighborhoodPrefs.fromJson(neighborhood);
-    }
+    prefs = const NeighborhoodPrefs();
     if (raw.containsKey('llm_provider')) {
       llmProvider = LlmProviderPref.normalize(raw['llm_provider']);
     }
