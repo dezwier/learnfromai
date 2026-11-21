@@ -206,14 +206,10 @@ String _compactScore(double value) {
 
 String _breakdownLine(TopicAffinityBreakdown b) {
   final parts = <String>[
-    if (b.focus > 0) 'f${_compactScore(b.focus)}',
-    if (b.open > 0) 'o${_compactScore(b.open)}',
+    if (b.interest > 0) 'i${_compactScore(b.interest)}',
     if (b.neighbor > 0) 'n${_compactScore(b.neighbor)}',
-    if (b.fresh > 0) '+${_compactScore(b.fresh)}',
+    if (b.recency > 0) 'r${_compactScore(b.recency)}',
   ];
-  if (b.recency < 0.995) {
-    parts.add('×${_compactScore(b.recency)}');
-  }
   return parts.isEmpty ? '—' : parts.join(' · ');
 }
 

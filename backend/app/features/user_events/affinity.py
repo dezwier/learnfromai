@@ -122,11 +122,9 @@ def topic_affinity(
                 ),
                 "cluster_id": cluster_id_by_node[nid],
                 "breakdown": {
-                    "focus": round(float(breakdown.get("focus") or 0), 4),
-                    "open": round(float(breakdown.get("open") or 0), 4),
+                    "interest": round(float(breakdown.get("interest") or 0), 4),
                     "neighbor": round(float(breakdown.get("neighbor") or 0), 4),
-                    "new": round(float(breakdown.get("new") or 0), 4),
-                    "recency": round(float(breakdown.get("recency") or 1), 4),
+                    "recency": round(float(breakdown.get("recency") or 0), 4),
                 },
             }
         )

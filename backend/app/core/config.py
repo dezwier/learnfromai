@@ -69,23 +69,22 @@ class Settings(BaseSettings):
     wikidata_max_items_per_request: int = 200
 
     # --- Affinity (profile map + base tile score for cron) ---
-    # Only focus + open (not learn/check/packs). Soft newness + event recency.
-    # affinity(u,t) = (own + w_neighbor * sum_neighbors(own) + w_new*recency(node_age))
-    #                 * recency(days_since_last_focus_or_open)
-    # where own = w_focus*focus + w_open*open
-    affinity_w_focus: float = Field(
-        default=1.0, validation_alias=_env("affinity_w_focus", "AFFINITY_W_FOCUS", "RANK_W_FOCUS")
+    # Only focus + open (not learn/check/packs). Three weighted factors (defaults 1):
+    #   interest          = focus + open (equal)
+    #   neighbor_interest = Σ_direct_neighbors interest
+    #   recency           = soft half-life of last focus/open
+    # affinity = w_interest*interest + w_neighbor*neighbor_interest + w_recency*recency
+    affinity_w_interest: float = Field(
+        default=1.0,
+        validation_alias=_env("affinity_w_interest", "AFFINITY_W_INTEREST"),
     )
-    affinity_w_open: float = Field(
-        default=2.0, validation_alias=_env("affinity_w_open", "AFFINITY_W_OPEN", "RANK_W_OPEN")
-    )
-    affinity_w_new: float = Field(
-        default=2.0, validation_alias=_env("affinity_w_new", "AFFINITY_W_NEW", "RANK_W_NEW")
-    )
-    # Fraction of each direct neighbor's focus/open engagement that spills into this tile.
     affinity_w_neighbor: float = Field(
-        default=0.5,
+        default=1.0,
         validation_alias=_env("affinity_w_neighbor", "AFFINITY_W_NEIGHBOR"),
+    )
+    affinity_w_recency: float = Field(
+        default=1.0,
+        validation_alias=_env("affinity_w_recency", "AFFINITY_W_RECENCY"),
     )
     affinity_half_life_days: float = Field(
         default=14.0,

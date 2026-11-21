@@ -1,7 +1,13 @@
 """Weighted user–tile affinity (single measure for HUD + cron).
 
-Affinity uses focus + open engagement only (not learn/check/pack walks).
-Direct graph neighbors contribute a fraction of their focus/open engagement.
+Three factors (each with a weight, defaults 1):
+  interest          = focus_count + open_count (equal)
+  neighbor_interest = sum of interest over direct graph neighbors
+  recency           = soft half-life of last focus/open
+
+affinity = w_interest * interest
+         + w_neighbor * neighbor_interest
+         + w_recency  * recency(last_focus_or_open)
 """
 
 from __future__ import annotations
@@ -42,10 +48,9 @@ def age_days(when: datetime | None, *, now: datetime | None = None) -> float:
 def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]:
     s = settings or get_settings()
     return {
-        "affinity_w_focus": s.affinity_w_focus,
-        "affinity_w_open": s.affinity_w_open,
-        "affinity_w_new": s.affinity_w_new,
+        "affinity_w_interest": s.affinity_w_interest,
         "affinity_w_neighbor": s.affinity_w_neighbor,
+        "affinity_w_recency": s.affinity_w_recency,
         "affinity_half_life_days": s.affinity_half_life_days,
         "cron_neighbor_w_count_penalty": s.cron_neighbor_w_count_penalty,
         "cron_learn_w_pack_penalty": s.cron_learn_w_pack_penalty,
@@ -57,13 +62,8 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
     }
 
 
-def _own_engagement(
-    *,
-    focus_n: int,
-    open_n: int,
-    settings: Settings,
-) -> float:
-    return settings.affinity_w_focus * focus_n + settings.affinity_w_open * open_n
+def _interest(focus_n: int, open_n: int) -> float:
+    return float(focus_n + open_n)
 
 
 def _undirected_neighbors(
@@ -106,6 +106,7 @@ def score_user_tiles(
 
     focus_counts: dict[UUID, int] = defaultdict(int)
     open_counts: dict[UUID, int] = defaultdict(int)
+    interest_by_id: dict[UUID, float] = defaultdict(float)
     learned_nodes: set[UUID] = set()
     last_engage_at: dict[UUID, datetime] = {}
     engaged_ids: set[UUID] = set()
@@ -128,6 +129,11 @@ def score_user_tiles(
     if not engaged_ids:
         return {}
 
+    for nid in engaged_ids:
+        interest_by_id[nid] = _interest(
+            focus_counts.get(nid, 0), open_counts.get(nid, 0)
+        )
+
     nodes = session.exec(
         select(KnowledgeNode).where(col(KnowledgeNode.id).in_(list(engaged_ids)))
     ).all()
@@ -141,27 +147,18 @@ def score_user_tiles(
             continue
         focus_n = focus_counts.get(nid, 0)
         open_n = open_counts.get(nid, 0)
-        focus_term = float(s.affinity_w_focus * focus_n)
-        open_term = float(s.affinity_w_open * open_n)
-        neighbor_spill = 0.0
+        interest_raw = interest_by_id[nid]
+        neighbor_raw = 0.0
         for nb in neighbor_map.get(nid, ()):
-            neighbor_spill += _own_engagement(
-                focus_n=focus_counts.get(nb, 0),
-                open_n=open_counts.get(nb, 0),
-                settings=s,
-            )
-        neighbor_term = float(s.affinity_w_neighbor * neighbor_spill)
-        node_age = age_days(node.created_at, now=current)
+            neighbor_raw += interest_by_id.get(nb, 0.0)
         event_age = age_days(last_engage_at.get(nid), now=current)
-        new_term = float(
-            s.affinity_w_new
-            * recency(node_age, half_life_days=s.affinity_half_life_days)
-        )
-        recency_factor = float(
+        recency_raw = float(
             recency(event_age, half_life_days=s.affinity_half_life_days)
         )
-        base = focus_term + open_term + neighbor_term + new_term
-        affinity = base * recency_factor
+        interest_term = float(s.affinity_w_interest * interest_raw)
+        neighbor_term = float(s.affinity_w_neighbor * neighbor_raw)
+        recency_term = float(s.affinity_w_recency * recency_raw)
+        affinity = interest_term + neighbor_term + recency_term
         if affinity <= 0:
             continue
         scored[nid] = {
@@ -173,11 +170,9 @@ def score_user_tiles(
             "learned": nid in learned_nodes,
             "has_image": bool(node.image_url),
             "breakdown": {
-                "focus": round(focus_term, 4),
-                "open": round(open_term, 4),
+                "interest": round(interest_term, 4),
                 "neighbor": round(neighbor_term, 4),
-                "new": round(new_term, 4),
-                "recency": round(recency_factor, 4),
+                "recency": round(recency_term, 4),
             },
         }
     return scored

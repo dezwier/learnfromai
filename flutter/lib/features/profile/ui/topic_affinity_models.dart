@@ -1,34 +1,26 @@
 class TopicAffinityBreakdown {
   const TopicAffinityBreakdown({
-    required this.focus,
-    required this.open,
+    required this.interest,
     required this.neighbor,
-    required this.fresh,
     required this.recency,
   });
 
-  final double focus;
-  final double open;
+  final double interest;
   final double neighbor;
-  final double fresh;
   final double recency;
 
   factory TopicAffinityBreakdown.fromJson(Map<String, dynamic>? raw) {
     if (raw == null) {
       return const TopicAffinityBreakdown(
-        focus: 0,
-        open: 0,
+        interest: 0,
         neighbor: 0,
-        fresh: 0,
-        recency: 1,
+        recency: 0,
       );
     }
     return TopicAffinityBreakdown(
-      focus: (raw['focus'] as num?)?.toDouble() ?? 0,
-      open: (raw['open'] as num?)?.toDouble() ?? 0,
+      interest: (raw['interest'] as num?)?.toDouble() ?? 0,
       neighbor: (raw['neighbor'] as num?)?.toDouble() ?? 0,
-      fresh: (raw['new'] as num?)?.toDouble() ?? 0,
-      recency: (raw['recency'] as num?)?.toDouble() ?? 1,
+      recency: (raw['recency'] as num?)?.toDouble() ?? 0,
     );
   }
 }

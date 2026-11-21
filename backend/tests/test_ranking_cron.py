@@ -255,8 +255,8 @@ def test_score_user_tiles_ignores_learn_events(session, user):
     session.commit()
     scored = score_user_tiles(session, user_id=user.id)
     assert scored[node.id]["learned"] is True
-    # focus(1) + new(2) ≈ 3 — learn/check do not add to affinity
-    assert scored[node.id]["affinity"] == pytest.approx(3.0, abs=0.1)
+    # interest(1) + recency(1) ≈ 2 — learn/check do not add to affinity
+    assert scored[node.id]["affinity"] == pytest.approx(2.0, abs=0.1)
 
 
 def test_score_user_tiles_neighbor_spill(session, user):
@@ -277,7 +277,7 @@ def test_score_user_tiles_neighbor_spill(session, user):
     session.commit()
 
     scored = score_user_tiles(session, user_id=user.id)
-    # A own=2, B own=2 → A gets +0.5*2, B gets +0.5*2; both +new(2)
-    assert scored[a.id]["affinity"] == pytest.approx(5.0, abs=0.05)
-    assert scored[b.id]["affinity"] == pytest.approx(5.0, abs=0.05)
+    # A interest=2, B neighbor=1, recency=1 → 4; B interest=1, A neighbor=2, recency=1 → 4
+    assert scored[a.id]["affinity"] == pytest.approx(4.0, abs=0.05)
+    assert scored[b.id]["affinity"] == pytest.approx(4.0, abs=0.05)
     assert scored[a.id]["breakdown"]["neighbor"] == pytest.approx(1.0)
