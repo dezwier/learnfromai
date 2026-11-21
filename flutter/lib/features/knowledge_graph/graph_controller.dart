@@ -377,17 +377,21 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  /// Next unlearned atomic pack on seed or a neighbor (exploit / explore).
+  /// Next learning-track pack from the focus tile's perspective.
   ///
+  /// Pass [opening]: true for the first card (pack on the focus tile).
+  /// Later cards dice among focus / children / other neighbors.
   /// Pass [excludeNodeId] + [excludePackIndex] to skip the on-screen pack when
   /// prefetching the following card.
   Future<LearningNext?> fetchLearningNext(
     String seedNodeId, {
     String? excludeNodeId,
     int? excludePackIndex,
+    bool opening = false,
   }) async {
     try {
       final params = <String>['seed_node_id=$seedNodeId'];
+      if (opening) params.add('opening=true');
       if (excludeNodeId != null &&
           excludeNodeId.isNotEmpty &&
           excludePackIndex != null &&

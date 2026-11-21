@@ -1,5 +1,7 @@
 """Learning track: next atomic pack picker."""
 
+import random
+
 from app.features.content.models import KnowledgeBit
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.learning.service import learning_next
@@ -50,7 +52,7 @@ def test_learning_next_generate_when_no_packs(client, auth, session, user):
     session.commit()
 
     response = client.get(
-        f"/api/v1/me/learning-next?seed_node_id={node.id}",
+        f"/api/v1/me/learning-next?seed_node_id={node.id}&opening=true",
         headers=auth,
     )
     assert response.status_code == 200
@@ -75,7 +77,7 @@ def test_learning_next_returns_seed_pack(client, auth, session, user):
     session.commit()
 
     response = client.get(
-        f"/api/v1/me/learning-next?seed_node_id={seed.id}",
+        f"/api/v1/me/learning-next?seed_node_id={seed.id}&opening=true",
         headers=auth,
     )
     assert response.status_code == 200
@@ -91,39 +93,15 @@ def test_learning_next_returns_seed_pack(client, auth, session, user):
     assert kinds & {"check1", "check2", "check3"}
 
 
-def test_learning_next_exclude_skips_current_pack(client, auth, session, user):
-    seed = KnowledgeNode(name="Seed", name_key="seed-ex", description="x")
-    neighbor = KnowledgeNode(name="Neighbor", name_key="neighbor-ex", description="x")
+def test_learning_next_opening_replays_learned_on_focus(session, user):
+    seed = KnowledgeNode(name="Done", name_key="done-open", description="x")
+    child = KnowledgeNode(name="Kid", name_key="kid-open", description="x")
     session.add(seed)
-    session.add(neighbor)
+    session.add(child)
     session.flush()
-    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=neighbor.id))
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
     _add_pack(session, seed.id, pack_index=1)
-    _add_pack(session, neighbor.id, pack_index=1)
-    session.commit()
-
-    response = client.get(
-        f"/api/v1/me/learning-next?seed_node_id={seed.id}"
-        f"&exclude_node_id={seed.id}&exclude_pack_index=1",
-        headers=auth,
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ready"
-    assert body["node_id"] == str(neighbor.id)
-    assert body["pack_index"] == 1
-
-
-def test_learning_next_skips_completed_atomic_pack(session, user):
-    seed = KnowledgeNode(name="Done", name_key="done", description="x")
-    neighbor = KnowledgeNode(name="Next", name_key="next", description="x")
-    session.add(seed)
-    session.add(neighbor)
-    session.flush()
-    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=neighbor.id))
-    session.add(KnowledgeEdge(from_id=neighbor.id, relation="parent", to_id=seed.id))
-    _add_pack(session, seed.id, pack_index=1)
-    _add_pack(session, neighbor.id, pack_index=1)
+    _add_pack(session, child.id, pack_index=1)
     record_events(
         session,
         user=user,
@@ -138,13 +116,75 @@ def test_learning_next_skips_completed_atomic_pack(session, user):
     )
     session.commit()
 
-    result = learning_next(session, user=user, seed_node_id=seed.id)
+    result = learning_next(
+        session, user=user, seed_node_id=seed.id, opening=True, rng=random.Random(0)
+    )
     assert result["status"] == "ready"
-    assert result["node_id"] == str(neighbor.id)
+    assert result["node_id"] == str(seed.id)
     assert result["pack_index"] == 1
 
 
-def test_learning_next_prefers_focus_over_neighbor(session, user):
+def test_learning_next_exclude_can_land_on_child(session, user, monkeypatch):
+    seed = KnowledgeNode(name="Seed", name_key="seed-ex", description="x")
+    child = KnowledgeNode(name="Child", name_key="child-ex", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, seed.id, pack_index=1)
+    _add_pack(session, child.id, pack_index=1)
+    session.commit()
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "learn_track_p_focus", 0.0)
+    monkeypatch.setattr(settings, "learn_track_p_child", 1.0)
+    monkeypatch.setattr(settings, "learn_track_p_other", 0.0)
+
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        exclude_node_id=seed.id,
+        exclude_pack_index=1,
+        rng=random.Random(1),
+    )
+    assert result["status"] == "ready"
+    assert result["node_id"] == str(child.id)
+    assert result["pack_index"] == 1
+
+
+def test_learning_next_dice_generate_for_picked_tile(session, user, monkeypatch):
+    seed = KnowledgeNode(name="Focus", name_key="focus-gen", description="x")
+    child = KnowledgeNode(name="EmptyKid", name_key="empty-kid", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, seed.id, pack_index=1)
+    session.commit()
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "learn_track_p_focus", 0.0)
+    monkeypatch.setattr(settings, "learn_track_p_child", 1.0)
+    monkeypatch.setattr(settings, "learn_track_p_other", 0.0)
+
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        exclude_node_id=seed.id,
+        exclude_pack_index=1,
+        rng=random.Random(2),
+    )
+    assert result["status"] == "generate"
+    assert result["node_id"] == str(child.id)
+
+
+def test_learning_next_opening_prefers_focus_pack(session, user):
     seed = KnowledgeNode(name="Focus", name_key="focus-learn", description="x")
     neighbor = KnowledgeNode(name="Side", name_key="side-learn", description="x")
     session.add(seed)
@@ -156,6 +196,8 @@ def test_learning_next_prefers_focus_over_neighbor(session, user):
     _add_pack(session, neighbor.id)
     session.commit()
 
-    result = learning_next(session, user=user, seed_node_id=seed.id)
+    result = learning_next(
+        session, user=user, seed_node_id=seed.id, opening=True, rng=random.Random(3)
+    )
     assert result["status"] == "ready"
     assert result["node_id"] == str(seed.id)

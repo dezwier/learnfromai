@@ -1,11 +1,13 @@
-"""Pick the next unlearned atomic pack (focus first, then neighbors)."""
+"""Pick the next learning-track pack from the focus tile's perspective."""
 
 from __future__ import annotations
 
+import random
 from uuid import UUID
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, select
 
+from app.core.config import get_settings
 from app.core.errors import not_found
 from app.features.accounts.models import User
 from app.features.content.service import (
@@ -26,12 +28,26 @@ def _image_fields(node: KnowledgeNode) -> dict[str, str | None]:
     }
 
 
-def _direct_neighbor_ids(session: Session, seed_id: UUID) -> list[UUID]:
-    """Stable neighbor order (by id) for deterministic picks."""
-    ids: set[UUID] = set()
-    for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == seed_id)).all():
-        ids.add(edge.to_id)
-    return sorted(ids, key=lambda nid: nid.hex)
+def _neighbor_buckets(
+    session: Session, focus_id: UUID
+) -> tuple[list[UUID], list[UUID]]:
+    """Children vs other direct neighbors (parent / sibling / acquaintance)."""
+    children: list[UUID] = []
+    others: list[UUID] = []
+    seen: set[UUID] = set()
+    for edge in session.exec(
+        select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus_id)
+    ).all():
+        if edge.to_id in seen:
+            continue
+        seen.add(edge.to_id)
+        if edge.relation == "child":
+            children.append(edge.to_id)
+        else:
+            others.append(edge.to_id)
+    children.sort(key=lambda nid: nid.hex)
+    others.sort(key=lambda nid: nid.hex)
+    return children, others
 
 
 def _eligible_packs(
@@ -41,6 +57,7 @@ def _eligible_packs(
     node_id: UUID,
     exclude_pack_index: int | None = None,
 ) -> list[dict]:
+    """Content-complete packs the user has not finished yet."""
     payload = content_for_node(session, node_id, user_id=user_id)
     completed = set(payload.get("completed_packs") or [])
     out: list[dict] = []
@@ -59,7 +76,35 @@ def _eligible_packs(
         if pack_index in completed:
             continue
         out.append(pack)
-    out.sort(key=lambda p: int(p["pack_index"]))
+    return out
+
+
+def _learned_packs(
+    session: Session,
+    *,
+    user_id: UUID,
+    node_id: UUID,
+    exclude_pack_index: int | None = None,
+) -> list[dict]:
+    """Content-complete packs the user already finished (replay)."""
+    payload = content_for_node(session, node_id, user_id=user_id)
+    completed = set(payload.get("completed_packs") or [])
+    out: list[dict] = []
+    for pack in payload.get("packs") or []:
+        if not isinstance(pack, dict):
+            continue
+        pack_index = int(pack.get("pack_index") or 0)
+        if pack_index < 1:
+            continue
+        if exclude_pack_index is not None and pack_index == exclude_pack_index:
+            continue
+        if pack.get("incomplete") is True:
+            continue
+        if not is_pack_complete(session, node_id, pack_index=pack_index):
+            continue
+        if pack_index not in completed:
+            continue
+        out.append(pack)
     return out
 
 
@@ -90,6 +135,118 @@ def _ready_payload(
     }
 
 
+def _generate_payload(node: KnowledgeNode) -> dict:
+    return {
+        "status": "generate",
+        "node_id": str(node.id),
+        "title": node.name,
+        **_image_fields(node),
+    }
+
+
+def _exclude_for(
+    node_id: UUID,
+    *,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+) -> int | None:
+    if (
+        exclude_node_id is not None
+        and exclude_pack_index is not None
+        and exclude_node_id == node_id
+    ):
+        return exclude_pack_index
+    return None
+
+
+def _pick_pack(
+    packs: list[dict],
+    rng: random.Random,
+) -> dict:
+    return packs[rng.randrange(len(packs))]
+
+
+def _opening_pack(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    rng: random.Random,
+) -> dict:
+    """First card: pack on the opening tile (unlearned preferred, else learned)."""
+    unlearned = _eligible_packs(session, user_id=user.id, node_id=focus.id)
+    if unlearned:
+        return _ready_payload(
+            session, user_id=user.id, node=focus, pack=_pick_pack(unlearned, rng)
+        )
+    learned = _learned_packs(session, user_id=user.id, node_id=focus.id)
+    if learned:
+        return _ready_payload(
+            session, user_id=user.id, node=focus, pack=_pick_pack(learned, rng)
+        )
+    return _generate_payload(focus)
+
+
+def _dice_tile(
+    *,
+    focus_id: UUID,
+    children: list[UUID],
+    others: list[UUID],
+    rng: random.Random,
+) -> UUID:
+    """Weighted tile from the focus tile's perspective; empty buckets drop out."""
+    settings = get_settings()
+    buckets: list[tuple[float, list[UUID]]] = [
+        (settings.learn_track_p_focus, [focus_id]),
+    ]
+    if children:
+        buckets.append((settings.learn_track_p_child, children))
+    if others:
+        buckets.append((settings.learn_track_p_other, others))
+    total = sum(weight for weight, _ in buckets)
+    if total <= 0:
+        return focus_id
+    draw = rng.random() * total
+    cursor = 0.0
+    for weight, ids in buckets:
+        cursor += weight
+        if draw <= cursor:
+            return ids[rng.randrange(len(ids))]
+    return buckets[-1][1][rng.randrange(len(buckets[-1][1]))]
+
+
+def _continue_pack(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+    rng: random.Random,
+) -> dict:
+    """Later cards: dice a tile, then unlearned pack or generate for that tile."""
+    children, others = _neighbor_buckets(session, focus.id)
+    tile_id = _dice_tile(
+        focus_id=focus.id, children=children, others=others, rng=rng
+    )
+    skip = _exclude_for(
+        tile_id,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+    )
+    unlearned = _eligible_packs(
+        session, user_id=user.id, node_id=tile_id, exclude_pack_index=skip
+    )
+    node = focus if tile_id == focus.id else session.get(KnowledgeNode, tile_id)
+    if node is None:
+        return _generate_payload(focus)
+    if unlearned:
+        return _ready_payload(
+            session, user_id=user.id, node=node, pack=_pick_pack(unlearned, rng)
+        )
+    return _generate_payload(node)
+
+
 def learning_next(
     session: Session,
     *,
@@ -97,59 +254,29 @@ def learning_next(
     seed_node_id: UUID,
     exclude_node_id: UUID | None = None,
     exclude_pack_index: int | None = None,
+    opening: bool = False,
+    rng: random.Random | None = None,
 ) -> dict:
-    """Return the next pack to learn, or a generate hint for the seed.
+    """Return the next pack to learn, or a generate hint for a chosen tile.
 
-    Fast path: unlearned pack on the focus first; only then scan neighbors.
-    Optional exclude_* skips a pack still on-screen so the client can prefetch.
+    Always interpreted from the track's opening focus (`seed_node_id`):
+    - `opening=True`: pack on the focus (prefer unlearned, else learned, else generate).
+    - otherwise: weighted dice (focus / children / other neighbors), then an
+      unlearned pack on that tile or `generate` for it.
+    Optional exclude_* skips the on-screen pack when prefetching.
     """
     seed = session.get(KnowledgeNode, seed_node_id)
     if seed is None:
         raise not_found("Topic not found")
 
-    seed_exclude = (
-        exclude_pack_index
-        if exclude_node_id is not None and exclude_node_id == seed_node_id
-        else None
-    )
-    seed_packs = _eligible_packs(
+    picker = rng if rng is not None else random.Random()
+    if opening:
+        return _opening_pack(session, user=user, focus=seed, rng=picker)
+    return _continue_pack(
         session,
-        user_id=user.id,
-        node_id=seed_node_id,
-        exclude_pack_index=seed_exclude,
+        user=user,
+        focus=seed,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+        rng=picker,
     )
-    if seed_packs:
-        return _ready_payload(session, user_id=user.id, node=seed, pack=seed_packs[0])
-
-    neighbor_ids = _direct_neighbor_ids(session, seed_node_id)
-    if neighbor_ids:
-        neighbors = {
-            node.id: node
-            for node in session.exec(
-                select(KnowledgeNode).where(col(KnowledgeNode.id).in_(neighbor_ids))
-            ).all()
-        }
-        for nid in neighbor_ids:
-            node = neighbors.get(nid)
-            if node is None:
-                continue
-            skip = (
-                exclude_pack_index
-                if exclude_node_id is not None and exclude_node_id == nid
-                else None
-            )
-            packs = _eligible_packs(
-                session,
-                user_id=user.id,
-                node_id=nid,
-                exclude_pack_index=skip,
-            )
-            if packs:
-                return _ready_payload(session, user_id=user.id, node=node, pack=packs[0])
-
-    return {
-        "status": "generate",
-        "node_id": str(seed_node_id),
-        "title": seed.name,
-        **_image_fields(seed),
-    }

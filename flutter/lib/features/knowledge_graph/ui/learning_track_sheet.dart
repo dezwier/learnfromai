@@ -94,7 +94,13 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_loadNext(widget.seedNodeId, titleHint: widget.seedTitle, trackOpen: true));
+      unawaited(
+        _loadNext(
+          titleHint: widget.seedTitle,
+          trackOpen: true,
+          opening: true,
+        ),
+      );
     });
   }
 
@@ -128,10 +134,12 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     setState(() => _cardImageUrl = url);
   }
 
-  Future<void> _loadNext(
-    String seedId, {
+  Future<void> _loadNext({
     String? titleHint,
     bool trackOpen = false,
+    bool opening = false,
+    String? excludeNodeId,
+    int? excludePackIndex,
   }) async {
     final graph = context.read<GraphController>();
     final support = _supportFor(graph);
@@ -142,7 +150,13 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _entry = null;
       _cardImageUrl = null;
     });
-    final next = await graph.fetchLearningNext(seedId);
+    // Always seed from the opening focus tile.
+    final next = await graph.fetchLearningNext(
+      widget.seedNodeId,
+      opening: opening,
+      excludeNodeId: excludeNodeId,
+      excludePackIndex: excludePackIndex,
+    );
     if (!mounted) return;
     if (next == null) {
       graph.surfaceError(graph.error ?? 'Could not load the next learning card');
@@ -150,35 +164,37 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     if (next.needsGenerate) {
-      // Always generate for the topic where this track was opened.
-      await _startGenerate(
-        graph,
-        widget.seedNodeId,
-        widget.seedTitle.isEmpty ? (titleHint ?? next.title) : widget.seedTitle,
-      );
+      final title = next.title.trim().isNotEmpty
+          ? next.title.trim()
+          : (titleHint ?? widget.seedTitle);
+      await _startGenerate(graph, next.nodeId, title, afterOpening: opening);
       return;
     }
     _applyReady(graph, next, trackOpen: trackOpen);
   }
 
-  Future<void> _startGenerate(GraphController graph, String nodeId, String title) async {
+  Future<void> _startGenerate(
+    GraphController graph,
+    String nodeId,
+    String title, {
+    bool afterOpening = false,
+  }) async {
     final support = _supportFor(graph);
     support.cancelPrefetch();
-    final originId = widget.seedNodeId;
-    final originTitle = widget.seedTitle.isEmpty ? title : widget.seedTitle;
+    final topicTitle = title.trim().isNotEmpty ? title.trim() : 'Topic';
     setState(() {
       _loading = true;
-      _generateNodeId = originId;
-      _topicTitle = originTitle;
-      _nodeId = originId;
+      _generateNodeId = nodeId;
+      _topicTitle = topicTitle;
+      _nodeId = nodeId;
       _cardImageUrl = null;
     });
     unawaited(
-      _setCardImage(LearningNext(status: 'generate', nodeId: originId, title: originTitle)),
+      _setCardImage(LearningNext(status: 'generate', nodeId: nodeId, title: topicTitle)),
     );
-    final queued = await graph.enqueueContentForTrack(originId, title: originTitle);
+    final queued = await graph.enqueueContentForTrack(nodeId, title: topicTitle);
     if (!mounted) return;
-    final job = graph.jobForNode(originId, type: 'expand_content');
+    final job = graph.jobForNode(nodeId, type: 'expand_content');
     if (job != null) {
       _watchedJobId = job.jobId;
       _listen(graph);
@@ -194,13 +210,16 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
     // 200 with existing content — try once more; do not loop generate forever.
-    final next = await graph.fetchLearningNext(originId);
+    final next = await graph.fetchLearningNext(
+      widget.seedNodeId,
+      opening: afterOpening,
+    );
     if (!mounted) return;
     if (next != null && next.isReady) {
       _applyReady(graph, next);
       return;
     }
-    graph.surfaceError('No new learning pack could be started for $originTitle');
+    graph.surfaceError('No new learning pack could be started for $topicTitle');
     setState(() {
       _generateNodeId = null;
       _loading = false;
@@ -241,8 +260,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     unawaited(_setCardImage(next));
     support.schedulePrefetch(
       next,
-      originNodeId: widget.seedNodeId,
-      originTitle: widget.seedTitle,
+      focusNodeId: widget.seedNodeId,
+      focusTitle: widget.seedTitle,
     );
     if (trackOpen) {
       unawaited(
@@ -281,7 +300,13 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       });
       return;
     }
-    unawaited(_loadNext(genId, titleHint: _topicTitle));
+    // After generate, continue from the focus tile (not the wandered seed).
+    unawaited(
+      _loadNext(
+        titleHint: _topicTitle,
+        opening: _cardEpoch == 0,
+      ),
+    );
   }
 
   void _dismiss() {
@@ -338,8 +363,9 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
 
   Future<void> _onNext() async {
     if (_advancing || !_quizDone) return;
-    final seed = _nodeId;
-    if (seed == null) return;
+    final shownNodeId = _nodeId;
+    final shownPackIndex = _entry?.packIndex;
+    if (shownNodeId == null) return;
     final graph = context.read<GraphController>();
     final support = _supportFor(graph);
     setState(() {
@@ -350,13 +376,13 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _cardImageUrl = null;
     });
 
-    // If prefetch already kicked off generation, show that while we wait.
+    // If prefetch already kicked off generation, show that tile while we wait.
     final peek = support.prefetched;
     if (peek != null && peek.needsGenerate) {
       setState(() {
-        _generateNodeId = widget.seedNodeId;
-        _nodeId = widget.seedNodeId;
-        _topicTitle = widget.seedTitle.isEmpty ? peek.title : widget.seedTitle;
+        _generateNodeId = peek.nodeId;
+        _nodeId = peek.nodeId;
+        _topicTitle = peek.title.trim().isNotEmpty ? peek.title : widget.seedTitle;
       });
     }
 
@@ -370,8 +396,10 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       if (prefetched.needsGenerate) {
         await _startGenerate(
           graph,
-          widget.seedNodeId,
-          widget.seedTitle.isEmpty ? (_topicTitle ?? '') : widget.seedTitle,
+          prefetched.nodeId,
+          prefetched.title.trim().isNotEmpty
+              ? prefetched.title
+              : (_topicTitle ?? widget.seedTitle),
         );
         if (mounted) setState(() => _advancing = false);
         return;
@@ -380,7 +408,11 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       return;
     }
 
-    await _loadNext(seed, titleHint: _topicTitle);
+    await _loadNext(
+      titleHint: _topicTitle,
+      excludeNodeId: shownNodeId,
+      excludePackIndex: shownPackIndex,
+    );
     if (mounted) setState(() => _advancing = false);
   }
 

@@ -21,36 +21,37 @@ class LearningTrackSupport {
     prefetchInFlight = null;
   }
 
+  /// Prefetch the following card from the track's opening focus perspective.
   void schedulePrefetch(
     LearningNext current, {
-    required String originNodeId,
-    String? originTitle,
+    required String focusNodeId,
+    String? focusTitle,
   }) {
-    final seedId = current.nodeId;
+    final currentId = current.nodeId;
     final packIndex = current.packIndex ?? current.pack?.packIndex;
-    if (seedId.isEmpty || packIndex == null || packIndex < 1) return;
-    if (originNodeId.isEmpty) return;
+    if (currentId.isEmpty || packIndex == null || packIndex < 1) return;
+    if (focusNodeId.isEmpty) return;
     final gen = ++_prefetchGen;
     prefetched = null;
     prefetchInFlight = _prefetchBody(
       gen: gen,
-      seedId: seedId,
+      focusNodeId: focusNodeId,
+      excludeNodeId: currentId,
       excludePackIndex: packIndex,
-      originNodeId: originNodeId,
-      originTitle: originTitle,
+      focusTitle: focusTitle,
     );
   }
 
   Future<void> _prefetchBody({
     required int gen,
-    required String seedId,
+    required String focusNodeId,
+    required String excludeNodeId,
     required int excludePackIndex,
-    required String originNodeId,
-    String? originTitle,
+    String? focusTitle,
   }) async {
     final next = await _graph.fetchLearningNext(
-      seedId,
-      excludeNodeId: seedId,
+      focusNodeId,
+      excludeNodeId: excludeNodeId,
       excludePackIndex: excludePackIndex,
     );
     if (gen != _prefetchGen) return;
@@ -58,21 +59,19 @@ class LearningTrackSupport {
     _warmImage(next);
     if (next == null || !next.needsGenerate) return;
 
-    // Always generate for the topic where the track started, not a wandered neighbor.
-    final title = (originTitle ?? '').trim().isNotEmpty
-        ? originTitle!.trim()
-        : (next.title.isEmpty ? 'Topic' : next.title);
-    await _graph.enqueueContentForTrack(originNodeId, title: title);
+    // Generate for the dice-picked tile (may be focus, child, or other neighbor).
+    final title = next.title.trim().isNotEmpty
+        ? next.title.trim()
+        : ((focusTitle ?? '').trim().isNotEmpty ? focusTitle!.trim() : 'Topic');
+    await _graph.enqueueContentForTrack(next.nodeId, title: title);
     if (gen != _prefetchGen) return;
 
-    // After generate, pick from the origin (exclude the on-screen pack if it is on origin).
-    final excludeOriginPack = seedId == originNodeId ? excludePackIndex : null;
     final ready = await _awaitGeneratedPack(
       gen: gen,
-      nodeId: originNodeId,
-      seedId: originNodeId,
-      excludeNodeId: excludeOriginPack == null ? null : originNodeId,
-      excludePackIndex: excludeOriginPack,
+      jobNodeId: next.nodeId,
+      focusNodeId: focusNodeId,
+      excludeNodeId: excludeNodeId,
+      excludePackIndex: excludePackIndex,
     );
     if (gen != _prefetchGen || ready == null) return;
     prefetched = ready;
@@ -86,23 +85,23 @@ class LearningTrackSupport {
     }
   }
 
-  /// Wait for the content job, then re-fetch the next pack from [seedId].
+  /// Wait for the content job, then re-dice from the focus tile.
   Future<LearningNext?> _awaitGeneratedPack({
     required int gen,
-    required String nodeId,
-    required String seedId,
+    required String jobNodeId,
+    required String focusNodeId,
     String? excludeNodeId,
     int? excludePackIndex,
   }) async {
-    var sawJob = _graph.isJobTypeActive(nodeId, 'expand_content');
+    var sawJob = _graph.isJobTypeActive(jobNodeId, 'expand_content');
     for (var i = 0; i < 180; i++) {
       if (gen != _prefetchGen) return null;
-      final active = _graph.isJobTypeActive(nodeId, 'expand_content');
+      final active = _graph.isJobTypeActive(jobNodeId, 'expand_content');
       if (active) {
         sawJob = true;
       } else {
         final again = await _graph.fetchLearningNext(
-          seedId,
+          focusNodeId,
           excludeNodeId: excludeNodeId,
           excludePackIndex: excludePackIndex,
         );

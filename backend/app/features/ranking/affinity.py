@@ -75,7 +75,9 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "cron_neighbor_budget_total": s.cron_neighbor_budget_total,
         "cron_learn_w_fill": s.cron_learn_w_fill,
         "cron_learn_desired_packs": s.cron_learn_desired_packs,
-        "learn_track_exploit_p": s.learn_track_exploit_p,
+        "learn_track_p_focus": s.learn_track_p_focus,
+        "learn_track_p_child": s.learn_track_p_child,
+        "learn_track_p_other": s.learn_track_p_other,
         "cron_neighbor_jobs_per_day": s.cron_neighbor_jobs_per_day,
         "cron_learn_jobs_per_day": s.cron_learn_jobs_per_day,
     }

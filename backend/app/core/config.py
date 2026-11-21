@@ -127,9 +127,20 @@ class Settings(BaseSettings):
     )
     cron_learn_jobs_per_day: int = 10
 
-    # --- Learning track (in-app next-card picker) ---
-    # P(stay on seed topic when it still has unlearned packs).
-    learn_track_exploit_p: float = 0.7
+    # --- Learning track (in-app next-card dice from focus) ---
+    # Weights renormalize over non-empty buckets (focus / children / other neighbors).
+    learn_track_p_focus: float = Field(
+        default=0.4,
+        validation_alias=_env("learn_track_p_focus", "LEARN_TRACK_P_FOCUS"),
+    )
+    learn_track_p_child: float = Field(
+        default=0.3,
+        validation_alias=_env("learn_track_p_child", "LEARN_TRACK_P_CHILD"),
+    )
+    learn_track_p_other: float = Field(
+        default=0.3,
+        validation_alias=_env("learn_track_p_other", "LEARN_TRACK_P_OTHER"),
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
