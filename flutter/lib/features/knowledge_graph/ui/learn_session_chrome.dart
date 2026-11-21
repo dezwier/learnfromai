@@ -3,15 +3,20 @@ import 'package:flutter/material.dart';
 import '../../profile/overlay_panel_chrome.dart';
 
 /// Floating bottom CTA with no fade bar — card shows behind it.
+///
+/// Must be a direct [Stack] child ([Positioned] root).
 class LearnSessionFloatingCta extends StatelessWidget {
   const LearnSessionFloatingCta({
     super.key,
     required this.label,
     required this.onPressed,
+    this.visible = true,
   });
 
   final String label;
   final VoidCallback? onPressed;
+  /// When false, keeps layout space but fades out and ignores taps.
+  final bool visible;
 
   static double clearance(BuildContext context, {required bool visible}) {
     if (!visible) {
@@ -29,18 +34,26 @@ class LearnSessionFloatingCta extends StatelessWidget {
       left: 20,
       right: 20,
       bottom: media.padding.bottom + media.viewInsets.bottom + 16,
-      child: FilledButton(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(52),
-          elevation: 4,
-          shadowColor: Colors.black.withValues(alpha: 0.28),
-          textStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
+      child: IgnorePointer(
+        ignoring: !visible || onPressed == null,
+        child: AnimatedOpacity(
+          opacity: visible && onPressed != null ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: FilledButton(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              elevation: 4,
+              shadowColor: Colors.black.withValues(alpha: 0.28),
+              textStyle: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            child: Text(label),
           ),
         ),
-        child: Text(label),
       ),
     );
   }

@@ -197,21 +197,25 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _answered = true;
       _continueArmed = false;
     });
-    await graph.submitReview(
-      nodeId: card.item.nodeId,
-      packIndex: card.item.packIndex,
-      correct: correct,
-      checkKind: card.checkKind,
-      choiceIndex: choiceIndex,
-      answerBool: answerBool,
-      answerText: answerText,
-    );
-    if (!mounted || sessionGen != _reviewSessionGen) return;
-    setState(() => _submitting = false);
-    // Arm Next/Done after the submitting tap/keyboard Done has fully settled.
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // Submit and gesture/keyboard settle in parallel — CTA fades in once ready
+    // (avoids a disabled Next that later "flickers" on).
+    await Future.wait<void>([
+      graph.submitReview(
+        nodeId: card.item.nodeId,
+        packIndex: card.item.packIndex,
+        correct: correct,
+        checkKind: card.checkKind,
+        choiceIndex: choiceIndex,
+        answerBool: answerBool,
+        answerText: answerText,
+      ).then((_) {}),
+      Future<void>.delayed(const Duration(milliseconds: 220)),
+    ]);
     if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
-    setState(() => _continueArmed = true);
+    setState(() {
+      _submitting = false;
+      _continueArmed = true;
+    });
   }
 
   Future<void> _onNextCard() async {
@@ -262,13 +266,16 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dist = _distribution;
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
-    final showNext = _reviewing && _answered;
+    // Reserve CTA space as soon as answered so the card doesn't jump when
+    // Next fades in; keep the button non-interactive until armed.
+    final reserveNext = _reviewing && _answered;
+    final nextReady = reserveNext && _continueArmed && !_submitting;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final bottomClearance = LearnSessionFloatingCta.clearance(
           context,
-          visible: showNext,
+          visible: reserveNext,
         ) +
-        (showNext ? 0 : keyboardInset);
+        (reserveNext ? 0 : keyboardInset);
 
     return OverlayPanel(
       onDismiss: widget.onClose,
@@ -313,12 +320,11 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
-          if (showNext)
+          if (reserveNext)
             LearnSessionFloatingCta(
               label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-              onPressed: (!_submitting && _continueArmed)
-                  ? () => unawaited(_onNextCard())
-                  : null,
+              visible: nextReady,
+              onPressed: () => unawaited(_onNextCard()),
             ),
         ],
       ),
