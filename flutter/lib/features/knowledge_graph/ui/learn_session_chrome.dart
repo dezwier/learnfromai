@@ -22,12 +22,16 @@ class LearnSessionFloatingCta extends StatelessWidget {
   ///
   /// Pass [reserveCta]: true whenever a Next/Done slot should stay reserved
   /// (even before the button is visible) so the card never jumps.
+  /// Matches [TurnableYAxisCard] corner radius.
+  static const double radius = 16;
+
   static double clearance(BuildContext context, {bool reserveCta = true}) {
     final media = MediaQuery.of(context);
     if (!reserveCta) {
       return media.padding.bottom + 24;
     }
-    return media.padding.bottom + media.viewInsets.bottom + 72;
+    // Button (52) + bottom inset (16) + gap above button (20).
+    return media.padding.bottom + media.viewInsets.bottom + 88;
   }
 
   @override
@@ -51,6 +55,9 @@ class LearnSessionFloatingCta extends StatelessWidget {
               minimumSize: const Size.fromHeight(52),
               elevation: 4,
               shadowColor: Colors.black.withValues(alpha: 0.28),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(radius),
+              ),
               textStyle: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
