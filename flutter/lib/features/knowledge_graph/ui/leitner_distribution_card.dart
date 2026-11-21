@@ -41,7 +41,7 @@ class LeitnerDistributionCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
       child: SizedBox(
-        height: 300,
+        height: 400,
         child: LayoutBuilder(
           builder: (context, constraints) {
             const bottomTitlesReservedHeight = 44.0;
@@ -130,7 +130,7 @@ class LeitnerDistributionCard extends StatelessWidget {
                                                 binData.count >
                                                         LeitnerBinChrome
                                                             .maxVisualCardsPerBin
-                                                    ? '100+'
+                                                    ? '${LeitnerBinChrome.maxVisualCardsPerBin}+'
                                                     : '${binData.count}',
                                                 style: Theme.of(context)
                                                     .textTheme
@@ -277,8 +277,9 @@ class LeitnerDistributionCard extends StatelessWidget {
                                 child: Text(
                                   LeitnerBinChrome.groupLabel(span.group),
                                   textAlign: TextAlign.center,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.visible,
                                   style: Theme.of(context)
                                       .textTheme
                                       .labelSmall

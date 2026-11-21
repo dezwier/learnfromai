@@ -9,7 +9,7 @@ class LeitnerBinChrome {
   static const strongBlue = Color(0xFF3A7A9C);
   static const masteredGold = Color.fromARGB(255, 223, 175, 17);
   static const dueOrange = Color.fromARGB(255, 255, 199, 94);
-  static const maxVisualCardsPerBin = 100;
+  static const maxVisualCardsPerBin = 150;
   static const minVisualScaleCards = 50;
   static const tuckStripes = 2;
   static const onFill = Colors.white;

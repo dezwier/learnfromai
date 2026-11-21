@@ -216,8 +216,12 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
 
         // Offstage measures body heights without painting (OverflowBox was
         // painting a second quiz/explanation over the visible card).
+        // With the keyboard open, pin the card to the bottom of the slot so the
+        // cloze field rides just above it instead of hanging mid-screen.
+        final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0.5;
         return Align(
-          alignment: Alignment.topCenter,
+          alignment:
+              keyboardOpen ? Alignment.bottomCenter : Alignment.topCenter,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

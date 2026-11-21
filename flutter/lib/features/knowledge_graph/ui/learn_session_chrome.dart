@@ -27,11 +27,17 @@ class LearnSessionFloatingCta extends StatelessWidget {
 
   static double clearance(BuildContext context, {bool reserveCta = true}) {
     final media = MediaQuery.of(context);
+    final keyboard = media.viewInsets.bottom;
+    // While typing (cloze), lift only just above the keyboard — don't also
+    // reserve the Next/Done slot or the field jumps too high.
+    if (keyboard > 0.5) {
+      return keyboard + 12;
+    }
     if (!reserveCta) {
       return media.padding.bottom + 24;
     }
     // Button (52) + bottom inset (16) + gap above button (20).
-    return media.padding.bottom + media.viewInsets.bottom + 88;
+    return media.padding.bottom + 88;
   }
 
   @override

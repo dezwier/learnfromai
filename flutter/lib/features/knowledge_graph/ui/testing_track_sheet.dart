@@ -449,6 +449,10 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
           onPressed: canReview ? () => unawaited(_startReview()) : null,
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(56),
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(LearnSessionFloatingCta.radius),
+            ),
             textStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),

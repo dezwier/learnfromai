@@ -218,6 +218,8 @@ class _ClozeCheck extends StatelessWidget {
           controller: controller,
           enabled: !revealed,
           textInputAction: TextInputAction.done,
+          // Keep ensureVisible tight — default padding lifts the field too high.
+          scrollPadding: const EdgeInsets.only(bottom: 12, top: 8),
           onSubmitted: (_) {
             if (!revealed) onSubmit();
           },
