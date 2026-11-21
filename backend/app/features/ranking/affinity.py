@@ -1,18 +1,20 @@
 """Weighted user–tile affinity (single measure for HUD + cron).
 
-Three factors (each with a weight, defaults 1):
-  interest          = focus_count + open_count (equal)
-  neighbor_interest = sum of interest over direct graph neighbors
-  recency           = soft half-life of last focus/open
+Per-user normalized factors (each in a bounded range), then weighted sum:
 
-affinity = w_interest * interest
-         + w_neighbor * neighbor_interest
-         + w_recency  * recency(last_focus_or_open)
+  interest_norm[t]  = interest[t] / Σ_tiles interest
+                      where interest = focus + open (equal)
+  neighbor_norm[t]  = Σ_direct_neighbors interest / Σ_tiles interest
+  recency[t]        = linear map of days since last focus/open
+                      today → 1.0, ≥ span (default 90d) → 0.5
+
+affinity = w_interest * interest_norm
+         + w_neighbor * neighbor_norm
+         + w_recency  * recency
 """
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from datetime import datetime
 from uuid import UUID
@@ -28,13 +30,26 @@ from app.features.user_events.models import UserTopicEvent
 # Still reported on the profile map for UI; not used in the affinity score.
 LEARNED_KINDS = frozenset({"learn", "example", "check1", "check2", "check3"})
 
+# Recency floor / ceiling for the linear span.
+_RECENCY_FLOOR = 0.5
+_RECENCY_CEILING = 1.0
 
-def recency(age_days: float, *, half_life_days: float) -> float:
-    """Soft half-life decay; never hard-cuts to zero."""
-    if half_life_days <= 0:
-        return 1.0
+
+def recency(
+    age_days: float,
+    *,
+    span_days: float,
+    floor: float = _RECENCY_FLOOR,
+    ceiling: float = _RECENCY_CEILING,
+) -> float:
+    """Linear recency: today → ceiling, age ≥ span → floor."""
+    if span_days <= 0:
+        return ceiling
     age = max(0.0, float(age_days))
-    return math.exp(-math.log(2.0) * age / half_life_days)
+    if age >= span_days:
+        return floor
+    t = age / span_days
+    return ceiling + (floor - ceiling) * t
 
 
 def age_days(when: datetime | None, *, now: datetime | None = None) -> float:
@@ -51,7 +66,7 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
         "affinity_w_interest": s.affinity_w_interest,
         "affinity_w_neighbor": s.affinity_w_neighbor,
         "affinity_w_recency": s.affinity_w_recency,
-        "affinity_half_life_days": s.affinity_half_life_days,
+        "affinity_recency_span_days": s.affinity_recency_span_days,
         "cron_neighbor_w_count_penalty": s.cron_neighbor_w_count_penalty,
         "cron_learn_w_pack_penalty": s.cron_learn_w_pack_penalty,
         "cron_learn_w_neighbor_boost": s.cron_learn_w_neighbor_boost,
@@ -134,6 +149,10 @@ def score_user_tiles(
             focus_counts.get(nid, 0), open_counts.get(nid, 0)
         )
 
+    total_interest = sum(interest_by_id.values())
+    if total_interest <= 0:
+        return {}
+
     nodes = session.exec(
         select(KnowledgeNode).where(col(KnowledgeNode.id).in_(list(engaged_ids)))
     ).all()
@@ -151,13 +170,15 @@ def score_user_tiles(
         neighbor_raw = 0.0
         for nb in neighbor_map.get(nid, ()):
             neighbor_raw += interest_by_id.get(nb, 0.0)
+        interest_norm = interest_raw / total_interest
+        neighbor_norm = neighbor_raw / total_interest
         event_age = age_days(last_engage_at.get(nid), now=current)
-        recency_raw = float(
-            recency(event_age, half_life_days=s.affinity_half_life_days)
+        recency_norm = float(
+            recency(event_age, span_days=s.affinity_recency_span_days)
         )
-        interest_term = float(s.affinity_w_interest * interest_raw)
-        neighbor_term = float(s.affinity_w_neighbor * neighbor_raw)
-        recency_term = float(s.affinity_w_recency * recency_raw)
+        interest_term = float(s.affinity_w_interest * interest_norm)
+        neighbor_term = float(s.affinity_w_neighbor * neighbor_norm)
+        recency_term = float(s.affinity_w_recency * recency_norm)
         affinity = interest_term + neighbor_term + recency_term
         if affinity <= 0:
             continue

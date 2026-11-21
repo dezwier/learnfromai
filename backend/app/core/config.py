@@ -69,11 +69,11 @@ class Settings(BaseSettings):
     wikidata_max_items_per_request: int = 200
 
     # --- Affinity (profile map + base tile score for cron) ---
-    # Only focus + open (not learn/check/packs). Three weighted factors (defaults 1):
-    #   interest          = focus + open (equal)
-    #   neighbor_interest = Σ_direct_neighbors interest
-    #   recency           = soft half-life of last focus/open
-    # affinity = w_interest*interest + w_neighbor*neighbor_interest + w_recency*recency
+    # Per-user normalized factors, then weighted sum (weights default 1):
+    #   interest_norm  = (focus+open) / Σ_tiles (focus+open)          ∈ [0,1]
+    #   neighbor_norm  = Σ_neighbors (focus+open) / Σ_tiles (…)       ∈ [0,1]
+    #   recency        = linear last focus/open: today→1, ≥span→0.5
+    # affinity = w_interest*interest_norm + w_neighbor*neighbor_norm + w_recency*recency
     affinity_w_interest: float = Field(
         default=1.0,
         validation_alias=_env("affinity_w_interest", "AFFINITY_W_INTEREST"),
@@ -86,10 +86,14 @@ class Settings(BaseSettings):
         default=1.0,
         validation_alias=_env("affinity_w_recency", "AFFINITY_W_RECENCY"),
     )
-    affinity_half_life_days: float = Field(
-        default=14.0,
+    # Days over which recency falls linearly from 1.0 to 0.5 (≈3 months).
+    affinity_recency_span_days: float = Field(
+        default=90.0,
         validation_alias=_env(
-            "affinity_half_life_days", "AFFINITY_HALF_LIFE_DAYS", "RANK_HALF_LIFE_DAYS"
+            "affinity_recency_span_days",
+            "AFFINITY_RECENCY_SPAN_DAYS",
+            "AFFINITY_HALF_LIFE_DAYS",
+            "RANK_HALF_LIFE_DAYS",
         ),
     )
 

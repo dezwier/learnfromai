@@ -16,11 +16,11 @@ from app.features.ranking.models import CronRun
 from app.features.user_events.service import record_events, record_focus
 
 
-def test_recency_soft_decay():
-    assert recency(0, half_life_days=14) == pytest.approx(1.0)
-    assert recency(14, half_life_days=14) == pytest.approx(0.5, abs=1e-6)
-    assert recency(28, half_life_days=14) == pytest.approx(0.25, abs=1e-6)
-    assert recency(1000, half_life_days=14) > 0
+def test_recency_linear_span():
+    assert recency(0, span_days=90) == pytest.approx(1.0)
+    assert recency(45, span_days=90) == pytest.approx(0.75, abs=1e-6)
+    assert recency(90, span_days=90) == pytest.approx(0.5, abs=1e-6)
+    assert recency(180, span_days=90) == pytest.approx(0.5, abs=1e-6)
 
 
 def test_neighbor_and_learn_scores_penalize(session, user):
@@ -255,7 +255,7 @@ def test_score_user_tiles_ignores_learn_events(session, user):
     session.commit()
     scored = score_user_tiles(session, user_id=user.id)
     assert scored[node.id]["learned"] is True
-    # interest(1) + recency(1) ≈ 2 — learn/check do not add to affinity
+    # interest_norm=1 + recency=1 ≈ 2 — learn/check do not add to affinity
     assert scored[node.id]["affinity"] == pytest.approx(2.0, abs=0.1)
 
 
@@ -277,7 +277,7 @@ def test_score_user_tiles_neighbor_spill(session, user):
     session.commit()
 
     scored = score_user_tiles(session, user_id=user.id)
-    # A interest=2, B neighbor=1, recency=1 → 4; B interest=1, A neighbor=2, recency=1 → 4
-    assert scored[a.id]["affinity"] == pytest.approx(4.0, abs=0.05)
-    assert scored[b.id]["affinity"] == pytest.approx(4.0, abs=0.05)
-    assert scored[a.id]["breakdown"]["neighbor"] == pytest.approx(1.0)
+    # total=3: A 2/3+1/3+1=2; B 1/3+2/3+1=2
+    assert scored[a.id]["affinity"] == pytest.approx(2.0, abs=0.05)
+    assert scored[b.id]["affinity"] == pytest.approx(2.0, abs=0.05)
+    assert scored[a.id]["breakdown"]["neighbor"] == pytest.approx(1.0 / 3.0, abs=1e-4)
