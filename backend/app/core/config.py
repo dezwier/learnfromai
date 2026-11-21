@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 600
     job_max_attempts: int = 3
     job_idle_seconds: float = 1.0
-    # Server default when the user has no llm_provider preference: gemini | openai | fake.
-    llm_provider: str = "gemini"
+    # Server default when the user has no llm_provider preference: openai | gemini | fake.
+    llm_provider: str = "openai"
     access_token_expire_minutes: int = 60 * 24 * 7
     api_v1_prefix: str = "/api/v1"
     wikipedia_api_url: str = "https://en.wikipedia.org/w/api.php"

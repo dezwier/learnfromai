@@ -22,8 +22,8 @@ class LlmProviderPref {
 
   static String normalize(Object? raw) {
     final value = (raw?.toString() ?? '').trim().toLowerCase();
-    if (value == openai || value == 'gpt' || value == 'chatgpt') return openai;
-    return gemini;
+    if (value == gemini || value == 'google') return gemini;
+    return openai;
   }
 
   static String label(String provider) =>

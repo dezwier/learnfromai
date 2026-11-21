@@ -73,12 +73,12 @@ class SettingsAppTab extends StatelessWidget {
             ),
             entries: [
               DensePopupEntry(
-                value: LlmProviderPref.gemini,
-                child: Text('Gemini', style: theme.textTheme.bodyMedium),
-              ),
-              DensePopupEntry(
                 value: LlmProviderPref.openai,
                 child: Text('ChatGPT', style: theme.textTheme.bodyMedium),
+              ),
+              DensePopupEntry(
+                value: LlmProviderPref.gemini,
+                child: Text('Gemini', style: theme.textTheme.bodyMedium),
               ),
             ],
             onSelected: (value) {

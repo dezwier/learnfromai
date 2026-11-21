@@ -12,7 +12,7 @@ DEFAULTS = {
     "extended": 12,
 }
 
-DEFAULT_LLM_PROVIDER = "gemini"
+DEFAULT_LLM_PROVIDER = "openai"
 ALLOWED_LLM_PROVIDERS = frozenset({"gemini", "openai"})
 
 CLAMPS = {
@@ -71,7 +71,7 @@ def preferred_llm_provider(user: User | None = None, raw: dict | None = None) ->
 
 
 def llm_provider_for(user: User | None = None, raw: dict | None = None) -> str:
-    """Preference for API/UI (defaults to gemini when unset)."""
+    """Preference for API/UI (defaults to openai when unset)."""
     return preferred_llm_provider(user, raw) or DEFAULT_LLM_PROVIDER
 
 

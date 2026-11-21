@@ -287,15 +287,15 @@ def normalize_llm_provider(value: object | None) -> str | None:
 
 
 def resolve_llm_provider(preferred: object | None = None) -> str:
-    """Resolve provider: explicit preference → env default → gemini."""
+    """Resolve provider: explicit preference → env default → openai."""
     settings = get_settings()
     if settings.environment == "test":
         return "fake"
-    for candidate in (preferred, settings.llm_provider, "gemini"):
+    for candidate in (preferred, settings.llm_provider, "openai"):
         normalized = normalize_llm_provider(candidate)
         if normalized:
             return normalized
-    return "gemini"
+    return "openai"
 
 
 

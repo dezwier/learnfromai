@@ -61,7 +61,7 @@ class GraphController extends ChangeNotifier {
   final Map<String, String> _focusTitles = {};
   static const int maxFocusTrail = 10;
   NeighborhoodPrefs prefs = const NeighborhoodPrefs();
-  String llmProvider = LlmProviderPref.gemini;
+  String llmProvider = LlmProviderPref.openai;
   final List<TrackedJob> trackedJobs = [];
   /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
   String? lastCompletedNodeId;

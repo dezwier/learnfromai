@@ -52,7 +52,7 @@ A real worker calls Gemini and/or OpenAI depending on each user's **Settings →
 
 - `GOOGLE_GEMINI_API_KEY` (+ optional `GEMINI_MODEL`, `GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image`)
 - `OPENAI_API_KEY` (+ optional `OPENAI_MODEL=gpt-5-mini`, `OPENAI_IMAGE_MODEL=gpt-image-2.5-flare`, `OPENAI_IMAGE_QUALITY=low`)
-- `LLM_PROVIDER=gemini` as the server default when a user has not chosen
+- `LLM_PROVIDER=openai` as the server default when a user has not chosen
 
 See [LLM provider setup](#llm-provider-setup) below.
 
@@ -107,7 +107,7 @@ What you need to do:
    - `OPENAI_API_KEY=sk-...`
    - `OPENAI_MODEL=gpt-5-mini` (optional; this is the default)
    - Keep `GOOGLE_GEMINI_API_KEY` so Gemini still works
-   - Optional: `LLM_PROVIDER=gemini` as the default for users who never flipped the switch
+   - Optional: `LLM_PROVIDER=openai` as the default for users who never flipped the switch
 3. Redeploy the worker after env vars change (`make deploy-worker`). Redeploy API/web if this branch is not live yet.
 4. In the app: **Settings → App → AI provider → ChatGPT**, expand a neighborhood, then flip back to Gemini to confirm both paths.
 5. Daily spend still hits `LLM_DAILY_SPEND_EUR_LIMIT` from recorded USD for either provider.
