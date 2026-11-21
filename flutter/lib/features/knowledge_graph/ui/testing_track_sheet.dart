@@ -12,10 +12,8 @@ import '../../profile/overlay_panel_chrome.dart';
 import '../graph_controller.dart';
 import 'admin_content_delete.dart';
 import 'learn_card.dart';
-import 'learn_check_bits.dart';
 import 'learn_session_chrome.dart';
 import 'leitner_distribution_card.dart';
-import 'quiz_feedback_badge.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -42,10 +40,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   var _answered = false;
   /// Prevents the cloze Check / keyboard Done tap from also hitting Next/Done.
   var _continueArmed = false;
-  bool? _feedbackCorrect;
-  String? _feedbackExplanation;
-  String? _feedbackDetail;
-  var _feedbackDismissed = false;
   int _hubLoadGen = 0;
   int _reviewSessionGen = 0;
 
@@ -122,7 +116,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queueIndex = 0;
       _answered = false;
       _continueArmed = false;
-      _clearFeedback();
     });
     final dist = await graph.fetchReviewDistribution();
     if (!mounted || gen != _hubLoadGen) return;
@@ -177,30 +170,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _continueArmed = false;
       _reviewing = true;
       _loading = false;
-      _clearFeedback();
     });
-  }
-
-  void _clearFeedback() {
-    _feedbackCorrect = null;
-    _feedbackExplanation = null;
-    _feedbackDetail = null;
-    _feedbackDismissed = false;
-  }
-
-  void _showFeedback({required bool correct, required TopicPack pack, required String checkKind}) {
-    final bit = pack.bit(checkKind);
-    final body = bit?.body;
-    final type = checkTypeOf(bit);
-    String? detail;
-    if (!correct && type == 'cloze') {
-      final expected = quizExpectedAnswerOf(body);
-      if (expected != null) detail = 'Answer: $expected';
-    }
-    _feedbackCorrect = correct;
-    _feedbackExplanation = quizExplanationOf(body);
-    _feedbackDetail = detail;
-    _feedbackDismissed = false;
   }
 
   String? _pickCheck(TopicPack pack) {
@@ -226,11 +196,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _submitting = true;
       _answered = true;
       _continueArmed = false;
-      _showFeedback(
-        correct: correct,
-        pack: card.item.pack,
-        checkKind: card.checkKind,
-      );
     });
     // Submit and gesture/keyboard settle in parallel — CTA fades in once ready
     // (avoids a disabled Next that later "flickers" on).
@@ -263,7 +228,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queueIndex += 1;
       _answered = false;
       _continueArmed = false;
-      _clearFeedback();
     });
   }
 
@@ -282,7 +246,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       if (_queueIndex >= next.length) _queueIndex = next.length - 1;
       _answered = false;
       _continueArmed = false;
-      _clearFeedback();
     });
   }
 
@@ -357,16 +320,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
-          if (_reviewing &&
-              _answered &&
-              !_feedbackDismissed &&
-              _feedbackCorrect != null)
-            QuizFeedbackBadge(
-              correct: _feedbackCorrect!,
-              explanation: _feedbackExplanation,
-              detail: _feedbackDetail,
-              onDismiss: () => setState(() => _feedbackDismissed = true),
-            ),
           if (reserveNext)
             LearnSessionFloatingCta(
               label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',

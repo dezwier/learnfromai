@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../models.dart';
+import 'learn_check_bits.dart';
 import 'learn_pack_chrome.dart';
-import 'learn_session_chrome.dart';
 
-/// Correct/incorrect + explanation, shown below the session title row.
-///
-/// Dismissible; sits above the card so the quiz face height stays stable.
+/// Correct/incorrect + explanation, pinned to the bottom of the quiz image.
 class QuizFeedbackBadge extends StatelessWidget {
   const QuizFeedbackBadge({
     super.key,
     required this.correct,
-    required this.onDismiss,
     this.explanation,
     this.detail,
   });
@@ -18,14 +16,26 @@ class QuizFeedbackBadge extends StatelessWidget {
   final bool correct;
   final String? explanation;
   final String? detail;
-  final VoidCallback onDismiss;
 
-  /// Top inset matching [LearnSessionCardStage] header bottom.
-  static double topInset(BuildContext context) =>
-      MediaQuery.paddingOf(context).top +
-      LearnSessionCardStage.headerTop +
-      LearnSessionCardStage.headerHeight +
-      6;
+  factory QuizFeedbackBadge.fromBit({
+    Key? key,
+    required TopicBit? bit,
+    required bool correct,
+  }) {
+    final body = bit?.body;
+    final type = checkTypeOf(bit);
+    String? detail;
+    if (!correct && type == 'cloze') {
+      final expected = quizExpectedAnswerOf(body);
+      if (expected != null) detail = 'Answer: $expected';
+    }
+    return QuizFeedbackBadge(
+      key: key,
+      correct: correct,
+      explanation: quizExplanationOf(body),
+      detail: detail,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,60 +50,40 @@ class QuizFeedbackBadge extends StatelessWidget {
         explanation!.trim(),
     ].join('\n');
 
-    return Positioned(
-      top: topInset(context),
-      left: 20,
-      right: 20,
-      child: Material(
-        color: Color.alphaBlend(
-          accent.withValues(alpha: dark ? 0.28 : 0.16),
-          scheme.surface,
-        ),
-        elevation: 3,
-        shadowColor: Colors.black.withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: accent,
-                          ),
+    return Material(
+      color: Color.alphaBlend(
+        accent.withValues(alpha: dark ? 0.42 : 0.92),
+        scheme.surface.withValues(alpha: dark ? 0.92 : 0.96),
+      ),
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.28),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: accent,
+                  ),
+            ),
+            if (body.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(
+                body,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      height: 1.3,
+                      color: scheme.onSurface.withValues(alpha: 0.88),
                     ),
-                    if (body.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        body,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              height: 1.35,
-                              color: scheme.onSurface.withValues(alpha: 0.82),
-                            ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: 'Dismiss',
-                onPressed: onDismiss,
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  Icons.close_rounded,
-                  size: 20,
-                  color: scheme.onSurface.withValues(alpha: 0.55),
-                ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );

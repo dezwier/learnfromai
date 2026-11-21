@@ -8,6 +8,7 @@ import '../../../core/widgets/pulse_placeholder.dart';
 import '../models.dart';
 import 'learn_check_bits.dart';
 import 'learn_pack_chrome.dart';
+import 'quiz_feedback_badge.dart';
 import 'turnable_y_axis_card.dart';
 
 class LearnDeckEntry {
@@ -19,7 +20,7 @@ class LearnDeckEntry {
   int get packIndex => pack.packIndex;
 }
 
-/// Preferred image aspect (width / height). Shrinks toward [_minImageHeight] for tall content.
+/// Max image aspect (width / height) — never taller than square. May shrink for tall quizzes.
 const _imageAspect = 1.0;
 const _minImageHeight = 100.0;
 const _bodyPadding = EdgeInsets.fromLTRB(16, 14, 16, 16);
@@ -64,6 +65,7 @@ class LearnFlipCard extends StatefulWidget {
 class _LearnFlipCardState extends State<LearnFlipCard> {
   var _selectedChoice = -1;
   var _revealed = false;
+  bool? _answerCorrect;
   var _trackedLearn = false;
   final _clozeController = TextEditingController();
   /// Separate controller so offstage height measurement never shares a TextField.
@@ -92,28 +94,29 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     setState(() => _revealed = true);
   }
 
+  void _reveal({required bool correct}) {
+    _answerCorrect = correct;
+    _markRevealed();
+  }
+
   void _onSelectMc(int choiceIndex) {
     if (_revealed) return;
     final bit = widget.entry.pack.bit(widget.entry.checkKind);
     final answerIndex = (bit?.body['answer_index'] as num?)?.toInt() ?? 0;
+    final correct = choiceIndex == answerIndex;
     _selectedChoice = choiceIndex;
-    _markRevealed();
-    widget.onCheckAnswer(
-      correct: choiceIndex == answerIndex,
-      choiceIndex: choiceIndex,
-    );
+    _reveal(correct: correct);
+    widget.onCheckAnswer(correct: correct, choiceIndex: choiceIndex);
   }
 
   void _onSelectBool(bool value) {
     if (_revealed) return;
     final bit = widget.entry.pack.bit(widget.entry.checkKind);
     final answer = bit?.body['answer'] == true;
+    final correct = value == answer;
     _selectedChoice = value ? 1 : 0;
-    _markRevealed();
-    widget.onCheckAnswer(
-      correct: value == answer,
-      answerBool: value,
-    );
+    _reveal(correct: correct);
+    widget.onCheckAnswer(correct: correct, answerBool: value);
   }
 
   void _onSubmitCloze() {
@@ -124,7 +127,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     final correct = gradeCloze(bit, text);
     _measureClozeController.text = text;
     FocusManager.instance.primaryFocus?.unfocus();
-    _markRevealed();
+    _reveal(correct: correct);
     widget.onCheckAnswer(correct: correct, answerText: text.trim());
   }
 
@@ -167,20 +170,20 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final defaultImageH = width > 0 ? width / _imageAspect : _minImageHeight;
+        final squareImageH = width > 0 ? width / _imageAspect : _minImageHeight;
         final frontBodyH =
             _frontBodyH > 0 ? _frontBodyH : _provisionalFrontBodyH;
         final backBodyH = _backBodyH > 0 ? _backBodyH : _provisionalBackBodyH;
-        // Shared face height: prefer front natural size; grow if back needs more
-        // even after shrinking its image to the minimum.
+        // Shared face height: square image + front, or shrink image for a tall quiz.
         final cardH = [
-          defaultImageH + frontBodyH,
+          squareImageH + frontBodyH,
           _minImageHeight + backBodyH,
         ].reduce((a, b) => a > b ? a : b);
-        // Fill leftover whitespace by growing the image (back may still shrink
-        // toward [_minImageHeight] when the quiz body is tall).
-        final frontImageH = (cardH - frontBodyH).clamp(_minImageHeight, cardH);
-        final backImageH = (cardH - backBodyH).clamp(_minImageHeight, cardH);
+        // Fill leftover up to square max — never taller than wide.
+        final frontImageH =
+            (cardH - frontBodyH).clamp(_minImageHeight, squareImageH);
+        final backImageH =
+            (cardH - backBodyH).clamp(_minImageHeight, squareImageH);
 
         // Offstage measures body heights without painting (OverflowBox was
         // painting a second quiz/explanation over the visible card).
@@ -246,6 +249,12 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                   loadImageBytes: widget.loadImageBytes,
                   completed: widget.completed,
                   imageHeight: backImageH,
+                  feedback: (_revealed && _answerCorrect != null)
+                      ? QuizFeedbackBadge.fromBit(
+                          bit: pack.bit(checkKind),
+                          correct: _answerCorrect!,
+                        )
+                      : null,
                   child: _backBody(
                     clozeController: _clozeController,
                   ),
@@ -268,6 +277,7 @@ class _LearnCardFace extends StatelessWidget {
     this.cachedBytes,
     this.imageLoading = false,
     this.completed = false,
+    this.feedback,
   });
 
   final Widget child;
@@ -276,6 +286,7 @@ class _LearnCardFace extends StatelessWidget {
   final bool imageLoading;
   final bool completed;
   final double imageHeight;
+  final Widget? feedback;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
   @override
@@ -304,6 +315,13 @@ class _LearnCardFace extends StatelessWidget {
                     color: learnOkColor(scheme.brightness),
                     size: 28,
                   ),
+                ),
+              if (feedback != null)
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: feedback!,
                 ),
             ],
           ),
