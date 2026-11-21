@@ -213,6 +213,7 @@ def get_me_learning_next(
     exclude_node_id: UUID | None = None,
     exclude_pack_index: int | None = None,
     opening: bool = False,
+    picked_node_id: UUID | None = None,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -223,6 +224,7 @@ def get_me_learning_next(
         exclude_node_id=exclude_node_id,
         exclude_pack_index=exclude_pack_index,
         opening=opening,
+        picked_node_id=picked_node_id,
     )
 
 

@@ -49,6 +49,7 @@ class LearningTrackSupport {
     required int excludePackIndex,
     String? focusTitle,
   }) async {
+    // One dice roll for the following card; stick to that tile through generate.
     final next = await _graph.fetchLearningNext(
       focusNodeId,
       excludeNodeId: excludeNodeId,
@@ -59,16 +60,19 @@ class LearningTrackSupport {
     _warmImage(next);
     if (next == null || !next.needsGenerate) return;
 
-    // Generate for the dice-picked tile (may be focus, child, or other neighbor).
+    // Start generate for the dice-picked tile while the user is still on this card.
+    final pickedId = next.nodeId;
     final title = next.title.trim().isNotEmpty
         ? next.title.trim()
         : ((focusTitle ?? '').trim().isNotEmpty ? focusTitle!.trim() : 'Topic');
-    await _graph.enqueueContentForTrack(next.nodeId, title: title);
+    unawaited(_graph.enqueueContentForTrack(pickedId, title: title));
+    // Give the enqueue a moment to register the job, then poll that same tile.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     if (gen != _prefetchGen) return;
 
     final ready = await _awaitGeneratedPack(
       gen: gen,
-      jobNodeId: next.nodeId,
+      pickedNodeId: pickedId,
       focusNodeId: focusNodeId,
       excludeNodeId: excludeNodeId,
       excludePackIndex: excludePackIndex,
@@ -85,18 +89,24 @@ class LearningTrackSupport {
     }
   }
 
-  /// Wait for the content job, then re-dice from the focus tile.
+  /// Wait for content on the dice-picked tile (do not roll again).
   Future<LearningNext?> _awaitGeneratedPack({
     required int gen,
-    required String jobNodeId,
+    required String pickedNodeId,
     required String focusNodeId,
     String? excludeNodeId,
     int? excludePackIndex,
   }) async {
-    var sawJob = _graph.isJobTypeActive(jobNodeId, 'expand_content');
+    var sawJob = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
+    // Kick enqueue if the fire-and-forget call has not registered yet.
+    if (!sawJob) {
+      await _graph.enqueueContentForTrack(pickedNodeId);
+      if (gen != _prefetchGen) return null;
+      sawJob = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
+    }
     for (var i = 0; i < 180; i++) {
       if (gen != _prefetchGen) return null;
-      final active = _graph.isJobTypeActive(jobNodeId, 'expand_content');
+      final active = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
       if (active) {
         sawJob = true;
       } else {
@@ -104,6 +114,7 @@ class LearningTrackSupport {
           focusNodeId,
           excludeNodeId: excludeNodeId,
           excludePackIndex: excludePackIndex,
+          pickedNodeId: pickedNodeId,
         );
         if (gen != _prefetchGen) return null;
         if (again != null && again.isReady) return again;

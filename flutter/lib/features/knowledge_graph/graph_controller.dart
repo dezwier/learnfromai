@@ -388,10 +388,14 @@ class GraphController extends ChangeNotifier {
     String? excludeNodeId,
     int? excludePackIndex,
     bool opening = false,
+    String? pickedNodeId,
   }) async {
     try {
       final params = <String>['seed_node_id=$seedNodeId'];
       if (opening) params.add('opening=true');
+      if (pickedNodeId != null && pickedNodeId.isNotEmpty) {
+        params.add('picked_node_id=$pickedNodeId');
+      }
       if (excludeNodeId != null &&
           excludeNodeId.isNotEmpty &&
           excludePackIndex != null &&

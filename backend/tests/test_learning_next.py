@@ -184,6 +184,35 @@ def test_learning_next_dice_generate_for_picked_tile(session, user, monkeypatch)
     assert result["node_id"] == str(child.id)
 
 
+def test_learning_next_picked_node_skips_dice(session, user, monkeypatch):
+    seed = KnowledgeNode(name="Focus", name_key="focus-pick", description="x")
+    child = KnowledgeNode(name="Kid", name_key="kid-pick", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, child.id, pack_index=1)
+    session.commit()
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    # Dice would prefer focus (empty → generate) if not pinned.
+    monkeypatch.setattr(settings, "learn_track_p_focus", 1.0)
+    monkeypatch.setattr(settings, "learn_track_p_child", 0.0)
+    monkeypatch.setattr(settings, "learn_track_p_other", 0.0)
+
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=child.id,
+        rng=random.Random(9),
+    )
+    assert result["status"] == "ready"
+    assert result["node_id"] == str(child.id)
+
+
 def test_learning_next_opening_prefers_focus_pack(session, user):
     seed = KnowledgeNode(name="Focus", name_key="focus-learn", description="x")
     neighbor = KnowledgeNode(name="Side", name_key="side-learn", description="x")

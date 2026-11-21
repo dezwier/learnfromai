@@ -215,20 +215,17 @@ def _dice_tile(
     return buckets[-1][1][rng.randrange(len(buckets[-1][1]))]
 
 
-def _continue_pack(
+def _pack_for_tile(
     session: Session,
     *,
     user: User,
     focus: KnowledgeNode,
+    tile_id: UUID,
     exclude_node_id: UUID | None,
     exclude_pack_index: int | None,
     rng: random.Random,
 ) -> dict:
-    """Later cards: dice a tile, then unlearned pack or generate for that tile."""
-    children, others = _neighbor_buckets(session, focus.id)
-    tile_id = _dice_tile(
-        focus_id=focus.id, children=children, others=others, rng=rng
-    )
+    """Unlearned pack on [tile_id], or generate for that tile."""
     skip = _exclude_for(
         tile_id,
         exclude_node_id=exclude_node_id,
@@ -247,6 +244,31 @@ def _continue_pack(
     return _generate_payload(node)
 
 
+def _continue_pack(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+    rng: random.Random,
+) -> dict:
+    """Later cards: dice a tile, then unlearned pack or generate for that tile."""
+    children, others = _neighbor_buckets(session, focus.id)
+    tile_id = _dice_tile(
+        focus_id=focus.id, children=children, others=others, rng=rng
+    )
+    return _pack_for_tile(
+        session,
+        user=user,
+        focus=focus,
+        tile_id=tile_id,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+        rng=rng,
+    )
+
+
 def learning_next(
     session: Session,
     *,
@@ -255,12 +277,14 @@ def learning_next(
     exclude_node_id: UUID | None = None,
     exclude_pack_index: int | None = None,
     opening: bool = False,
+    picked_node_id: UUID | None = None,
     rng: random.Random | None = None,
 ) -> dict:
     """Return the next pack to learn, or a generate hint for a chosen tile.
 
     Always interpreted from the track's opening focus (`seed_node_id`):
     - `opening=True`: pack on the focus (prefer unlearned, else learned, else generate).
+    - `picked_node_id`: stick to that tile (after a dice roll started generate).
     - otherwise: weighted dice (focus / children / other neighbors), then an
       unlearned pack on that tile or `generate` for it.
     Optional exclude_* skips the on-screen pack when prefetching.
@@ -272,6 +296,16 @@ def learning_next(
     picker = rng if rng is not None else random.Random()
     if opening:
         return _opening_pack(session, user=user, focus=seed, rng=picker)
+    if picked_node_id is not None:
+        return _pack_for_tile(
+            session,
+            user=user,
+            focus=seed,
+            tile_id=picked_node_id,
+            exclude_node_id=exclude_node_id,
+            exclude_pack_index=exclude_pack_index,
+            rng=picker,
+        )
     return _continue_pack(
         session,
         user=user,
