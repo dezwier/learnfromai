@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../profile/overlay_panel_chrome.dart';
@@ -18,7 +20,10 @@ class LearnSessionFloatingCta extends StatelessWidget {
   /// When false, keeps layout space but fades out and ignores taps.
   final bool visible;
 
-  /// Space to keep clear above the home indicator / keyboard for the CTA.
+  /// Space to keep clear above the home indicator for the CTA.
+  ///
+  /// Keyboard lift is applied as a [Transform] in [LearnSessionCardStage]
+  /// so the card keeps a stable size while the keyboard animates.
   ///
   /// Pass [reserveCta]: true whenever a Next/Done slot should stay reserved
   /// (even before the button is visible) so the card never jumps.
@@ -27,12 +32,6 @@ class LearnSessionFloatingCta extends StatelessWidget {
 
   static double clearance(BuildContext context, {bool reserveCta = true}) {
     final media = MediaQuery.of(context);
-    final keyboard = media.viewInsets.bottom;
-    // While typing (cloze), lift only just above the keyboard — don't also
-    // reserve the Next/Done slot or the field jumps too high.
-    if (keyboard > 0.5) {
-      return keyboard + 12;
-    }
     if (!reserveCta) {
       return media.padding.bottom + 24;
     }
@@ -111,6 +110,11 @@ class LearnSessionCardStage extends StatelessWidget {
     final resolvedTitleColor = titleColor ?? scheme.onSurface;
     final resolvedMetaColor =
         metaColor ?? scheme.onSurface.withValues(alpha: 0.55);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    // Slide the laid-out card up with the keyboard — no height recalc/jitter.
+    final lift = keyboard <= 0.5
+        ? 0.0
+        : math.max(0.0, keyboard + 12 - bottomClearance);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -121,48 +125,59 @@ class LearnSessionCardStage extends StatelessWidget {
           left: 16,
           right: OverlayPanel.closeInset + 2,
           height: headerHeight,
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: resolvedTitleColor,
-                        shadows: titleShadows,
-                      ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: resolvedTitleColor,
+                          shadows: titleShadows,
+                        ),
+                  ),
                 ),
-              ),
-              if (meta != null && meta!.trim().isNotEmpty) ...[
+                if (meta != null && meta!.trim().isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    meta!,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: resolvedMetaColor,
+                          fontWeight: FontWeight.w600,
+                          shadows: titleShadows,
+                        ),
+                  ),
+                ],
                 const SizedBox(width: 10),
-                Text(
-                  meta!,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: resolvedMetaColor,
-                        fontWeight: FontWeight.w600,
-                        shadows: titleShadows,
-                      ),
-                ),
+                OverlayCloseButton(onPressed: onClose),
               ],
-              const SizedBox(width: 10),
-              OverlayCloseButton(onPressed: onClose),
-            ],
+            ),
           ),
         ),
         Positioned(
-          top: headerTop + headerHeight + 4,
+          // Slide the whole slot up with the keyboard while keeping height
+          // constant — card layout stays put, no Transform on the focused field.
+          top: headerTop + headerHeight + 4 - lift,
           left: 20,
           right: 20,
-          bottom: bottomClearance,
-          // Bounded height so the card can shrink its image to fit.
+          bottom: bottomClearance + lift,
           child: LayoutBuilder(
             builder: (context, constraints) {
               if (constraints.maxHeight <= 0) {
                 return const SizedBox.shrink();
               }
-              return card;
+              final mq = MediaQuery.of(context);
+              // Always wrap (stable tree). Stops TextField ensureVisible from
+              // fighting our lift when the keyboard is open.
+              return MediaQuery(
+                data: mq.removeViewInsets(removeBottom: true),
+                child: card,
+              );
             },
           ),
         ),

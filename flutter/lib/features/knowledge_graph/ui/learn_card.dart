@@ -134,11 +134,13 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   }
 
   void _onFrontBodySize(Size size) {
+    if (!mounted) return;
     if ((size.height - _frontBodyH).abs() < 0.5) return;
     setState(() => _frontBodyH = size.height);
   }
 
   void _onBackBodySize(Size size) {
+    if (!mounted) return;
     if ((size.height - _backBodyH).abs() < 0.5) return;
     setState(() => _backBodyH = size.height);
   }
@@ -216,12 +218,10 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
 
         // Offstage measures body heights without painting (OverflowBox was
         // painting a second quiz/explanation over the visible card).
-        // With the keyboard open, pin the card to the bottom of the slot so the
-        // cloze field rides just above it instead of hanging mid-screen.
-        final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0.5;
+        // Always pin to the slot floor so the card rides the keyboard inset
+        // continuously — flipping top↔bottom on open/close caused a jump.
         return Align(
-          alignment:
-              keyboardOpen ? Alignment.bottomCenter : Alignment.topCenter,
+          alignment: Alignment.bottomCenter,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -342,12 +342,16 @@ class _LearnCardFace extends StatelessWidget {
         children: [
           Stack(
             children: [
-              _LearnCardImage(
-                imageUrl: imageUrl,
-                cachedBytes: cachedBytes,
-                loading: imageLoading,
-                height: imageHeight,
-                loadImageBytes: loadImageBytes,
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+                child: _LearnCardImage(
+                  imageUrl: imageUrl,
+                  cachedBytes: cachedBytes,
+                  loading: imageLoading,
+                  height: imageHeight,
+                  loadImageBytes: loadImageBytes,
+                ),
               ),
               if (completed)
                 Positioned(
@@ -370,7 +374,11 @@ class _LearnCardFace extends StatelessWidget {
           ),
           if (scrollBody)
             Expanded(
-              child: SingleChildScrollView(child: body),
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: body,
+              ),
             )
           else
             // No Spacer — Column already fills the tight face height.

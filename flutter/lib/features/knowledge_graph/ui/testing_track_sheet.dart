@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
@@ -106,6 +107,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   Future<void> _loadHub({bool quiet = false}) async {
     final graph = context.read<GraphController>();
     final gen = ++_hubLoadGen;
+    // Cancel in-flight answer/keyboard waits before tearing down the card.
+    if (_reviewing) _reviewSessionGen++;
     setState(() {
       if (quiet) {
         _refreshing = true;
@@ -118,6 +121,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queueIndex = 0;
       _answered = false;
       _continueArmed = false;
+      _submitting = false;
     });
     final dist = await graph.fetchReviewDistribution();
     if (!mounted || gen != _hubLoadGen) return;
@@ -129,6 +133,25 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
         _error = graph.error ?? 'Could not load review bins';
       }
     });
+  }
+
+  /// Unfocus + hide keyboard before unmounting the cloze field / hub swap.
+  Future<void> _leaveReviewForHub({bool quiet = false}) async {
+    if (!_reviewing) {
+      await _loadHub(quiet: quiet);
+      return;
+    }
+    final sessionGen = ++_reviewSessionGen;
+    FocusManager.instance.primaryFocus?.unfocus();
+    // ignore: discarded_futures
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    for (var i = 0; i < 40; i++) {
+      if (!mounted || sessionGen != _reviewSessionGen) return;
+      if (MediaQuery.viewInsetsOf(context).bottom <= 0.5) break;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (!mounted || sessionGen != _reviewSessionGen) return;
+    await _loadHub(quiet: quiet);
   }
 
   Future<void> _startReview() async {
@@ -236,7 +259,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     if (MediaQuery.viewInsetsOf(context).bottom > 0.5) return;
     if (DateTime.now().isBefore(_nextAllowedAt)) return;
     if (_queueIndex + 1 >= _queue.length) {
-      await _loadHub();
+      await _leaveReviewForHub();
       return;
     }
     setState(() {
@@ -248,12 +271,12 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
 
   Future<void> _afterAdminDelete() async {
     if (_queue.isEmpty) {
-      await _loadHub();
+      await _leaveReviewForHub();
       return;
     }
     final next = List<_ReviewCard>.from(_queue)..removeAt(_queueIndex);
     if (next.isEmpty) {
-      await _loadHub();
+      await _leaveReviewForHub();
       return;
     }
     setState(() {
@@ -496,7 +519,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       meta: '${_queueIndex + 1} / ${_queue.length}',
       bottomClearance: bottomClearance,
       // Leave the review card, stay on the Leitner hub (bin screen).
-      onClose: () => unawaited(_loadHub()),
+      onClose: () => unawaited(_leaveReviewForHub()),
       card: Builder(
         builder: (context) {
           final flip = LearnFlipCard(
