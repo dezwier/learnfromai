@@ -282,6 +282,19 @@ def get_latest_cron_run(
     return {"run": cron_run_payload(session, run)}
 
 
+@router.get("/admin/cron-runs/preview")
+def get_cron_queue_preview(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Admin: a-priori ranked neighbor/learn queues (what Run now would enqueue)."""
+    if not user.is_admin:
+        raise forbidden()
+    from app.features.ranking.cron_run import cron_queue_preview
+
+    return cron_queue_preview(session)
+
+
 @router.post("/admin/cron-runs/run")
 def post_run_cron(
     user: User = Depends(get_current_user),
@@ -290,12 +303,15 @@ def post_run_cron(
     """Admin: enqueue the daily ranking cron immediately (same as the scheduled job)."""
     if not user.is_admin:
         raise forbidden()
-    from app.features.ranking.cron_run import cron_run_payload, run_daily_cron
+    from app.features.ranking.cron_run import cron_queue_preview, cron_run_payload, run_daily_cron
 
     try:
         run = run_daily_cron(session)
         session.commit()
-        return {"run": cron_run_payload(session, run)}
+        return {
+            "run": cron_run_payload(session, run),
+            "preview": cron_queue_preview(session),
+        }
     except Exception:
         session.commit()
         raise

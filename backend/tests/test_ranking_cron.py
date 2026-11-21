@@ -202,9 +202,11 @@ def test_admin_cron_latest(client, auth, session, user):
     assert body["neighbor_jobs"][0]["name"] == "UniqueCronTile"
 
 
-def test_admin_cron_run_now(client, auth, session, user):
-    blocked = client.post("/api/v1/admin/cron-runs/run", headers=auth)
+def test_admin_cron_preview_and_run_now(client, auth, session, user):
+    blocked = client.get("/api/v1/admin/cron-runs/preview", headers=auth)
     assert blocked.status_code == 403
+    blocked_run = client.post("/api/v1/admin/cron-runs/run", headers=auth)
+    assert blocked_run.status_code == 403
 
     user.is_admin = True
     session.add(user)
@@ -222,12 +224,27 @@ def test_admin_cron_run_now(client, auth, session, user):
     )
     session.commit()
 
+    preview = client.get("/api/v1/admin/cron-runs/preview", headers=auth)
+    assert preview.status_code == 200
+    preview_body = preview.json()
+    assert "neighbor_jobs" in preview_body
+    assert "learn_jobs" in preview_body
+    assert preview_body["limits"]["desired_neighbors"] == 16
+    assert preview_body["limits"]["desired_packs"] == 20
+    assert any(row["name"] == "CronNow" for row in preview_body["neighbor_jobs"])
+    cron_now = next(row for row in preview_body["neighbor_jobs"] if row["name"] == "CronNow")
+    assert "tile_affinity" in cron_now
+    assert "fill_term" in cron_now
+    assert "score" in cron_now
+
     response = client.post("/api/v1/admin/cron-runs/run", headers=auth)
     assert response.status_code == 200
-    body = response.json()["run"]
-    assert body["status"] == "succeeded"
-    assert isinstance(body["neighbor_jobs"], list)
-    assert isinstance(body["learn_jobs"], list)
+    body = response.json()
+    assert body["run"]["status"] == "succeeded"
+    assert isinstance(body["run"]["neighbor_jobs"], list)
+    assert isinstance(body["run"]["learn_jobs"], list)
+    assert "preview" in body
+    assert isinstance(body["preview"]["neighbor_jobs"], list)
 
 
 def test_me_includes_is_admin(client, auth, user, session):
