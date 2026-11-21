@@ -19,10 +19,9 @@ def test_topic_affinity_scores_and_clusters(client, auth, session, user):
     session.add(KnowledgeEdge(from_id=softmax.id, relation="parent", to_id=attention.id))
     session.commit()
 
+    # Cold-start style focus must not affect interest.
     record_focus(session, user=user, node_id=attention.id)
     record_focus(session, user=user, node_id=attention.id)
-    record_focus(session, user=user, node_id=softmax.id)
-    record_focus(session, user=user, node_id=embedding.id)
     record_events(
         session,
         user=user,
@@ -32,7 +31,12 @@ def test_topic_affinity_scores_and_clusters(client, auth, session, user):
             {"node_id": str(attention.id), "kind": "learn"},
             {"node_id": str(softmax.id), "kind": "open", "payload": {"source": "list"}},
             {"node_id": str(softmax.id), "kind": "example"},
-            {"node_id": str(softmax.id), "kind": "check1", "payload": {"correct": True, "choice_index": 1}},
+            {
+                "node_id": str(softmax.id),
+                "kind": "check1",
+                "payload": {"correct": True, "choice_index": 1},
+            },
+            {"node_id": str(embedding.id), "kind": "open", "payload": {"source": "settings"}},
         ],
     )
     session.commit()
@@ -42,30 +46,34 @@ def test_topic_affinity_scores_and_clusters(client, auth, session, user):
     body = response.json()
     by_name = {row["name"]: row for row in body["nodes"]}
 
-    # Weights default 1. Learn events do not score. Total interest = 4+2+1 = 7.
-    # Attention: 4/7 + 2/7 + 1 ≈ 1.857; Softmax: 2/7 + 4/7 + 1 ≈ 1.857
-    assert by_name["Attention"]["affinity"] == pytest.approx(4 / 7 + 2 / 7 + 1, abs=0.05)
-    assert by_name["Attention"]["focus_count"] == 2
+    # Opens only: Attention=2, Softmax=1, Embedding=1 → total=4.
+    # Attention: 2/4 + Softmax-neighbor 1/4 + recency 1 = 1.75
+    assert by_name["Attention"]["affinity"] == pytest.approx(2 / 4 + 1 / 4 + 1, abs=0.05)
+    assert by_name["Attention"]["focus_count"] == 2  # recorded but not in interest
     assert by_name["Attention"]["open_count"] == 2
     assert by_name["Attention"]["learned"] is True
-    assert by_name["Attention"]["breakdown"]["interest"] == pytest.approx(4 / 7, abs=1e-4)
-    assert by_name["Attention"]["breakdown"]["neighbor"] == pytest.approx(2 / 7, abs=1e-4)
+    assert by_name["Attention"]["breakdown"]["interest"] == pytest.approx(2 / 4, abs=1e-4)
+    assert by_name["Attention"]["breakdown"]["neighbor"] == pytest.approx(1 / 4, abs=1e-4)
     assert by_name["Attention"]["breakdown"]["recency"] == pytest.approx(1.0, abs=0.05)
 
-    assert by_name["Softmax"]["affinity"] == pytest.approx(2 / 7 + 4 / 7 + 1, abs=0.05)
+    assert by_name["Softmax"]["affinity"] == pytest.approx(1 / 4 + 2 / 4 + 1, abs=0.05)
     assert by_name["Softmax"]["learned"] is True
 
-    # Embedding: 1/7 + 0 + 1 (no graph neighbors)
-    assert by_name["Embedding"]["affinity"] == pytest.approx(1 / 7 + 1, abs=0.05)
-    assert by_name["Embedding"]["rank"] == 3
+    assert by_name["Embedding"]["affinity"] == pytest.approx(1 / 4 + 1, abs=0.05)
+    assert by_name["Embedding"]["open_count"] == 1
     assert by_name["Embedding"]["learned"] is False
 
     assert {by_name["Attention"]["rank"], by_name["Softmax"]["rank"]} == {1, 2}
+    assert by_name["Embedding"]["rank"] == 3
     assert len(body["clusters"]) == 2
-    linked = next(c for c in body["clusters"] if set(c["node_ids"]) == {str(attention.id), str(softmax.id)})
+    linked = next(
+        c for c in body["clusters"] if set(c["node_ids"]) == {str(attention.id), str(softmax.id)}
+    )
     alone = next(c for c in body["clusters"] if c["node_ids"] == [str(embedding.id)])
-    assert linked["total_affinity"] == pytest.approx(2 * (4 / 7 + 2 / 7 + 1), abs=0.1)
-    assert alone["total_affinity"] == pytest.approx(1 / 7 + 1, abs=0.05)
+    assert linked["total_affinity"] == pytest.approx(
+        (2 / 4 + 1 / 4 + 1) + (1 / 4 + 2 / 4 + 1), abs=0.1
+    )
+    assert alone["total_affinity"] == pytest.approx(1 / 4 + 1, abs=0.05)
     assert by_name["Attention"]["cluster_id"] == linked["id"]
     assert by_name["Softmax"]["cluster_id"] == linked["id"]
     assert by_name["Embedding"]["cluster_id"] == alone["id"]
@@ -73,6 +81,18 @@ def test_topic_affinity_scores_and_clusters(client, auth, session, user):
         {edge["source"], edge["target"]} == {str(attention.id), str(softmax.id)}
         for edge in body["edges"]
     )
+
+
+def test_topic_affinity_ignores_focus_only(client, auth, session, user):
+    node = KnowledgeNode(name="Quiet", name_key="quiet", description="x")
+    session.add(node)
+    session.flush()
+    record_focus(session, user=user, node_id=node.id)
+    session.commit()
+
+    response = client.get("/api/v1/me/topic-affinity", headers=auth)
+    assert response.status_code == 200
+    assert response.json() == {"nodes": [], "clusters": [], "edges": []}
 
 
 def test_topic_affinity_empty(client, auth):
@@ -88,8 +108,14 @@ def test_topic_affinity_limit(client, auth, session, user):
         session.add(node)
         nodes.append(node)
     session.flush()
-    for node in nodes:
-        session.add(UserTopicEvent(user_id=user.id, node_id=node.id, kind="focus", payload={}))
+    record_events(
+        session,
+        user=user,
+        items=[
+            {"node_id": str(node.id), "kind": "open", "payload": {"source": "graph"}}
+            for node in nodes
+        ],
+    )
     session.commit()
 
     response = client.get("/api/v1/me/topic-affinity?limit=2", headers=auth)

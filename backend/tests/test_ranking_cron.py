@@ -164,7 +164,11 @@ def test_cron_skips_complete_neighborhood(session, user):
         session.flush()
         session.add(KnowledgeEdge(from_id=focus.id, relation="child", to_id=n.id))
         session.add(KnowledgeEdge(from_id=n.id, relation="parent", to_id=focus.id))
-    record_focus(session, user=user, node_id=focus.id)
+    record_events(
+        session,
+        user=user,
+        items=[{"node_id": str(focus.id), "kind": "open", "payload": {"source": "graph"}}],
+    )
     session.commit()
 
     ranked = neighbor_job_scores(session, settings=settings)
@@ -268,6 +272,7 @@ def test_score_user_tiles_ignores_learn_events(session, user):
         session,
         user=user,
         items=[
+            {"node_id": str(node.id), "kind": "open", "payload": {"source": "graph"}},
             {"node_id": str(node.id), "kind": "learn", "payload": {"pack_index": 1}},
             {
                 "node_id": str(node.id),
@@ -279,8 +284,18 @@ def test_score_user_tiles_ignores_learn_events(session, user):
     session.commit()
     scored = score_user_tiles(session, user_id=user.id)
     assert scored[node.id]["learned"] is True
-    # interest_norm=1 + recency=1 ≈ 2 — learn/check do not add to affinity
+    # open-only interest_norm=1 + recency=1 ≈ 2 — learn/check/focus do not add
     assert scored[node.id]["affinity"] == pytest.approx(2.0, abs=0.1)
+    assert scored[node.id]["open_count"] == 1
+
+
+def test_score_user_tiles_ignores_focus_only(session, user):
+    node = KnowledgeNode(name="Cold", name_key="cold", description="x")
+    session.add(node)
+    session.flush()
+    record_focus(session, user=user, node_id=node.id)
+    session.commit()
+    assert score_user_tiles(session, user_id=user.id) == {}
 
 
 def test_score_user_tiles_neighbor_spill(session, user):
@@ -291,17 +306,19 @@ def test_score_user_tiles_neighbor_spill(session, user):
     session.flush()
     session.add(KnowledgeEdge(from_id=a.id, relation="child", to_id=b.id))
     session.add(KnowledgeEdge(from_id=b.id, relation="parent", to_id=a.id))
-    record_focus(session, user=user, node_id=a.id)
-    record_focus(session, user=user, node_id=a.id)
     record_events(
         session,
         user=user,
-        items=[{"node_id": str(b.id), "kind": "open", "payload": {"source": "graph"}}],
+        items=[
+            {"node_id": str(a.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(a.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(b.id), "kind": "open", "payload": {"source": "graph"}},
+        ],
     )
     session.commit()
 
     scored = score_user_tiles(session, user_id=user.id)
-    # total=3: A 2/3+1/3+1=2; B 1/3+2/3+1=2
+    # total=3 opens: A 2/3+1/3+1=2; B 1/3+2/3+1=2
     assert scored[a.id]["affinity"] == pytest.approx(2.0, abs=0.05)
     assert scored[b.id]["affinity"] == pytest.approx(2.0, abs=0.05)
     assert scored[a.id]["breakdown"]["neighbor"] == pytest.approx(1.0 / 3.0, abs=1e-4)

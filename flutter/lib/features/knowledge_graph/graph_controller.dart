@@ -123,7 +123,11 @@ class GraphController extends ChangeNotifier {
     if (idx >= 0 && idx < focusHistory.length - 1) {
       focusHistory.removeRange(idx + 1, focusHistory.length);
     }
-    await openExisting(id, title: _focusTitles[id] ?? _titleForNode(id));
+    await openExisting(
+      id,
+      title: _focusTitles[id] ?? _titleForNode(id),
+      interestSource: 'graph',
+    );
   }
 
   int get activeJobCount => trackedJobs.where((j) => j.isActive).length;
@@ -243,6 +247,13 @@ class GraphController extends ChangeNotifier {
       focusHistory
         ..clear()
         ..addAll(previous);
+      return;
+    }
+    final id = focusId;
+    if (id != null) {
+      unawaited(
+        trackEvent(nodeId: id, kind: 'open', payload: {'source': 'search'}),
+      );
     }
   }
 
@@ -297,11 +308,28 @@ class GraphController extends ChangeNotifier {
   }
 
   /// Open an existing node via GET graph (no expand enqueue).
-  Future<void> openExisting(String id, {String? title, Map<String, dynamic>? knownPayload}) async {
+  ///
+  /// Pass [interestSource] (`graph` / `search` / `list` / `settings`) to record
+  /// an intentional open for affinity. Omit for internal refreshes.
+  Future<void> openExisting(
+    String id, {
+    String? title,
+    Map<String, dynamic>? knownPayload,
+    String? interestSource,
+  }) async {
     if (refreshing || loading) return;
     if (focusId == id && categoryGraph != null && knownPayload == null) {
       suggestions = [];
       notifyListeners();
+      if (interestSource != null && interestSource.isNotEmpty) {
+        unawaited(
+          trackEvent(
+            nodeId: id,
+            kind: 'open',
+            payload: {'source': interestSource},
+          ),
+        );
+      }
       return;
     }
     final first = categoryGraph == null;
@@ -319,6 +347,15 @@ class GraphController extends ChangeNotifier {
       }
       final openedId = focusId ?? id;
       _recordFocus(openedId, title: title ?? _titleForNode(openedId));
+      if (interestSource != null && interestSource.isNotEmpty) {
+        unawaited(
+          trackEvent(
+            nodeId: openedId,
+            kind: 'open',
+            payload: {'source': interestSource},
+          ),
+        );
+      }
     } on ApiException catch (exc) {
       error = exc.message;
     } finally {
@@ -588,14 +625,14 @@ class GraphController extends ChangeNotifier {
   Future<void> choose(TopicChoice choice) async {
     candidates = [];
     notifyListeners();
-    await openExisting(choice.id, title: choice.title);
+    await openExisting(choice.id, title: choice.title, interestSource: 'search');
   }
 
   Future<void> back() async {
     if (!canGoBack) return;
     final current = focusHistory.removeLast();
     final previous = focusHistory.last;
-    await openExisting(previous);
+    await openExisting(previous, interestSource: 'graph');
     if (error != null) focusHistory.add(current);
   }
 

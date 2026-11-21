@@ -66,6 +66,8 @@ class _GraphScreenState extends State<GraphScreen>
   List<FocusTrailEntry> _trailShown = const [];
   /// Relation tap in flight — keep topic screen stable until the new focus lands.
   String? _openingRelatedId;
+  /// Next dwell/open came from a graph tap (not free-pan settle or cold start).
+  var _countNextOpenAsInterest = false;
 
   @override
   void initState() {
@@ -336,6 +338,7 @@ class _GraphScreenState extends State<GraphScreen>
       return;
     }
     _panTargetId = node.id;
+    _countNextOpenAsInterest = true;
     final changed = _highlighted?.id != node.id ||
         _highlighted?.title != node.title ||
         _highlighted?.description != node.description;
@@ -397,7 +400,14 @@ class _GraphScreenState extends State<GraphScreen>
     final incomplete = payload['incomplete'] == true;
     setState(() => _incompleteByNode[nodeId] = incomplete);
     // Always refocus — show whatever neighbors exist; Request only if under budget.
-    await graph.openExisting(nodeId, title: _highlighted?.title, knownPayload: payload);
+    final source = _countNextOpenAsInterest ? 'graph' : null;
+    _countNextOpenAsInterest = false;
+    await graph.openExisting(
+      nodeId,
+      title: _highlighted?.title,
+      knownPayload: payload,
+      interestSource: source,
+    );
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
@@ -407,7 +417,7 @@ class _GraphScreenState extends State<GraphScreen>
   Future<void> _goToHighlighted(GraphController graph) async {
     final node = _highlighted;
     if (node == null || node.id == graph.focusId) return;
-    await graph.openExisting(node.id, title: node.title);
+    await graph.openExisting(node.id, title: node.title, interestSource: 'graph');
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
@@ -480,7 +490,7 @@ class _GraphScreenState extends State<GraphScreen>
       _openingRelatedId = node.id;
     });
     try {
-      await graph.openExisting(node.id, title: node.title);
+      await graph.openExisting(node.id, title: node.title, interestSource: 'list');
       if (!mounted) return;
       // Wait for LayoutBuilder's post-frame adopt — not merely the network return.
       for (var i = 0; i < 12; i++) {
@@ -511,7 +521,7 @@ class _GraphScreenState extends State<GraphScreen>
       _selectNode(placed);
       return;
     }
-    await graph.openExisting(job.nodeId, title: job.title);
+    await graph.openExisting(job.nodeId, title: job.title, interestSource: 'graph');
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
@@ -658,7 +668,7 @@ class _GraphScreenState extends State<GraphScreen>
     });
     // Settle focus on the pressed tile before management actions when needed.
     if (node.id != graph.focusId) {
-      await graph.openExisting(node.id, title: node.title);
+      await graph.openExisting(node.id, title: node.title, interestSource: 'graph');
       if (!mounted) return;
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
@@ -990,7 +1000,7 @@ class _GraphScreenState extends State<GraphScreen>
     _search.clear();
     _dismissSearch();
     if (exact != null) {
-      await graph.openExisting(exact.id);
+      await graph.openExisting(exact.id, interestSource: 'search');
     } else {
       await graph.search(topic);
     }
@@ -1003,7 +1013,7 @@ class _GraphScreenState extends State<GraphScreen>
   Future<void> _pickSuggestion(GraphController graph, TopicChoice choice) async {
     _search.clear();
     _dismissSearch();
-    await graph.openExisting(choice.id);
+    await graph.openExisting(choice.id, interestSource: 'search');
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
@@ -1031,7 +1041,7 @@ class _GraphScreenState extends State<GraphScreen>
       await Future<void>.delayed(const Duration(milliseconds: 50));
       if (!mounted) return;
     }
-    await graph.openExisting(nodeId);
+    await graph.openExisting(nodeId, interestSource: 'settings');
     if (!mounted) return;
     // Focus only — do not open the topic screen.
     for (var i = 0; i < 24; i++) {
@@ -1502,6 +1512,8 @@ class _GraphScreenState extends State<GraphScreen>
           onInteractionStart: (_) {
             _graphGestureActive = true;
             _cancelDwellAndSettle();
+            // Finger pan/pinch is not a tap — don't credit the next dwell open.
+            _countNextOpenAsInterest = false;
             if (!_panController.isAnimating) return;
             _panController.stop();
             _panAnimation = null;

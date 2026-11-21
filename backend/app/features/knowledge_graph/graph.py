@@ -61,13 +61,28 @@ def focus_or_enqueue(
     }, 202
 
 
-def graph_for_focus(session: Session, *, user: User, focus_id: UUID) -> dict:
+def graph_for_focus(
+    session: Session,
+    *,
+    user: User,
+    focus_id: UUID,
+    record_event: bool = True,
+) -> dict:
     focus = ensure_focus_node(session, node_id=focus_id)
     counts = neighborhood_counts(user)
-    return _graph_payload(session, user=user, focus=focus, counts=counts)
+    return _graph_payload(
+        session, user=user, focus=focus, counts=counts, record_event=record_event
+    )
 
 
-def _graph_payload(session: Session, *, user: User, focus, counts: dict[str, int]) -> dict:
+def _graph_payload(
+    session: Session,
+    *,
+    user: User,
+    focus,
+    counts: dict[str, int],
+    record_event: bool = True,
+) -> dict:
     payload = build_subgraph(
         session, focus, max_extended=counts["extended"], counts=counts
     )
@@ -80,7 +95,9 @@ def _graph_payload(session: Session, *, user: User, focus, counts: dict[str, int
         acquaintances=0,
     )
     session.add(request)
-    record_focus(session, user=user, node_id=focus.id)
+    # Cold-start resume skips this — affinity interest uses client `open` events.
+    if record_event:
+        record_focus(session, user=user, node_id=focus.id)
     session.flush()
     payload["request_id"] = str(request.id)
     return payload
@@ -93,7 +110,13 @@ def _resume(session: Session, *, user: User) -> tuple[dict, int]:
     if latest is None:
         return {"focus_node_id": None, "incomplete": False, "request_id": None, "nodes": [], "edges": []}, 200
     # Never auto top-up on resume — show whatever neighbors already exist.
-    return graph_for_focus(session, user=user, focus_id=latest.focus_id), 200
+    # Do not record focus: resume is not intentional interest.
+    return (
+        graph_for_focus(
+            session, user=user, focus_id=latest.focus_id, record_event=False
+        ),
+        200,
+    )
 
 
 def _enqueue_expand(

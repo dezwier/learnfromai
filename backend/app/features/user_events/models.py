@@ -14,7 +14,8 @@ from app.core.time import utcnow
 EVENT_KINDS = ("focus", "open", "learn", "example", "check1", "check2", "check3")
 CLIENT_EVENT_KINDS = ("open", "learn", "example", "check1", "check2", "check3")
 CHECK_EVENT_KINDS = ("check1", "check2", "check3")
-OPEN_SOURCES = ("graph", "search", "list")
+# Intentional navigation only (not cold-start resume focus).
+OPEN_SOURCES = ("graph", "search", "list", "settings")
 MAX_EVENTS_PER_REQUEST = 50
 
 

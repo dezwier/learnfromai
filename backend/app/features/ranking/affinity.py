@@ -1,11 +1,13 @@
 """Weighted user–tile affinity (single measure for HUD + cron).
 
-Per-user normalized factors (each in a bounded range), then weighted sum:
+Per-user normalized factors (each in a bounded range), then weighted sum.
 
-  interest_norm[t]  = interest[t] / Σ_tiles interest
-                      where interest = focus + open (equal)
-  neighbor_norm[t]  = Σ_direct_neighbors interest / Σ_tiles interest
-  recency[t]        = linear map of days since last focus/open
+Interest comes only from intentional `open` events (graph / search / list /
+settings). Cold-start resume `focus` events do not count.
+
+  interest_norm[t]  = open_count[t] / Σ_tiles open_count
+  neighbor_norm[t]  = Σ_direct_neighbors open_count / Σ_tiles open_count
+  recency[t]        = linear map of days since last intentional open
                       today → 1.0, ≥ span (default 30d) → 0.5
 
 affinity = w_interest * interest_norm
@@ -25,10 +27,12 @@ from sqlmodel import Session, col, select
 from app.core.config import Settings, get_settings
 from app.core.time import utcnow
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
-from app.features.user_events.models import UserTopicEvent
+from app.features.user_events.models import OPEN_SOURCES, UserTopicEvent
 
 # Still reported on the profile map for UI; not used in the affinity score.
 LEARNED_KINDS = frozenset({"learn", "example", "check1", "check2", "check3"})
+# Intentional opens only (matches OPEN_SOURCES).
+INTEREST_OPEN_SOURCES = frozenset(OPEN_SOURCES)
 
 # Recency floor / ceiling for the linear span.
 _RECENCY_FLOOR = 0.5
@@ -77,10 +81,6 @@ def weights_snapshot(settings: Settings | None = None) -> dict[str, float | int]
     }
 
 
-def _interest(focus_n: int, open_n: int) -> float:
-    return float(focus_n + open_n)
-
-
 def _undirected_neighbors(
     session: Session, node_ids: set[UUID]
 ) -> dict[UUID, set[UUID]]:
@@ -110,7 +110,7 @@ def score_user_tiles(
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> dict[UUID, dict]:
-    """Score tiles the user focused/opened. Returns node_id → row dict."""
+    """Score tiles from intentional opens. Returns node_id → row dict."""
     s = settings or get_settings()
     current = now or utcnow()
     events = list(
@@ -129,25 +129,28 @@ def score_user_tiles(
     for event in events:
         if event.kind in LEARNED_KINDS:
             learned_nodes.add(event.node_id)
-        if event.kind not in ("focus", "open"):
+        if event.kind == "focus":
+            # Reported for UI; not used in interest (includes cold-start resume).
+            focus_counts[event.node_id] += 1
+            continue
+        if event.kind != "open":
+            continue
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        source = str(payload.get("source") or "").strip()
+        if source not in INTEREST_OPEN_SOURCES:
             continue
         engaged_ids.add(event.node_id)
         occurred = event.occurred_at or event.created_at
         prev = last_engage_at.get(event.node_id)
         if prev is None or occurred > prev:
             last_engage_at[event.node_id] = occurred
-        if event.kind == "focus":
-            focus_counts[event.node_id] += 1
-        else:
-            open_counts[event.node_id] += 1
+        open_counts[event.node_id] += 1
 
     if not engaged_ids:
         return {}
 
     for nid in engaged_ids:
-        interest_by_id[nid] = _interest(
-            focus_counts.get(nid, 0), open_counts.get(nid, 0)
-        )
+        interest_by_id[nid] = float(open_counts.get(nid, 0))
 
     total_interest = sum(interest_by_id.values())
     if total_interest <= 0:
