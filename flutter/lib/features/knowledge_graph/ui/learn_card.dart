@@ -332,7 +332,7 @@ class _LearnCardFace extends StatelessWidget {
       child: child,
     );
     return ColoredBox(
-      color: scheme.surface,
+      color: scheme.surfaceContainerHigh,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

@@ -230,10 +230,12 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
 
   List<BoxShadow> _cardShadow(double angle) {
     final depth = 0.35 + 0.35 * math.sin(angle).abs().clamp(0.0, 1.0);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final base = dark ? 0.38 : 0.12;
     return [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.12 + 0.1 * depth),
-        blurRadius: 12 + 8 * depth,
+        color: Colors.black.withValues(alpha: base + 0.12 * depth),
+        blurRadius: (dark ? 16 : 12) + 8 * depth,
         offset: Offset(0, 4 + 4 * depth),
       ),
     ];
@@ -281,8 +283,11 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
           transformHitTests: false,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(r),
+              border: Theme.of(context).brightness == Brightness.dark
+                  ? Border.all(color: Colors.white.withValues(alpha: 0.07))
+                  : null,
               boxShadow: _cardShadow(angle),
             ),
             child: ClipRRect(
