@@ -42,6 +42,8 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/admin/cron-runs/latest` → last daily ranking cron summary (403 unless `is_admin`)
 - `GET /api/v1/admin/cron-runs/preview` → a-priori ranked neighbor/learn queues with affinity, counts, fill term, score, and live job result when a prior run enqueued that tile (403 unless `is_admin`)
 - `POST /api/v1/admin/cron-runs/run` → run the ranking cron now and return `{run, preview}` (403 unless `is_admin`)
+- `DELETE /api/v1/admin/knowledge/nodes/{id}/packs/{pack_index}` → delete pack bits + related events + Leitner rows (403 unless `is_admin`)
+- `DELETE /api/v1/admin/knowledge/nodes/{id}/packs/{pack_index}/bits/{kind}` → delete one quiz bit (+ events); last quiz returns 409 `CONFIRM_PACK_DELETE` unless `confirm_last_pack=true` (then deletes the pack)
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
 - `GET /api/v1/knowledge/nodes?q=` existing-topic autocomplete (no LLM)
 - `GET /api/v1/knowledge/nodes/{node_id}/content` → `{pack_count, packs: [{pack_index, incomplete, title, bits}], completed_packs, incomplete}` (`completed_packs` = pack indexes where the user logged learn + any one check; `incomplete` when no packs or any pack content-incomplete)

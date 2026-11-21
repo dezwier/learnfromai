@@ -628,6 +628,41 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Admin: delete one quiz bit (or the whole pack when [confirmLastPack]).
+  Future<Map<String, dynamic>?> adminDeleteQuiz({
+    required String nodeId,
+    required int packIndex,
+    required String checkKind,
+    bool confirmLastPack = false,
+  }) async {
+    error = null;
+    try {
+      final q = confirmLastPack ? '?confirm_last_pack=true' : '';
+      return await _delete(
+        '/admin/knowledge/nodes/$nodeId/packs/$packIndex/bits/$checkKind$q',
+      );
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Admin: delete a shared pack (+ events + Leitner rows).
+  Future<Map<String, dynamic>?> adminDeletePack({
+    required String nodeId,
+    required int packIndex,
+  }) async {
+    error = null;
+    try {
+      return await _delete('/admin/knowledge/nodes/$nodeId/packs/$packIndex');
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<bool> deleteNode(String id) async {
     if (refreshing || loading) return false;
     final wasFocus = focusId == id;

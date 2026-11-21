@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
 import '../../../core/widgets/study_card.dart';
+import '../../auth/auth_controller.dart';
 import '../../profile/overlay_panel_chrome.dart';
 import '../graph_controller.dart';
+import 'admin_content_delete.dart';
 import 'learn_card.dart';
 import 'learn_session_chrome.dart';
 import 'leitner_distribution_card.dart';
@@ -220,6 +222,24 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     }
     setState(() {
       _queueIndex += 1;
+      _answered = false;
+      _continueArmed = false;
+    });
+  }
+
+  Future<void> _afterAdminDelete() async {
+    if (_queue.isEmpty) {
+      await _loadHub();
+      return;
+    }
+    final next = List<_ReviewCard>.from(_queue)..removeAt(_queueIndex);
+    if (next.isEmpty) {
+      await _loadHub();
+      return;
+    }
+    setState(() {
+      _queue = next;
+      if (_queueIndex >= next.length) _queueIndex = next.length - 1;
       _answered = false;
       _continueArmed = false;
     });
@@ -452,30 +472,49 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
           widget.onClose();
         }
       },
-      card: LearnFlipCard(
-        key: ValueKey(
-          'review-$_queueIndex-${card.item.nodeId}-${card.item.packIndex}-${card.checkKind}',
-        ),
-        entry: entry,
-        imageUrl: imageUrl,
-        startOnCheck: true,
-        imageLoading: graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
-        loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
-        cachedBytes: graph.cachedImageBytes(imageUrl),
-        onShown: () {},
-        onCheckAnswer: ({
-          required bool correct,
-          int? choiceIndex,
-          bool? answerBool,
-          String? answerText,
-        }) {
-          unawaited(
-            _onAnswer(
-              correct: correct,
-              choiceIndex: choiceIndex,
-              answerBool: answerBool,
-              answerText: answerText,
+      card: Builder(
+        builder: (context) {
+          final flip = LearnFlipCard(
+            key: ValueKey(
+              'review-$_queueIndex-${card.item.nodeId}-${card.item.packIndex}-${card.checkKind}',
             ),
+            entry: entry,
+            imageUrl: imageUrl,
+            startOnCheck: true,
+            imageLoading: graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
+            loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+            cachedBytes: graph.cachedImageBytes(imageUrl),
+            onShown: () {},
+            onCheckAnswer: ({
+              required bool correct,
+              int? choiceIndex,
+              bool? answerBool,
+              String? answerText,
+            }) {
+              unawaited(
+                _onAnswer(
+                  correct: correct,
+                  choiceIndex: choiceIndex,
+                  answerBool: answerBool,
+                  answerText: answerText,
+                ),
+              );
+            },
+          );
+          final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
+          if (!isAdmin || !_answered) return flip;
+          return GestureDetector(
+            onLongPress: () async {
+              final deleted = await showAdminContentDeleteMenu(
+                context,
+                nodeId: card.item.nodeId,
+                pack: card.item.pack,
+                checkKind: card.checkKind,
+              );
+              if (!deleted || !mounted) return;
+              await _afterAdminDelete();
+            },
+            child: flip,
           );
         },
       ),

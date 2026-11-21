@@ -488,6 +488,48 @@ def post_knowledge_node_content(
     return payload
 
 
+@router.delete("/admin/knowledge/nodes/{node_id}/packs/{pack_index}")
+def admin_delete_pack(
+    node_id: UUID,
+    pack_index: int,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Admin: delete a shared pack, its bits, related events, and Leitner rows."""
+    if not user.is_admin:
+        raise forbidden()
+    from app.features.content.admin_delete import delete_pack
+
+    payload = delete_pack(session, node_id=node_id, pack_index=pack_index)
+    session.commit()
+    return payload
+
+
+@router.delete("/admin/knowledge/nodes/{node_id}/packs/{pack_index}/bits/{kind}")
+def admin_delete_pack_bit(
+    node_id: UUID,
+    pack_index: int,
+    kind: str,
+    confirm_last_pack: bool = False,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Admin: delete one quiz bit (+ events). Last quiz requires confirm_last_pack=true."""
+    if not user.is_admin:
+        raise forbidden()
+    from app.features.content.admin_delete import delete_check_bit
+
+    payload = delete_check_bit(
+        session,
+        node_id=node_id,
+        pack_index=pack_index,
+        kind=kind,
+        confirm_last_pack=confirm_last_pack,
+    )
+    session.commit()
+    return payload
+
+
 @router.get("/knowledge/nodes/{node_id}/image/file")
 def get_knowledge_node_image_file(
     node_id: UUID,

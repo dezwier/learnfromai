@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
+import '../../auth/auth_controller.dart';
 import '../graph_controller.dart';
+import 'admin_content_delete.dart';
 import 'learn_card.dart';
 import 'learn_edge_dismiss.dart';
 import 'learn_session_chrome.dart';
@@ -409,7 +411,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         ),
       );
     } else {
-      cardBody = LearnFlipCard(
+      final flip = LearnFlipCard(
         key: ValueKey('track-$_cardEpoch-${entry.packIndex}-${entry.checkKind}'),
         entry: entry,
         imageUrl: imageUrl,
@@ -433,6 +435,23 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
           );
         },
       );
+      final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
+      final nodeId = _nodeId;
+      cardBody = (isAdmin && _quizDone && nodeId != null)
+          ? GestureDetector(
+              onLongPress: () async {
+                final deleted = await showAdminContentDeleteMenu(
+                  context,
+                  nodeId: nodeId,
+                  pack: entry.pack,
+                  checkKind: entry.checkKind,
+                );
+                if (!deleted || !mounted) return;
+                await _onNext();
+              },
+              child: flip,
+            )
+          : flip;
     }
 
     final title = (_topicTitle ?? '').trim().isEmpty ? 'Learn' : _topicTitle!.trim();
