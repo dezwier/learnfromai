@@ -348,15 +348,17 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
         ],
         pack_index=2,
     )
-    assert "atomic learning pack" in prompt
+    assert "atomic learning" in prompt
+    assert "interesting learning bit" in prompt
+    assert "short (a few words" in prompt
     assert "What is Softmax?" in prompt
     assert "Attention" in prompt
     assert "true_false" in prompt
     assert "cloze" in prompt
     assert '"pack_index": 2' in prompt
-    assert "Do not overlap other packs" in prompt
+    assert "Do not overlap other atomic learnings" in prompt
     assert "Do not teach neighboring topics" in prompt
-    assert "Never mention neighbors, other packs" in prompt
+    assert "Never mention neighbors, other learnings" in prompt
     assert "worth knowing" in prompt
     assert "genuinely useful" in prompt
     assert "exactly one word or one number" in prompt

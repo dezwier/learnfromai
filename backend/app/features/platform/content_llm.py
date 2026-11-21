@@ -26,7 +26,7 @@ from app.features.platform.openai_chat import openai_chat_body, set_openai_max_o
 
 logger = logging.getLogger(__name__)
 
-PROMPT_CONTENT = "content_bits_v4"
+PROMPT_CONTENT = "content_bits_v5"
 
 
 class ContentLLM(Protocol):
@@ -62,24 +62,25 @@ def build_content_prompt(
     need_learn = "learn" in required
 
     parts = [
-        f"Write one atomic learning pack about {name}. "
+        f"Write one atomic learning for {name}: one interesting learning bit about this topic. "
         "Return JSON only with keys: "
         + ", ".join(required)
         + ".\n\n"
-        "Pack shape:\n"
-        "- learn: one short, standalone learning bit — atomic, concrete, worth knowing\n"
+        "Shape:\n"
+        "- learn: one short, standalone atomic learning bit — concrete, interesting, worth knowing\n"
         "- three tests (check1–check3): genuinely useful checks of that same bit\n\n"
         "Rules:\n"
         "- Stay on this topic only.\n"
         "- Do not teach neighboring topics.\n"
-        "- Do not overlap other packs already written for this topic.\n"
-        "- Never mention neighbors, other packs, or these rules in the learner-facing text.\n"
-        "- Learning bit must stand alone (no “as above”, no fluff, no generic intro).\n"
+        "- Do not overlap other atomic learnings already written for this topic.\n"
+        "- Never mention neighbors, other learnings, or these rules in the learner-facing text.\n"
+        "- The learning bit must stand alone (no “as above”, no fluff, no generic intro).\n"
         "- Tests must stand alone and be worth asking — precise, not trivia or paraphrases of each other.\n"
     ]
     if need_learn:
         parts.append(
-            "learn = {title, markdown}. A few short paragraphs of Markdown max. "
+            "learn = {title, markdown}. Title: short (a few words, not a full sentence). "
+            "Markdown: a few short paragraphs max. "
             "Make it interesting: a sharp fact, mechanism, or distinction someone is glad they learned.\n"
         )
     if checks_needed:
@@ -145,7 +146,7 @@ class FakeContentLLM:
         payload: dict = {}
         if "learn" in required:
             payload["learn"] = {
-                "title": f"What is {topic}?" if pack_index == 1 else f"{topic}: {facet}",
+                "title": topic if pack_index == 1 else facet.title(),
                 "markdown": (
                     f"**{topic}** ({facet}): "
                     f"{desc or 'One precise idea you can use right away.'} "
