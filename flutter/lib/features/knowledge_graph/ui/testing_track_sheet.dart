@@ -266,16 +266,13 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dist = _distribution;
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
-    // Reserve CTA space as soon as answered so the card doesn't jump when
-    // Next fades in; keep the button non-interactive until armed.
+    // Reserve CTA space during review (even before Next appears) so the card fits.
     final reserveNext = _reviewing && _answered;
     final nextReady = reserveNext && _continueArmed && !_submitting;
-    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final bottomClearance = LearnSessionFloatingCta.clearance(
-          context,
-          visible: reserveNext,
-        ) +
-        (reserveNext ? 0 : keyboardInset);
+      context,
+      reserveCta: _reviewing,
+    );
 
     return OverlayPanel(
       onDismiss: widget.onClose,

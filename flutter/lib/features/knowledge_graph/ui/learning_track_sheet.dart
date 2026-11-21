@@ -395,8 +395,8 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         genId == null ? null : graph.jobForNode(genId, type: 'expand_content');
     final generating = genId != null && (genJob != null || entry == null);
     final showNext = _quizDone && entry != null && !generating;
-    final bottomClearance =
-        LearnSessionFloatingCta.clearance(context, visible: showNext);
+    // Always reserve Next so the card fits before the button appears.
+    final bottomClearance = LearnSessionFloatingCta.clearance(context);
 
     final Widget cardBody;
     if (generating) {

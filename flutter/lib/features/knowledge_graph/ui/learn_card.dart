@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -20,9 +21,10 @@ class LearnDeckEntry {
   int get packIndex => pack.packIndex;
 }
 
-/// Max image aspect (width / height) — never taller than square. May shrink for tall quizzes.
+/// Max image aspect (width / height) — never taller than square.
 const _imageAspect = 1.0;
-const _minImageHeight = 100.0;
+/// Front scrolls only after the image has shrunk to this fraction of width.
+const _minImageWidthFraction = 0.25;
 const _bodyPadding = EdgeInsets.fromLTRB(16, 14, 16, 16);
 /// Until the first measure lands, keep the card tall enough to avoid overflow.
 const _provisionalFrontBodyH = 110.0;
@@ -170,98 +172,120 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final squareImageH = width > 0 ? width / _imageAspect : _minImageHeight;
+        final maxH = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : double.infinity;
+        final squareImageH = width > 0 ? width / _imageAspect : 100.0;
+        final minImageH =
+            width > 0 ? width * _minImageWidthFraction : squareImageH * _minImageWidthFraction;
         final frontBodyH =
             _frontBodyH > 0 ? _frontBodyH : _provisionalFrontBodyH;
         final backBodyH = _backBodyH > 0 ? _backBodyH : _provisionalBackBodyH;
-        // Shared face height: square image + front, or shrink image for a tall quiz.
-        final cardH = [
+        // Preferred: square + learn, or min image + quiz body.
+        final preferred = [
           squareImageH + frontBodyH,
-          _minImageHeight + backBodyH,
+          minImageH + backBodyH,
         ].reduce((a, b) => a > b ? a : b);
-        // Fill leftover up to square max — never taller than wide.
-        final frontImageH =
-            (cardH - frontBodyH).clamp(_minImageHeight, squareImageH);
-        final backImageH =
-            (cardH - backBodyH).clamp(_minImageHeight, squareImageH);
+        final cardH = maxH.isFinite ? math.min(preferred, maxH) : preferred;
+
+        // Shrink image first on both faces; scroll body only at min image height.
+        (double, bool) imageAndScroll(double bodyH) {
+          final room = cardH - bodyH;
+          if (room >= squareImageH) {
+            return (squareImageH, false);
+          }
+          if (room >= minImageH) {
+            return (room, false);
+          }
+          return (math.min(minImageH, cardH), true);
+        }
+
+        final frontLayout = imageAndScroll(frontBodyH);
+        final backLayout = imageAndScroll(backBodyH);
+        final frontImageH = frontLayout.$1;
+        final frontScroll = frontLayout.$2;
+        final backImageH = backLayout.$1;
+        final backScroll = backLayout.$2;
 
         // Offstage measures body heights without painting (OverflowBox was
         // painting a second quiz/explanation over the visible card).
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Measure offstage without allowing TextFields to take focus (cloze).
-            Offstage(
-              offstage: true,
-              child: ExcludeFocus(
-                child: SizedBox(
-                  width: width,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _MeasureSize(
-                        onChange: _onFrontBodySize,
-                        child: Padding(
-                          padding: _bodyPadding,
-                          child: _frontBody(),
-                        ),
-                      ),
-                      _MeasureSize(
-                        onChange: _onBackBodySize,
-                        child: Padding(
-                          padding: _bodyPadding,
-                          child: _backBody(
-                            clozeController: _measureClozeController,
-                            interactive: false,
+        return Align(
+          alignment: Alignment.topCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Offstage(
+                offstage: true,
+                child: ExcludeFocus(
+                  child: SizedBox(
+                    width: width,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _MeasureSize(
+                          onChange: _onFrontBodySize,
+                          child: Padding(
+                            padding: _bodyPadding,
+                            child: _frontBody(),
                           ),
                         ),
-                      ),
-                    ],
+                        _MeasureSize(
+                          onChange: _onBackBodySize,
+                          child: Padding(
+                            padding: _bodyPadding,
+                            child: _backBody(
+                              clozeController: _measureClozeController,
+                              interactive: false,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
-              clipBehavior: Clip.none,
-              child: TurnableYAxisCard(
-                resetIdentity: '${pack.packIndex}-$checkKind',
-                dismissKeyboardOnInteraction: true,
-                prelayoutFacesForHeight: false,
-                fixedFaceHeight: cardH,
-                initialBackFaceVisible: widget.startOnCheck,
-                interactionEnabled: !widget.startOnCheck || _revealed,
-                front: _LearnCardFace(
-                  imageUrl: widget.imageUrl,
-                  cachedBytes: widget.cachedBytes,
-                  imageLoading: widget.imageLoading,
-                  loadImageBytes: widget.loadImageBytes,
-                  completed: widget.completed,
-                  imageHeight: frontImageH,
-                  child: _frontBody(),
-                ),
-                back: _LearnCardFace(
-                  imageUrl: widget.imageUrl,
-                  cachedBytes: widget.cachedBytes,
-                  imageLoading: widget.imageLoading,
-                  loadImageBytes: widget.loadImageBytes,
-                  completed: widget.completed,
-                  imageHeight: backImageH,
-                  feedback: (_revealed && _answerCorrect != null)
-                      ? QuizFeedbackBadge.fromBit(
-                          bit: pack.bit(checkKind),
-                          correct: _answerCorrect!,
-                        )
-                      : null,
-                  child: _backBody(
-                    clozeController: _clozeController,
+              SizedBox(
+                width: width.isFinite ? width : null,
+                height: cardH.isFinite ? cardH : null,
+                child: TurnableYAxisCard(
+                  resetIdentity: '${pack.packIndex}-$checkKind',
+                  dismissKeyboardOnInteraction: true,
+                  prelayoutFacesForHeight: false,
+                  fixedFaceHeight: cardH.isFinite ? cardH : null,
+                  initialBackFaceVisible: widget.startOnCheck,
+                  interactionEnabled: !widget.startOnCheck || _revealed,
+                  front: _LearnCardFace(
+                    imageUrl: widget.imageUrl,
+                    cachedBytes: widget.cachedBytes,
+                    imageLoading: widget.imageLoading,
+                    loadImageBytes: widget.loadImageBytes,
+                    completed: widget.completed,
+                    imageHeight: frontImageH,
+                    scrollBody: frontScroll,
+                    child: _frontBody(),
+                  ),
+                  back: _LearnCardFace(
+                    imageUrl: widget.imageUrl,
+                    cachedBytes: widget.cachedBytes,
+                    imageLoading: widget.imageLoading,
+                    loadImageBytes: widget.loadImageBytes,
+                    completed: widget.completed,
+                    imageHeight: backImageH,
+                    scrollBody: backScroll,
+                    feedback: (_revealed && _answerCorrect != null)
+                        ? QuizFeedbackBadge.fromBit(
+                            bit: pack.bit(checkKind),
+                            correct: _answerCorrect!,
+                          )
+                        : null,
+                    child: _backBody(
+                      clozeController: _clozeController,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -273,6 +297,7 @@ class _LearnCardFace extends StatelessWidget {
     required this.child,
     required this.loadImageBytes,
     required this.imageHeight,
+    required this.scrollBody,
     this.imageUrl,
     this.cachedBytes,
     this.imageLoading = false,
@@ -286,12 +311,17 @@ class _LearnCardFace extends StatelessWidget {
   final bool imageLoading;
   final bool completed;
   final double imageHeight;
+  final bool scrollBody;
   final Widget? feedback;
   final Future<List<int>?> Function(String imageUrl) loadImageBytes;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final body = Padding(
+      padding: _bodyPadding,
+      child: child,
+    );
     return ColoredBox(
       color: scheme.surface,
       child: Column(
@@ -325,14 +355,14 @@ class _LearnCardFace extends StatelessWidget {
                 ),
             ],
           ),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: _bodyPadding,
-                child: child,
-              ),
-            ),
-          ),
+          if (scrollBody)
+            Expanded(
+              child: SingleChildScrollView(child: body),
+            )
+          else ...[
+            body,
+            const Spacer(),
+          ],
         ],
       ),
     );

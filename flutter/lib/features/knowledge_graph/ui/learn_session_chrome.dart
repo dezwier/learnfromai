@@ -18,13 +18,16 @@ class LearnSessionFloatingCta extends StatelessWidget {
   /// When false, keeps layout space but fades out and ignores taps.
   final bool visible;
 
-  static double clearance(BuildContext context, {required bool visible}) {
-    if (!visible) {
-      return MediaQuery.paddingOf(context).bottom + 24;
+  /// Space to keep clear above the home indicator / keyboard for the CTA.
+  ///
+  /// Pass [reserveCta]: true whenever a Next/Done slot should stay reserved
+  /// (even before the button is visible) so the card never jumps.
+  static double clearance(BuildContext context, {bool reserveCta = true}) {
+    final media = MediaQuery.of(context);
+    if (!reserveCta) {
+      return media.padding.bottom + 24;
     }
-    return MediaQuery.paddingOf(context).bottom +
-        MediaQuery.viewInsetsOf(context).bottom +
-        72;
+    return media.padding.bottom + media.viewInsets.bottom + 72;
   }
 
   @override
@@ -138,10 +141,8 @@ class LearnSessionCardStage extends StatelessWidget {
           left: 20,
           right: 20,
           bottom: bottomClearance,
-          child: SingleChildScrollView(
-            clipBehavior: Clip.none,
-            child: card,
-          ),
+          // Bounded height so the card can shrink its image to fit.
+          child: card,
         ),
       ],
     );
