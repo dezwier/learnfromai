@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque
 from uuid import UUID
 
+from sqlalchemy.orm import load_only
 from sqlmodel import Session, col, select
 
 from app.features.knowledge_graph.identity import same_topic
 from app.features.knowledge_graph.neighborhood.constants import (
+    BUCKET_RELATION,
     KIND_FOR_RELATION,
     RELATION_CHILD,
     RELATION_PARENT,
-    is_complete,
 )
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
+
+# Canvas paint needs titles + focus description/image path — never image BLOBs.
+_NODE_CANVAS_COLS = (
+    KnowledgeNode.id,
+    KnowledgeNode.name,
+    KnowledgeNode.description,
+    KnowledgeNode.image_url,
+)
+_BUCKET_RELS = frozenset(BUCKET_RELATION.values())
+
 
 def build_subgraph(
     session: Session,
@@ -36,8 +47,13 @@ def build_subgraph(
     if canvas_max < 1:
         canvas_max = 30
 
-    for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus.id)).all():
-        other = session.get(KnowledgeNode, edge.to_id)
+    focus_edges = list(
+        session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus.id)).all()
+    )
+    direct_candidates = _nodes_by_ids(session, {edge.to_id for edge in focus_edges})
+
+    for edge in focus_edges:
+        other = direct_candidates.get(edge.to_id)
         if other is None:
             continue
         # Hide near-duplicates of the focus (Dinosaur beside Dinosaurs, etc.).
@@ -75,14 +91,25 @@ def build_subgraph(
     pools: dict[str, list[KnowledgeNode]] = {kind: [] for kind in via_order}
     seen_extended: set[UUID] = set()
     seen_extended_nodes: list[KnowledgeNode] = []
+    hop_by_from: dict[UUID, list[KnowledgeEdge]] = defaultdict(list)
+    hop_to_ids: set[UUID] = set()
+    if directs_sorted:
+        for edge in session.exec(
+            select(KnowledgeEdge).where(col(KnowledgeEdge.from_id).in_(directs_sorted))
+        ).all():
+            hop_by_from[edge.from_id].append(edge)
+            if edge.to_id not in nodes:
+                hop_to_ids.add(edge.to_id)
+    hop_nodes = _nodes_by_ids(session, hop_to_ids)
+
     for direct_id in directs_sorted:
         via_kind = kinds.get(direct_id, "related")
         if via_kind not in pools:
             via_kind = "related"
-        for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == direct_id)).all():
+        for edge in hop_by_from.get(direct_id, ()):
             if edge.to_id in nodes or edge.to_id in seen_extended:
                 continue
-            other = session.get(KnowledgeNode, edge.to_id)
+            other = hop_nodes.get(edge.to_id)
             if other is None:
                 continue
             if same_topic(other.name, focus.name):
@@ -119,7 +146,9 @@ def build_subgraph(
     ids = list(nodes.keys())
     edges = list(
         session.exec(
-            select(KnowledgeEdge).where(col(KnowledgeEdge.from_id).in_(ids), col(KnowledgeEdge.to_id).in_(ids))
+            select(KnowledgeEdge).where(
+                col(KnowledgeEdge.from_id).in_(ids), col(KnowledgeEdge.to_id).in_(ids)
+            )
         ).all()
     ) if ids else []
     distances = _distances(focus.id, edges)
@@ -134,8 +163,8 @@ def build_subgraph(
             str(node_id),
         )
 
-    # Canvas needs focus description + small thumbs; neighbor descriptions and
-    # full image URLs stay off the wire until that node becomes focus.
+    # Canvas: focus description + thumb paths for post-morph fade-in. Neighbor
+    # descriptions and full image URLs stay off the wire until that node is focus.
     node_payload = []
     for node_id in sorted(ids, key=sort_key):
         node = nodes[node_id]
@@ -151,7 +180,9 @@ def build_subgraph(
                 "image_url": node.image_url if is_focus else None,
                 "image_thumb_url": thumb,
                 "depth": depths.get(node_id, 0),
-                "distance": distances.get(node_id, 0 if is_focus else 2 if kinds.get(node_id) == "extended" else 1),
+                "distance": distances.get(
+                    node_id, 0 if is_focus else 2 if kinds.get(node_id) == "extended" else 1
+                ),
                 "kind": kinds.get(node_id, "related"),
             }
         )
@@ -164,13 +195,26 @@ def build_subgraph(
     ]
     incomplete = False
     if counts is not None:
-        incomplete = not is_complete(session, focus.id, counts)
+        total = int(counts.get("total") or sum(int(counts.get(b, 0)) for b in BUCKET_RELATION))
+        have = sum(1 for edge in focus_edges if edge.relation in _BUCKET_RELS)
+        incomplete = have < total
     return {
         "focus_node_id": str(focus.id),
         "incomplete": incomplete,
         "nodes": node_payload,
         "edges": edge_payload,
     }
+
+
+def _nodes_by_ids(session: Session, ids: set[UUID]) -> dict[UUID, KnowledgeNode]:
+    if not ids:
+        return {}
+    rows = session.exec(
+        select(KnowledgeNode)
+        .where(col(KnowledgeNode.id).in_(list(ids)))
+        .options(load_only(*_NODE_CANVAS_COLS))
+    ).all()
+    return {row.id: row for row in rows}
 
 
 def _distances(focus_id: UUID, edges: list[KnowledgeEdge]) -> dict[UUID, int]:

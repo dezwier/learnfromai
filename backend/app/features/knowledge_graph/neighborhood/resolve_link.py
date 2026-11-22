@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, or_
+from sqlalchemy.orm import load_only
 from sqlmodel import Session, col, select
 
 from app.features.knowledge_graph.identity import canonical_key_for, same_topic, topic_stems
@@ -21,7 +22,21 @@ from app.features.platform.neighborhood_llm import BUCKETS, parse_uuid
 
 def ensure_focus_node(session: Session, *, topic: str | None = None, node_id: UUID | None = None) -> KnowledgeNode:
     if node_id is not None:
-        row = session.get(KnowledgeNode, node_id)
+        # Graph/refocus never needs image BLOBs — only name/description/url path.
+        row = session.exec(
+            select(KnowledgeNode)
+            .where(KnowledgeNode.id == node_id)
+            .options(
+                load_only(
+                    KnowledgeNode.id,
+                    KnowledgeNode.name,
+                    KnowledgeNode.name_key,
+                    KnowledgeNode.description,
+                    KnowledgeNode.image_url,
+                    KnowledgeNode.created_at,
+                )
+            )
+        ).first()
         if row is None:
             from app.core.errors import not_found
 
