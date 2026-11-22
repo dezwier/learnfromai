@@ -176,16 +176,13 @@ class _GraphScreenState extends State<GraphScreen>
     _panAnimation = null;
     // Pin camera + seed morph at t=0 in one setState so the first painted
     // frame already matches the screen pin (avoids a one-frame jump).
-    // Camera then eases to canvas-center together with the tile morph.
+    // Camera then eases focus to center at the user's current zoom (don't reset).
     final scale = _transform.value.getMaxScaleOnAxis();
     final camBegin = nextFocus == null
         ? _transform.value.clone()
         : _matrixPinning(nextFocus.center, screenPin, scale: scale);
-    final camEnd = Matrix4.translationValues(
-      (viewport.width - next.width) / 2,
-      (viewport.height - next.height) / 2,
-      0,
-    );
+    final focusScene = nextFocus?.center ?? Offset(next.width / 2, next.height / 2);
+    final camEnd = _matrixCentering(focusScene, viewport, scale: scale);
     _transform.value = camBegin;
     _morphCameraBegin = camBegin;
     _morphCameraEnd = camEnd;
@@ -238,10 +235,11 @@ class _GraphScreenState extends State<GraphScreen>
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
-    _transform.value = Matrix4.translationValues(
-      (viewport.width - canvas.width) / 2,
-      (viewport.height - canvas.height) / 2,
-      0,
+    final scale = _transform.value.getMaxScaleOnAxis();
+    _transform.value = _matrixCentering(
+      Offset(canvas.width / 2, canvas.height / 2),
+      viewport,
+      scale: scale,
     );
   }
 
