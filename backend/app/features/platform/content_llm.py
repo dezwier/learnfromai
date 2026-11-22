@@ -71,9 +71,9 @@ def build_content_prompt(
         "- three tests (check1–check3): one of each type below, all checking that same bit\n\n"
         "Rules:\n"
         "- Stay on this topic only.\n"
-        "- Do not teach neighboring topics.\n"
+        "- Do not teach parent or sibling topics.\n"
         "- Do not overlap other atomic learnings already written for this topic.\n"
-        "- Never mention neighbors, other learnings, or these rules in the learner-facing text.\n"
+        "- Never mention parents, siblings, other learnings, or these rules in the learner-facing text.\n"
         "- The learning bit must stand alone (no “as above”, no fluff, no generic intro).\n"
         "- Tests must stand alone and be worth asking — precise, not trivia or paraphrases of each other.\n"
     ]
@@ -106,7 +106,7 @@ def build_content_prompt(
         )
     if neighbor_titles:
         parts.append(
-            "Neighbor topics (do not teach): "
+            "Parent and sibling topics (do not teach): "
             + json.dumps(neighbor_titles[:12])
             + "\n"
         )

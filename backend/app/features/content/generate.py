@@ -21,6 +21,10 @@ from app.features.content.service import (
     missing_content_kinds,
 )
 from app.features.knowledge_graph.neighborhood import set_progress
+from app.features.knowledge_graph.neighborhood.constants import (
+    RELATION_PARENT,
+    RELATION_SIBLING,
+)
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.platform.content_llm import get_content_llm
 from app.features.platform.jobs import renew_lease
@@ -167,10 +171,13 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
 
 
 def _neighbor_titles(session: Session, node_id: UUID) -> list[str]:
+    """Parent and sibling titles only — children/acquaintances stay teachable."""
     edges = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == node_id)).all())
     titles: list[str] = []
     seen: set[UUID] = set()
     for edge in edges:
+        if edge.relation not in (RELATION_PARENT, RELATION_SIBLING):
+            continue
         if edge.to_id in seen:
             continue
         seen.add(edge.to_id)

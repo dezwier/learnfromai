@@ -358,7 +358,8 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
     assert "single-word" in prompt
     assert '"pack_index": 2' in prompt
     assert "Do not overlap other atomic learnings" in prompt
-    assert "Do not teach neighboring topics" in prompt
-    assert "Never mention neighbors, other learnings" in prompt
+    assert "Do not teach parent or sibling topics" in prompt
+    assert "Never mention parents, siblings, other learnings" in prompt
+    assert "Parent and sibling topics (do not teach)" in prompt
     assert "worth knowing" in prompt
     assert "one of each type" in prompt
