@@ -372,18 +372,21 @@ class _NodeCard extends StatelessWidget {
                   shadows: hasImage ? _imageTitleShadows : null,
                 );
                 final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
-                final locked = node.titleFontSize;
-                final titleLaid = layoutTitle(
-                  text: node.title,
-                  style: titleStyleBase,
-                  maxWidth: maxW,
-                  maxHeight: titleBudget,
-                  maxLines: titleMaxLines,
-                  minFontSize: locked ?? 13,
-                  maxFontSize: locked ?? (node.radius * 0.5).clamp(17.0, 34.0),
-                  textScaler: scaler,
-                  hyphenateAtMinSize: true,
-                );
+                final lockedSize = node.titleFontSize;
+                final lockedLaid = node.titleLaid;
+                final titleLaid = lockedLaid != null && lockedSize != null
+                    ? (text: lockedLaid, fontSize: lockedSize)
+                    : layoutTitle(
+                        text: node.title,
+                        style: titleStyleBase,
+                        maxWidth: maxW,
+                        maxHeight: titleBudget,
+                        maxLines: titleMaxLines,
+                        minFontSize: 13,
+                        maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
+                        textScaler: scaler,
+                        hyphenateAtMinSize: true,
+                      );
                 final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
                 final gap = (node.radius * 0.08).clamp(4.0, 10.0);
                 final descStyle = TextStyle(
@@ -458,20 +461,40 @@ class _NodeCard extends StatelessWidget {
               vertical: node.radius * 0.24,
             ),
             child: Center(
-              child: _FittingLabel(
-                text: node.title,
-                maxLines: 4,
-                minFontSize: node.titleFontSize ?? 10,
-                maxFontSize: node.titleFontSize ?? (node.radius * 0.32).clamp(11.0, 17.0),
-                hyphenateWords: true,
-                style: TextStyle(
-                  fontFamily: 'tt_ramilas',
-                  height: 1.15,
-                  fontWeight: FontWeight.w600,
-                  color: hasImage ? Colors.white : scheme.onSurface.withValues(alpha: 0.9),
-                  shadows: hasImage ? _imageTitleShadows : null,
-                ),
-              ),
+              child: node.titleLaid != null && node.titleFontSize != null
+                  ? Text(
+                      node.titleLaid!,
+                      textAlign: TextAlign.center,
+                      softWrap: false,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramilas',
+                        height: 1.15,
+                        fontWeight: FontWeight.w600,
+                        color: hasImage
+                            ? Colors.white
+                            : scheme.onSurface.withValues(alpha: 0.9),
+                        fontSize: node.titleFontSize,
+                        shadows: hasImage ? _imageTitleShadows : null,
+                      ),
+                    )
+                  : _FittingLabel(
+                      text: node.title,
+                      maxLines: 4,
+                      minFontSize: 10,
+                      maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
+                      hyphenateWords: true,
+                      style: TextStyle(
+                        fontFamily: 'tt_ramilas',
+                        height: 1.15,
+                        fontWeight: FontWeight.w600,
+                        color: hasImage
+                            ? Colors.white
+                            : scheme.onSurface.withValues(alpha: 0.9),
+                        shadows: hasImage ? _imageTitleShadows : null,
+                      ),
+                    ),
             ),
           ),
         ],
