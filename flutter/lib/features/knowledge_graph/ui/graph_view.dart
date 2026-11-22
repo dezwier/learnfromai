@@ -103,6 +103,8 @@ class _GraphViewState extends State<GraphView> {
         children: [
           for (final node in ordered)
             Positioned(
+              // Keep tile/image State across sort-order shuffles during morph.
+              key: ValueKey(node.id),
               left: node.x - shadowPad,
               top: node.y - shadowPad,
               width: node.width + shadowPad * 2,
@@ -228,8 +230,9 @@ class _NodeCard extends StatelessWidget {
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
         : nodeFill(node, scheme);
     final flower = node.effectiveFlowerAmount;
-    // Morph on solid fills; fade thumbs in after settle (and when bytes arrive).
-    final revealImages = !morphing;
+    final imageKey = (node.imageThumbUrl?.trim().isNotEmpty == true)
+        ? node.imageThumbUrl!
+        : (node.imageUrl ?? node.id);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
@@ -246,7 +249,7 @@ class _NodeCard extends StatelessWidget {
           dark: dark,
           spotlight: spotlight,
           imageBytes: imageBytes,
-          revealImages: revealImages,
+          imageKey: imageKey,
         );
         final bloom = _flowerCard(
           scheme: scheme,
@@ -254,7 +257,7 @@ class _NodeCard extends StatelessWidget {
           dark: dark,
           spotlight: spotlight,
           imageBytes: imageBytes,
-          revealImages: revealImages,
+          imageKey: imageKey,
           contentOpacity: Curves.easeOut.transform(flower.clamp(0.0, 1.0)),
         );
         // Crossfade the whole range so flowerAmount never pops widgets in/out.
@@ -293,11 +296,11 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
     Uint8List? imageBytes,
-    required bool revealImages,
+    required String imageKey,
     double contentOpacity = 1,
   }) {
     final description = (node.description ?? '').trim();
-    final hasImage = imageBytes != null && revealImages;
+    final hasImage = imageBytes != null;
     final titleColor = hasImage ? Colors.white : scheme.onSurface;
     final descColor = hasImage
         ? Colors.white.withValues(alpha: 0.88)
@@ -310,7 +313,12 @@ class _NodeCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (imageBytes != null)
-              _hexImageFill(imageBytes, flower: true, reveal: revealImages),
+              _FadingHexImage(
+                key: ValueKey('img-flower-${node.id}'),
+                cacheKey: imageKey,
+                bytes: imageBytes,
+                flower: true,
+              ),
             if (hasImage)
               ClipPath(
                 clipper: const _FlowerTapClipper(),
@@ -415,16 +423,21 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
     Uint8List? imageBytes,
-    required bool revealImages,
+    required String imageKey,
   }) {
-    final hasImage = imageBytes != null && revealImages;
+    final hasImage = imageBytes != null;
     return CustomPaint(
       painter: _HexTilePainter(color: fill, dark: dark, spotlight: spotlight),
       child: Stack(
         fit: StackFit.expand,
         children: [
           if (imageBytes != null)
-            _hexImageFill(imageBytes, flower: false, reveal: revealImages),
+            _FadingHexImage(
+              key: ValueKey('img-hex-${node.id}'),
+              cacheKey: imageKey,
+              bytes: imageBytes,
+              flower: false,
+            ),
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.34,
@@ -451,22 +464,86 @@ class _NodeCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  static const _hexImageOpacity = 0.4;
+/// Thumb fill: fade in once per image URL; remounts / morphs stay opaque.
+class _FadingHexImage extends StatefulWidget {
+  const _FadingHexImage({
+    super.key,
+    required this.cacheKey,
+    required this.bytes,
+    required this.flower,
+  });
 
-  Widget _hexImageFill(
-    Uint8List bytes, {
-    required bool flower,
-    required bool reveal,
-  }) {
+  final String cacheKey;
+  final Uint8List bytes;
+  final bool flower;
+
+  static const opacity = 0.4;
+  static final _revealed = <String>{};
+
+  @override
+  State<_FadingHexImage> createState() => _FadingHexImageState();
+}
+
+class _FadingHexImageState extends State<_FadingHexImage> {
+  late double _opacity;
+  late String _key;
+  late bool _animateIn;
+  Uint8List? _shown;
+
+  bool get _warm => _FadingHexImage._revealed.contains(_key);
+
+  @override
+  void initState() {
+    super.initState();
+    _key = widget.cacheKey;
+    _shown = widget.bytes;
+    _animateIn = !_warm;
+    _opacity = _warm ? _FadingHexImage.opacity : 0;
+    if (_animateIn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _FadingHexImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final keyChanged = widget.cacheKey != _key;
+    final bytesChanged = !identical(_shown, widget.bytes);
+    if (!keyChanged && !bytesChanged) return;
+    _key = widget.cacheKey;
+    _shown = widget.bytes;
+    if (_warm) {
+      _animateIn = false;
+      _opacity = _FadingHexImage.opacity;
+      return;
+    }
+    _animateIn = true;
+    _opacity = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
+  }
+
+  void _reveal() {
+    if (!mounted || _shown != widget.bytes || widget.cacheKey != _key) return;
+    if (_opacity >= _FadingHexImage.opacity) {
+      _FadingHexImage._revealed.add(_key);
+      return;
+    }
+    setState(() => _opacity = _FadingHexImage.opacity);
+    _FadingHexImage._revealed.add(_key);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return ClipPath(
-      clipper: flower ? const _FlowerTapClipper() : const _HexTapClipper(),
+      clipper: widget.flower ? const _FlowerTapClipper() : const _HexTapClipper(),
       child: AnimatedOpacity(
-        opacity: reveal ? _hexImageOpacity : 0,
-        duration: Duration(milliseconds: reveal ? 280 : 0),
-        curve: Curves.easeOutCubic,
+        opacity: _opacity,
+        duration: Duration(milliseconds: _animateIn ? 560 : 0),
+        curve: Curves.easeInOutCubic,
         child: Image.memory(
-          bytes,
+          widget.bytes,
           fit: BoxFit.cover,
           gaplessPlayback: true,
           filterQuality: FilterQuality.medium,
