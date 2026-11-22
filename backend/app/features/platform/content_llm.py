@@ -36,7 +36,6 @@ class ContentLLM(Protocol):
         self,
         name: str,
         description: str | None,
-        neighbor_titles: list[str],
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
@@ -48,7 +47,6 @@ class ContentLLM(Protocol):
 def build_content_prompt(
     name: str,
     description: str | None,
-    neighbor_titles: list[str],
     *,
     kinds: list[str] | None = None,
     existing_checks: dict[str, dict] | None = None,
@@ -60,9 +58,10 @@ def build_content_prompt(
         required = list(CONTENT_KINDS)
     checks_needed = [k for k in required if k in CHECK_KINDS]
     need_learn = "learn" in required
+    topic = (name or "Topic").strip() or "Topic"
 
     parts = [
-        f"Write one atomic learning for {name}: one interesting learning bit about this topic. "
+        f"Write one atomic learning for {topic}: one interesting learning bit clearly about this topic. "
         "Return JSON only with keys: "
         + ", ".join(required)
         + ".\n\n"
@@ -70,10 +69,10 @@ def build_content_prompt(
         "- learn: one short, standalone atomic learning bit — concrete, interesting, worth knowing\n"
         "- three tests (check1–check3): one of each type below, all checking that same bit\n\n"
         "Rules:\n"
-        "- Stay on this topic only.\n"
-        "- Do not teach parent or sibling topics.\n"
+        f"- Every sentence must be about {topic} itself (use the topic name when natural).\n"
+        "- Do not digress into nearby or related topics; deepen this topic only.\n"
         "- Do not overlap other atomic learnings already written for this topic.\n"
-        "- Never mention parents, siblings, other learnings, or these rules in the learner-facing text.\n"
+        "- Never mention other learnings or these rules in the learner-facing text.\n"
         "- The learning bit must stand alone (no “as above”, no fluff, no generic intro).\n"
         "- Tests must stand alone and be worth asking — precise, not trivia or paraphrases of each other.\n"
     ]
@@ -104,17 +103,11 @@ def build_content_prompt(
             + json.dumps(existing_packs)
             + "\n"
         )
-    if neighbor_titles:
-        parts.append(
-            "Parent and sibling topics (do not teach): "
-            + json.dumps(neighbor_titles[:12])
-            + "\n"
-        )
     parts.append(
         "\n"
         + json.dumps(
             {
-                "topic": name,
+                "topic": topic,
                 "description": description or "",
                 "pack_index": pack_index,
                 "required_keys": required,
@@ -131,7 +124,6 @@ class FakeContentLLM:
         self,
         name: str,
         description: str | None,
-        neighbor_titles: list[str],
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
@@ -140,7 +132,6 @@ class FakeContentLLM:
     ) -> tuple[dict, dict]:
         topic = (name or "Topic").strip() or "Topic"
         desc = (description or "").strip()
-        neighbors = ", ".join(neighbor_titles[:4]) if neighbor_titles else "related ideas"
         required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
         facet = f"pack {pack_index}" if pack_index > 1 else "core idea"
         payload: dict = {}
@@ -150,7 +141,7 @@ class FakeContentLLM:
                 "markdown": (
                     f"**{topic}** ({facet}): "
                     f"{desc or 'One precise idea you can use right away.'} "
-                    f"Hold onto that single idea before branching toward {neighbors}."
+                    f"Hold onto that single idea about {topic}."
                 ),
             }
         if pack_index == 1:
@@ -201,7 +192,7 @@ class FakeContentLLM:
                     "question": f"Which focus fits a later pack about {topic}?",
                     "choices": [
                         f"A different facet of {topic} not covered yet.",
-                        f"A full course on every neighbor of {topic}.",
+                        f"A survey of unrelated subjects besides {topic}.",
                         f"Ignoring {topic} entirely.",
                         f"Only memorizing the word {topic}.",
                     ],
@@ -232,7 +223,6 @@ class GeminiContentLLM:
         self,
         name: str,
         description: str | None,
-        neighbor_titles: list[str],
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
@@ -244,7 +234,6 @@ class GeminiContentLLM:
             build_content_prompt(
                 name,
                 description,
-                neighbor_titles,
                 kinds=required,
                 existing_checks=existing_checks,
                 existing_packs=existing_packs,
@@ -335,7 +324,6 @@ class OpenAIContentLLM:
         self,
         name: str,
         description: str | None,
-        neighbor_titles: list[str],
         *,
         kinds: list[str] | None = None,
         existing_checks: dict[str, dict] | None = None,
@@ -347,7 +335,6 @@ class OpenAIContentLLM:
             build_content_prompt(
                 name,
                 description,
-                neighbor_titles,
                 kinds=required,
                 existing_checks=existing_checks,
                 existing_packs=existing_packs,

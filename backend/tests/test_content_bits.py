@@ -332,11 +332,10 @@ def test_normalize_cloze_rejects_multi_word_choice():
         )
 
 
-def test_build_content_prompt_includes_existing_packs_and_neighbors():
+def test_build_content_prompt_includes_existing_packs_and_stays_on_topic():
     prompt = build_content_prompt(
         "Softmax",
         "Normalize scores",
-        ["Attention", "Logits"],
         kinds=["learn", "check1", "check2", "check3"],
         existing_packs=[
             {
@@ -352,14 +351,16 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
     assert "interesting learning bit" in prompt
     assert "short (a few words" in prompt
     assert "What is Softmax?" in prompt
-    assert "Attention" in prompt
     assert "true_false" in prompt
     assert "cloze" in prompt
     assert "single-word" in prompt
     assert '"pack_index": 2' in prompt
     assert "Do not overlap other atomic learnings" in prompt
-    assert "Do not teach parent or sibling topics" in prompt
-    assert "Never mention parents, siblings, other learnings" in prompt
-    assert "Parent and sibling topics (do not teach)" in prompt
+    assert "Every sentence must be about Softmax" in prompt
+    assert "Do not digress into nearby or related topics" in prompt
+    assert "Never mention other learnings" in prompt
+    assert "Parent and sibling" not in prompt
+    assert "Neighbor topics" not in prompt
+    assert "Attention" not in prompt
     assert "worth knowing" in prompt
     assert "one of each type" in prompt

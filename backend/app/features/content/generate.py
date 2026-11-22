@@ -21,11 +21,7 @@ from app.features.content.service import (
     missing_content_kinds,
 )
 from app.features.knowledge_graph.neighborhood import set_progress
-from app.features.knowledge_graph.neighborhood.constants import (
-    RELATION_PARENT,
-    RELATION_SIBLING,
-)
-from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
+from app.features.knowledge_graph.node_models import KnowledgeNode
 from app.features.platform.content_llm import get_content_llm
 from app.features.platform.jobs import renew_lease
 from app.features.platform.llm import assert_user_quota, bind_usage_sink, maybe_record_usage
@@ -104,7 +100,6 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
             "bit_ids": [],
         }
 
-    neighbor_titles = _neighbor_titles(session, node.id)
     from app.features.accounts.models import User
     from app.features.knowledge_graph.preferences import preferred_llm_provider
 
@@ -137,7 +132,6 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     bits, usage = llm.generate_bits(
         node.name,
         node.description,
-        neighbor_titles,
         kinds=missing,
         existing_checks=existing_checks or None,
         existing_packs=other_packs or None,
@@ -168,25 +162,6 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
             session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
         ),
     }
-
-
-def _neighbor_titles(session: Session, node_id: UUID) -> list[str]:
-    """Parent and sibling titles only — children/acquaintances stay teachable."""
-    edges = list(session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == node_id)).all())
-    titles: list[str] = []
-    seen: set[UUID] = set()
-    for edge in edges:
-        if edge.relation not in (RELATION_PARENT, RELATION_SIBLING):
-            continue
-        if edge.to_id in seen:
-            continue
-        seen.add(edge.to_id)
-        other = session.get(KnowledgeNode, edge.to_id)
-        if other is not None and other.name:
-            titles.append(other.name)
-        if len(titles) >= 12:
-            break
-    return titles
 
 
 def _upsert_bits(
