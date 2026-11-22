@@ -102,6 +102,8 @@ class LearnSessionCardStage extends StatelessWidget {
 
   static double get headerTop => OverlayPanel.closeInset;
   static double get headerHeight => OverlayPanel.closeSize;
+  /// Gap under the title/close row before the card.
+  static const double headerCardGap = 12;
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +163,7 @@ class LearnSessionCardStage extends StatelessWidget {
         Positioned(
           // Slide the whole slot up with the keyboard while keeping height
           // constant — card layout stays put, no Transform on the focused field.
-          top: headerTop + headerHeight + 4 - lift,
+          top: headerTop + headerHeight + headerCardGap - lift,
           left: 20,
           right: 20,
           bottom: bottomClearance + lift,

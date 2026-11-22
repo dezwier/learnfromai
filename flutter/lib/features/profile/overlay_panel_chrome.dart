@@ -21,8 +21,8 @@ class OverlayPanel extends StatefulWidget {
   /// When false, the caller paints its own close control (e.g. under a flip card).
   final bool showCloseButton;
 
-  static const double closeSize = 44;
-  static const double closeInset = 10;
+  static const double closeSize = 34;
+  static const double closeInset = 12;
   static const double edgeWidth = 44;
 
   static double bottomClearance(BuildContext context, {required bool hasBottom}) {
@@ -220,7 +220,7 @@ class OverlayPanelState extends State<OverlayPanel>
   }
 }
 
-/// Comfy circular dismiss control for overlay panels.
+/// Small circular dismiss control for overlay panels.
 class OverlayCloseButton extends StatelessWidget {
   const OverlayCloseButton({super.key, required this.onPressed});
 
@@ -230,17 +230,19 @@ class OverlayCloseButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
-    final dialFill = dark ? const Color(0xFFE8EAEE) : const Color(0xFFF7F6F4);
-    final rim = scheme.primary.withValues(alpha: 0.55);
-    final iconColor = dark ? const Color(0xFF2A2E33) : const Color(0xFF3A4048);
+    final dialFill = dark
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.72)
+        : scheme.surface.withValues(alpha: 0.78);
+    final rim = scheme.onSurface.withValues(alpha: dark ? 0.18 : 0.12);
+    final iconColor = scheme.onSurface.withValues(alpha: dark ? 0.62 : 0.48);
 
     return Tooltip(
       message: 'Close',
       child: Material(
-        elevation: 3,
-        shadowColor: Colors.black.withValues(alpha: 0.28),
-        shape: CircleBorder(side: BorderSide(color: rim, width: 1.4)),
-        color: dialFill.withValues(alpha: 0.96),
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: 0.16),
+        shape: CircleBorder(side: BorderSide(color: rim, width: 1)),
+        color: dialFill,
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
@@ -248,7 +250,7 @@ class OverlayCloseButton extends StatelessWidget {
           child: SizedBox(
             width: OverlayPanel.closeSize,
             height: OverlayPanel.closeSize,
-            child: Icon(Icons.close_rounded, size: 24, color: iconColor),
+            child: Icon(Icons.close_rounded, size: 18, color: iconColor),
           ),
         ),
       ),
