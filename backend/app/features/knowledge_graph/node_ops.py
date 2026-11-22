@@ -98,21 +98,26 @@ def delete_knowledge_node(session: Session, node_id: UUID) -> dict:
     )
     session.flush()
 
-    for link in list(
-        session.exec(select(KnowledgeRequestNode).where(KnowledgeRequestNode.node_id == node_id)).all()
-    ):
-        session.delete(link)
-    session.flush()
+    # Drop membership rows that point at this node (other users' focuses).
+    session.execute(delete(KnowledgeRequestNode).where(KnowledgeRequestNode.node_id == node_id))
 
-    focused = list(session.exec(select(KnowledgeRequest).where(KnowledgeRequest.focus_id == node_id)).all())
-    for request in focused:
-        for link in list(
-            session.exec(
-                select(KnowledgeRequestNode).where(KnowledgeRequestNode.request_id == request.id)
-            ).all()
-        ):
-            session.delete(link)
-        session.delete(request)
+    # Focused requests own many request_nodes (neighbors). Delete those links
+    # first, then the requests — ORM autoflush otherwise deletes the request
+    # while sibling links still reference it.
+    focused_ids = list(
+        session.exec(select(KnowledgeRequest.id).where(KnowledgeRequest.focus_id == node_id)).all()
+    )
+    requests_deleted = 0
+    if focused_ids:
+        session.execute(
+            delete(KnowledgeRequestNode).where(col(KnowledgeRequestNode.request_id).in_(focused_ids))
+        )
+        requests_deleted = int(
+            session.execute(
+                delete(KnowledgeRequest).where(col(KnowledgeRequest.id).in_(focused_ids))
+            ).rowcount
+            or 0
+        )
     session.flush()
 
     title = row.name
@@ -128,4 +133,5 @@ def delete_knowledge_node(session: Session, node_id: UUID) -> dict:
         "events_deleted": events_deleted,
         "reviews_deleted": reviews_deleted,
         "watchers_deleted": watchers_deleted,
+        "requests_deleted": requests_deleted,
     }

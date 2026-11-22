@@ -276,6 +276,7 @@ def test_patch_and_delete_knowledge_node(client, auth, session):
 
 def test_delete_knowledge_node_cascades_atoms_and_progress(client, auth, session, user):
     from app.features.content.models import KnowledgeBit
+    from app.features.knowledge_graph.node_models import KnowledgeRequest, KnowledgeRequestNode
     from app.features.node_image.pack_models import KnowledgePackImage
     from app.features.platform.models import GenerationJob, GenerationJobWatcher
     from app.features.reviews.models import UserPackReview
@@ -343,9 +344,25 @@ def test_delete_knowledge_node_cascades_atoms_and_progress(client, auth, session
             title=node.name,
         )
     )
+    # Focused request with neighbor links — this was the production 500.
+    focus_req = KnowledgeRequest(user_id=user.id, focus_id=node.id)
+    session.add(focus_req)
+    session.flush()
+    focus_req_id = focus_req.id
+    session.add_all(
+        [
+            KnowledgeRequestNode(
+                request_id=focus_req_id, node_id=node.id, distance=0, kind="focus"
+            ),
+            KnowledgeRequestNode(
+                request_id=focus_req_id, node_id=other.id, distance=1, kind="sibling"
+            ),
+        ]
+    )
     session.commit()
 
     node_id = node.id
+    other_id = other.id
     deleted = client.delete(f"/api/v1/knowledge/nodes/{node_id}", headers=auth)
     assert deleted.status_code == 200, deleted.text
     body = deleted.json()
@@ -356,6 +373,7 @@ def test_delete_knowledge_node_cascades_atoms_and_progress(client, auth, session
     assert body["events_deleted"] == 2
     assert body["reviews_deleted"] == 1
     assert body["watchers_deleted"] == 1
+    assert body["requests_deleted"] == 1
 
     session.expire_all()
     assert session.get(KnowledgeNode, node_id) is None
@@ -370,8 +388,10 @@ def test_delete_knowledge_node_cascades_atoms_and_progress(client, auth, session
         session.exec(select(GenerationJobWatcher).where(GenerationJobWatcher.node_id == node_id)).all()
         == []
     )
+    assert session.get(KnowledgeRequest, focus_req_id) is None
+    assert session.exec(select(KnowledgeRequestNode)).all() == []
     # Sibling remains; only the deleted node's edges are gone.
-    assert session.get(KnowledgeNode, other.id) is not None
+    assert session.get(KnowledgeNode, other_id) is not None
     assert session.exec(select(KnowledgeEdge)).all() == []
 
 
