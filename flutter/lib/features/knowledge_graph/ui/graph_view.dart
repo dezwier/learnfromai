@@ -393,16 +393,25 @@ class _NodeCard extends StatelessWidget {
                                 hyphenateAtMinSize: true,
                               );
                 final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
-                final gap = (node.radius * 0.08).clamp(4.0, 10.0);
-                final morphingText = lockedSize != null;
+                final descSize = node.descFontSize ?? (node.radius * 0.22).clamp(13.0, 18.0);
+                final gap = (descSize * 0.45).clamp(4.0, 10.0);
                 final descStyle = TextStyle(
                   fontFamily: 'tt_ramilas',
                   height: 1.25,
                   fontWeight: FontWeight.w500,
                   color: descColor,
-                  fontSize: (node.radius * 0.22).clamp(13.0, 18.0),
+                  fontSize: descSize,
                   shadows: hasImage ? _imageBodyShadows : null,
                 );
+                // Always pre-wrap (same helper as morph) so settle matches animation.
+                final descText = node.descLaid ??
+                    wrapTitleWithHyphens(
+                      text: description,
+                      style: descStyle,
+                      maxWidth: maxW * 0.84,
+                      maxLines: 5,
+                      textScaler: scaler,
+                    );
 
                   return Center(
                     child: Column(
@@ -420,11 +429,10 @@ class _NodeCard extends StatelessWidget {
                         if (hasDesc) ...[
                           SizedBox(height: gap),
                           Text(
-                            description,
+                            descText,
                             textAlign: TextAlign.center,
-                            // Morph: no reflow — single-line fade; settle wraps normally.
-                            softWrap: !morphingText,
-                            maxLines: morphingText ? 2 : 5,
+                            softWrap: false,
+                            maxLines: 5,
                             overflow: TextOverflow.ellipsis,
                             style: descStyle,
                           ),

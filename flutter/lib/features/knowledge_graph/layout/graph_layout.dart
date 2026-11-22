@@ -81,6 +81,8 @@ class PlacedNode {
     this.colorT = 1,
     this.titleFontSize,
     this.titleLaid,
+    this.descFontSize,
+    this.descLaid,
   });
 
   final String id;
@@ -114,6 +116,9 @@ class PlacedNode {
   final double? titleFontSize;
   /// Pre-wrapped title for morph (softWrap: false); keeps line breaks fixed.
   final String? titleLaid;
+  /// Focus description: pre-wrapped at final metrics (softWrap: false during morph).
+  final double? descFontSize;
+  final String? descLaid;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -148,6 +153,8 @@ class PlacedNode {
     double? titleFontSize,
     String? titleLaid,
     bool clearTitleLaid = false,
+    double? descFontSize,
+    String? descLaid,
   }) {
     return PlacedNode(
       id: id,
@@ -172,6 +179,8 @@ class PlacedNode {
       colorT: colorT ?? this.colorT,
       titleFontSize: titleFontSize ?? this.titleFontSize,
       titleLaid: clearTitleLaid ? null : (titleLaid ?? this.titleLaid),
+      descFontSize: descFontSize ?? this.descFontSize,
+      descLaid: descLaid ?? this.descLaid,
     );
   }
 }
@@ -298,6 +307,31 @@ PlacedNode _scaledAboutCenter(PlacedNode node, double scale) {
   );
 }
 
+/// Focus flower description at settled size — pre-wrapped so morph can't reflow it.
+({String text, double fontSize})? fittedDesc(PlacedNode node) {
+  final raw = (node.description ?? '').trim();
+  if (raw.isEmpty) return null;
+  final padX = node.radius * 0.62 * 2;
+  final maxW = (node.width - padX).clamp(8.0, 4000.0);
+  final fontSize = (node.radius * 0.22).clamp(13.0, 18.0);
+  final style = TextStyle(
+    fontFamily: 'tt_ramilas',
+    height: 1.25,
+    fontWeight: FontWeight.w500,
+    fontSize: fontSize,
+  );
+  return (
+    text: wrapTitleWithHyphens(
+      text: raw,
+      style: style,
+      maxWidth: maxW * 0.84,
+      maxLines: 5,
+      textScaler: TextScaler.noScaling,
+    ),
+    fontSize: fontSize,
+  );
+}
+
 typedef MorphLayoutIndex = ({
   Map<String, PlacedNode> fromById,
   Map<String, PlacedNode> toById,
@@ -347,10 +381,14 @@ GraphLayout morphGraphLayouts(
       final toFocus = b.effectiveFlowerAmount >= 0.5;
       if (fromFocus != toFocus) {
         // Focus ↔ hex: ease title size; raw title (no frozen wrap) while size moves.
+        // Description: final pre-wrapped lines from the focus side (no reflow).
+        final desc = fittedDesc(toFocus ? b : a);
         nodes.add(
           lerpPlacedNode(a, b, tt).copyWith(
             titleFontSize: lerpDouble(fromFit.fontSize, toFit.fontSize, tt),
             clearTitleLaid: true,
+            descFontSize: desc?.fontSize,
+            descLaid: desc?.text,
           ),
         );
       } else {
