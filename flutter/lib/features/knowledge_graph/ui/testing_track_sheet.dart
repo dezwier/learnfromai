@@ -469,6 +469,11 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   }
 
   String? _cardImageUrl(ReviewDueItem item, GraphController graph) {
+    final packThumb =
+        item.packImageThumbUrl?.trim() ?? item.pack.packImageThumbUrl?.trim();
+    if (packThumb != null && packThumb.isNotEmpty) return packThumb;
+    final packFull = item.packImageUrl?.trim() ?? item.pack.packImageUrl?.trim();
+    if (packFull != null && packFull.isNotEmpty) return packFull;
     final thumb = item.imageThumbUrl?.trim();
     if (thumb != null && thumb.isNotEmpty) return thumb;
     final full = item.imageUrl?.trim();
@@ -485,6 +490,53 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       if (gFull != null && gFull.isNotEmpty) return gFull;
     }
     return null;
+  }
+
+  /// When a pack-image job finishes, point the current card at the new asset.
+  void _syncPackImageFromGraph(GraphController graph) {
+    if (!_reviewing || _queue.isEmpty) return;
+    if (graph.lastCompletedJobType != 'generate_pack_image') return;
+    final card = _queue[_queueIndex];
+    if (graph.lastCompletedNodeId != card.item.nodeId) return;
+    if (graph.lastCompletedPackIndex != card.item.packIndex) return;
+    final full =
+        '/knowledge/nodes/${card.item.nodeId}/packs/${card.item.packIndex}/image/file';
+    final thumb = '$full?variant=thumb';
+    if (card.item.packImageUrl == full && card.item.packImageThumbUrl == thumb) {
+      return;
+    }
+    final item = card.item;
+    final updated = ReviewDueItem(
+      nodeId: item.nodeId,
+      title: item.title,
+      packIndex: item.packIndex,
+      leitnerBin: item.leitnerBin,
+      nextReviewAt: item.nextReviewAt,
+      imageUrl: full,
+      imageThumbUrl: thumb,
+      packImageUrl: full,
+      packImageThumbUrl: thumb,
+      pack: item.pack.copyWith(
+        imageUrl: full,
+        imageThumbUrl: thumb,
+        packImageUrl: full,
+        packImageThumbUrl: thumb,
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_reviewing || _queue.isEmpty) return;
+      if (_queueIndex >= _queue.length) return;
+      final current = _queue[_queueIndex];
+      if (current.item.nodeId != item.nodeId ||
+          current.item.packIndex != item.packIndex) {
+        return;
+      }
+      setState(() {
+        final next = List<_ReviewCard>.from(_queue);
+        next[_queueIndex] = _ReviewCard(item: updated, checkKind: current.checkKind);
+        _queue = next;
+      });
+    });
   }
 
   Future<void> _onPackLongPress(GraphController graph, _ReviewCard card) async {
@@ -532,6 +584,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
 
   Widget _buildReview(BuildContext context, double bottomClearance) {
     final graph = context.watch<GraphController>();
+    _syncPackImageFromGraph(graph);
     final card = _queue[_queueIndex];
     final imageUrl = _cardImageUrl(card.item, graph);
     final entry = LearnDeckEntry(pack: card.item.pack, checkKind: card.checkKind);

@@ -396,12 +396,28 @@ class _LearnCardImageState extends State<_LearnCardImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl) {
       _hydrateFromCache();
-      unawaited(_load());
+      unawaited(_load(force: true));
       return;
     }
-    if (_bytes == null &&
-        widget.cachedBytes != null &&
-        widget.cachedBytes!.isNotEmpty) {
+    // Pack regenerate keeps the same URL — reload when the job finishes or
+    // when GraphController hands us freshly cached bytes.
+    if (oldWidget.loading && !widget.loading) {
+      unawaited(_load(force: true));
+      return;
+    }
+    final cached = widget.cachedBytes;
+    if (cached != null &&
+        cached.isNotEmpty &&
+        !identical(cached, oldWidget.cachedBytes) &&
+        !identical(cached, _bytes)) {
+      setState(() {
+        _bytes = cached;
+        _loadedUrl = (widget.imageUrl ?? '').trim();
+        _loadingBytes = false;
+      });
+      return;
+    }
+    if (_bytes == null && cached != null && cached.isNotEmpty) {
       setState(_hydrateFromCache);
     }
   }
@@ -415,7 +431,7 @@ class _LearnCardImageState extends State<_LearnCardImage> {
     _loadingBytes = false;
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     final url = (widget.imageUrl ?? '').trim();
     final gen = ++_loadGen;
     if (url.isEmpty) {
@@ -428,7 +444,7 @@ class _LearnCardImageState extends State<_LearnCardImage> {
       }
       return;
     }
-    if (url == _loadedUrl && _bytes != null) return;
+    if (!force && url == _loadedUrl && _bytes != null) return;
     if (_bytes == null) {
       setState(() => _loadingBytes = true);
     }
@@ -452,6 +468,7 @@ class _LearnCardImageState extends State<_LearnCardImage> {
     const radius = BorderRadius.vertical(top: Radius.circular(16));
     final bytes = _bytes;
     final showPlaceholder = bytes == null && (widget.loading || _loadingBytes);
+    final showProgressOnImage = widget.loading && bytes != null;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
@@ -459,23 +476,43 @@ class _LearnCardImageState extends State<_LearnCardImage> {
       width: double.infinity,
       child: ClipRRect(
         borderRadius: radius,
-        child: showPlaceholder
-            ? const PulsePlaceholder.image(borderRadius: radius)
-            : bytes == null
-                ? ColoredBox(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.06),
-                  )
-                : Image.memory(
-                    bytes,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    gaplessPlayback: true,
-                    filterQuality: FilterQuality.medium,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (showPlaceholder)
+              const PulsePlaceholder.image(borderRadius: radius)
+            else if (bytes == null)
+              ColoredBox(
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.06),
+              )
+            else
+              Image.memory(
+                bytes,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
+              ),
+            if (showProgressOnImage)
+              const ColoredBox(
+                color: Color(0x4D000000),
+                child: Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Colors.white,
+                    ),
                   ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

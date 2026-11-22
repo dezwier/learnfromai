@@ -142,7 +142,7 @@ extension GraphControllerImages on GraphController {
     String? imageThumbUrl,
   }) {
     imageBytesByUrl.removeWhere(
-      (key, _) => key.contains('/packs/$packIndex/image'),
+      (key, _) => key.contains('/nodes/$nodeId/packs/$packIndex/image'),
     );
     ensureImageCached(imageThumbUrl ?? imageUrl);
     ensureImageCached(imageUrl);

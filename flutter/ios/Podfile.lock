@@ -1,4 +1,7 @@
 PODS:
+  - audioplayers_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - Firebase/Auth (12.19.3):
     - Firebase/CoreOnly
     - FirebaseAuth (~> 12.19.0)
@@ -64,6 +67,7 @@ PODS:
   - RecaptchaInterop (101.0.0)
 
 DEPENDENCIES:
+  - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
   - firebase_auth (from `.symlinks/plugins/firebase_auth/ios`)
   - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
   - Flutter (from `Flutter`)
@@ -86,6 +90,8 @@ SPEC REPOS:
     - RecaptchaInterop
 
 EXTERNAL SOURCES:
+  audioplayers_darwin:
+    :path: ".symlinks/plugins/audioplayers_darwin/darwin"
   firebase_auth:
     :path: ".symlinks/plugins/firebase_auth/ios"
   firebase_core:
@@ -102,6 +108,7 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/integration_test/ios"
 
 SPEC CHECKSUMS:
+  audioplayers_darwin: 835ced6edd4c9fc8ebb0a7cc9e294a91d99917d5
   Firebase: e3c5ab38229ae085490d02398d97b9f5374bbe6e
   firebase_auth: 749e959255e42e6ca6ec2ecc83a0e1ce55d384fe
   firebase_core: 4d065e808a89f0eaa0df16660666783f9ea13d38
