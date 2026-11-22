@@ -380,13 +380,13 @@ GraphLayout morphGraphLayouts(
       final fromFocus = a.effectiveFlowerAmount >= 0.5;
       final toFocus = b.effectiveFlowerAmount >= 0.5;
       if (fromFocus != toFocus) {
-        // Focus ↔ hex: ease title size; raw title (no frozen wrap) while size moves.
-        // Description: final pre-wrapped lines from the focus side (no reflow).
+        // Focus ↔ hex: ease title size; keep *destination* wrap the whole way
+        // (new focus shows final flower lines while growing — no settle flicker).
         final desc = fittedDesc(toFocus ? b : a);
         nodes.add(
           lerpPlacedNode(a, b, tt).copyWith(
             titleFontSize: lerpDouble(fromFit.fontSize, toFit.fontSize, tt),
-            clearTitleLaid: true,
+            titleLaid: toFit.text,
             descFontSize: desc?.fontSize,
             descLaid: desc?.text,
           ),

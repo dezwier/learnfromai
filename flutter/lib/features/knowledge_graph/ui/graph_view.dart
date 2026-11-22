@@ -374,24 +374,21 @@ class _NodeCard extends StatelessWidget {
                 final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
                 final lockedSize = node.titleFontSize;
                 final lockedLaid = node.titleLaid;
-                // Morph focus ease: size set, laid null → raw title (no mid-anim wrap).
-                // Morph freeze: both set → pre-wrapped lines.
+                // Morph: locked wrap + size. Settle: same noScaling fit as morph precompute.
                 final ({String text, double fontSize}) titleLaid =
                     lockedLaid != null && lockedSize != null
                         ? (text: lockedLaid, fontSize: lockedSize)
-                        : lockedSize != null
-                            ? (text: node.title, fontSize: lockedSize)
-                            : layoutTitle(
-                                text: node.title,
-                                style: titleStyleBase,
-                                maxWidth: maxW,
-                                maxHeight: titleBudget,
-                                maxLines: titleMaxLines,
-                                minFontSize: 13,
-                                maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
-                                textScaler: scaler,
-                                hyphenateAtMinSize: true,
-                              );
+                        : layoutTitle(
+                            text: node.title,
+                            style: titleStyleBase,
+                            maxWidth: maxW,
+                            maxHeight: titleBudget,
+                            maxLines: titleMaxLines,
+                            minFontSize: 13,
+                            maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
+                            textScaler: TextScaler.noScaling,
+                            hyphenateAtMinSize: true,
+                          );
                 final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
                 final descSize = node.descFontSize ?? (node.radius * 0.22).clamp(13.0, 18.0);
                 final gap = (descSize * 0.45).clamp(4.0, 10.0);
