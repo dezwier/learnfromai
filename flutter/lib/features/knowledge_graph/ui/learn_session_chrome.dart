@@ -50,10 +50,9 @@ class LearnSessionFloatingCta extends StatelessWidget {
       // can't fall through to whatever sits under this slot.
       child: AbsorbPointer(
         absorbing: !visible || onPressed == null,
-        child: AnimatedOpacity(
+        // Instant with quiz feedback — no fade that lags the green/red badge.
+        child: Opacity(
           opacity: visible && onPressed != null ? 1 : 0,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
           child: FilledButton(
             onPressed: onPressed,
             style: FilledButton.styleFrom(

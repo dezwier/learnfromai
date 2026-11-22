@@ -282,9 +282,9 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final dist = _distribution;
     final dueCount = dist?.dueCount ?? 0;
     final canReview = dueCount > 0 && !_loading;
-    // Reserve CTA space during review (even before Next appears) so the card fits.
-    final reserveNext = _reviewing && _answered;
-    final nextReady = reserveNext && _continueArmed && !_submitting;
+    // Show Next in the same frame as green/red feedback; only taps stay gated.
+    final showNext = _reviewing && _answered;
+    final nextTappable = showNext && _continueArmed && !_submitting;
     final bottomClearance = LearnSessionFloatingCta.clearance(
       context,
       reserveCta: _reviewing,
@@ -333,15 +333,15 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
-          // Eat taps while settling so the answer tap can't hit Next/Done.
-          if (reserveNext && !nextReady)
+          // Eat taps briefly so the answer tap can't also hit Next/Done.
+          if (showNext && !nextTappable)
             const Positioned.fill(
               child: AbsorbPointer(
                 child: ColoredBox(color: Color(0x00000000)),
               ),
             ),
-          // Mount CTA only when safe — avoids IgnorePointer fall-through into Done.
-          if (nextReady)
+          // Mount with the feedback badge — don't wait for the settle timer.
+          if (showNext)
             LearnSessionFloatingCta(
               label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
               onPressed: () => unawaited(_onNextCard()),
