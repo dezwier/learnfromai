@@ -19,7 +19,7 @@ from app.features.platform.neighborhood_llm import resolve_llm_provider
 
 logger = logging.getLogger(__name__)
 
-PROMPT_IMAGE = "topic_image_v2"
+PROMPT_IMAGE = "topic_image_v3"
 
 # 1×1 PNG used by the fake provider in tests.
 _FAKE_PNG = base64.b64decode(
@@ -27,17 +27,28 @@ _FAKE_PNG = base64.b64decode(
 )
 
 
+_NO_TEXT = (
+    "CRITICAL — TEXT-FREE IMAGE: "
+    "Show zero writing in the frame. No letters, words, numbers, digits, captions, "
+    "titles, subtitles, labels, annotations, callouts, arrows with words, sticky notes, "
+    "whiteboard writing, chalk writing, book pages with readable prose, posters, "
+    "street signs, product packaging text, logos, watermarks, UI chrome, or typography "
+    "of any kind. Do not render the topic name or learning title as text. "
+    "Do not draw equations, formulas, symbols-as-labels, charts with axis labels, "
+    "or diagrams with named boxes — convey those ideas with concrete objects, scenes, "
+    "light, gesture, and metaphor instead. "
+    "The only exception is when the learning subject IS the craft of writing itself "
+    "(e.g. the art of calligraphy, illuminated manuscripts as artifacts) and even then "
+    "keep glyphs abstract/illegible rather than spelling real words. "
+    "If unsure, omit all text. "
+)
+
 _IMAGE_STYLE = (
     "Style: photorealistic, mature editorial photography, clean single-subject "
     "composition, soft natural light, shallow depth of field, no logos, no UI, "
     "no watermarks, no collage, no borders. "
-    "Do not put any text, letters, numbers, captions, labels, signs, handwriting, "
-    "or typography in the image unless the topic or learning bit clearly requires "
-    "readable writing as the subject itself (for example calligraphy, a street sign "
-    "central to the idea, sheet music, or a specific formula that must be shown). "
-    "When in doubt, leave the image text-free and convey the idea visually. "
     "Prefer a realistic mature look unless the topic clearly demands another medium "
-    "(myth, fantasy, abstract math, cartoon characters, etc.). "
+    "(myth, fantasy, abstract concept, cartoon characters, etc.). "
 )
 
 
@@ -60,9 +71,12 @@ def build_topic_image_prompt(name: str, description: str | None) -> str:
     if desc:
         subject = f"{topic}: {desc}"
     return (
-        "Create one iconic square image that represents the learning topic below. "
+        f"{_NO_TEXT}"
+        "Create one iconic square image that represents the learning topic below "
+        "using only visual imagery — no written language in the picture. "
         f"{_IMAGE_STYLE}"
-        f"Topic: {subject}"
+        f"Topic (for meaning only, never letter it into the image): {subject} "
+        f"{_NO_TEXT}"
     )
 
 
@@ -79,18 +93,24 @@ def build_pack_image_prompt(
     bit = (learn_markdown or "").strip()
     if len(bit) > 600:
         bit = bit[:600].rstrip() + "…"
-    subject_lines = [f"Topic: {topic}."]
+    subject_lines = [f"Topic (meaning only): {topic}."]
     if desc:
-        subject_lines.append(f"Topic context: {desc}")
+        subject_lines.append(f"Topic context (meaning only): {desc}")
     if title:
-        subject_lines.append(f"Learning bit title: {title}")
+        subject_lines.append(f"Learning bit title (meaning only, never print it): {title}")
     if bit:
-        subject_lines.append(f"Learning bit: {bit}")
+        subject_lines.append(
+            f"Learning bit (conceptual guidance only — do not copy any of this prose "
+            f"or its terms as text in the image): {bit}"
+        )
     return (
-        "Create one square image that appropriately supports the atomic learning below "
-        "(illustrate the specific learning bit, not a generic topic icon). "
+        f"{_NO_TEXT}"
+        "Create one square image that supports the atomic learning below "
+        "(illustrate the specific idea with a scene or object, not a generic topic icon, "
+        "and not a titled poster or textbook page). "
         f"{_IMAGE_STYLE}"
         + " ".join(subject_lines)
+        + f" {_NO_TEXT}"
     )
 
 
