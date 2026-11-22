@@ -53,6 +53,9 @@ class _GraphScreenState extends State<GraphScreen>
   GraphLayout? _settledLayout;
   GraphLayout? _morphFrom;
   GraphLayout? _morphTo;
+  /// Camera eases to canvas-center in lockstep with tile morph (not after).
+  Matrix4? _morphCameraBegin;
+  Matrix4? _morphCameraEnd;
   Size _viewport = Size.zero;
   Timer? _dwellTimer;
   Timer? _motionSettleTimer;
@@ -167,19 +170,22 @@ class _GraphScreenState extends State<GraphScreen>
 
   void _onLayoutMorphTick() {
     if (!mounted) return;
+    final camFrom = _morphCameraBegin;
+    final camTo = _morphCameraEnd;
+    if (camFrom != null && camTo != null) {
+      final t = Curves.easeOutCubic.transform(_layoutMorph.value.clamp(0.0, 1.0));
+      _transform.value = Matrix4Tween(begin: camFrom, end: camTo).transform(t);
+    }
     setState(() {});
     if (!_layoutMorph.isCompleted) return;
     _morphFrom = null;
     _morphTo = null;
+    _morphCameraBegin = null;
+    _morphCameraEnd = null;
     final graph = context.read<GraphController>();
     _trailShown = List.of(graph.focusTrail);
-    // Morph first; thumbs load (and fade in) only after tiles have settled.
+    // Morph + camera done; thumbs fade in on settled tiles.
     graph.preloadGraphImages();
-    // Neighbors finished rearranging — ease the grown focus into true center.
-    _animateCameraToCanvasCenter(
-      viewport: _viewport,
-      canvas: Size(_settledLayout?.width ?? _viewport.width, _settledLayout?.height ?? _viewport.height),
-    );
   }
 
   GraphLayout _displayLayout(GraphLayout settled) {
@@ -221,14 +227,19 @@ class _GraphScreenState extends State<GraphScreen>
     _panAnimation = null;
     // Pin camera + seed morph at t=0 in one setState so the first painted
     // frame already matches the screen pin (avoids a one-frame jump).
-    if (nextFocus != null) {
-      final scale = _transform.value.getMaxScaleOnAxis();
-      _transform.value = _matrixPinning(
-        nextFocus.center,
-        screenPin,
-        scale: scale,
-      );
-    }
+    // Camera then eases to canvas-center together with the tile morph.
+    final scale = _transform.value.getMaxScaleOnAxis();
+    final camBegin = nextFocus == null
+        ? _transform.value.clone()
+        : _matrixPinning(nextFocus.center, screenPin, scale: scale);
+    final camEnd = Matrix4.translationValues(
+      (viewport.width - next.width) / 2,
+      (viewport.height - next.height) / 2,
+      0,
+    );
+    _transform.value = camBegin;
+    _morphCameraBegin = camBegin;
+    _morphCameraEnd = camEnd;
     _layoutMorph.stop();
     _layoutMorph.value = 0;
     setState(() {
@@ -252,6 +263,8 @@ class _GraphScreenState extends State<GraphScreen>
       _settledLayout = next;
       _morphFrom = null;
       _morphTo = null;
+      _morphCameraBegin = null;
+      _morphCameraEnd = null;
       _layoutMorph.stop();
       _layoutMorph.value = 1;
       _trailShown = List.of(context.read<GraphController>().focusTrail);
@@ -281,24 +294,6 @@ class _GraphScreenState extends State<GraphScreen>
       (viewport.height - canvas.height) / 2,
       0,
     );
-  }
-
-  void _animateCameraToCanvasCenter({required Size viewport, required Size canvas}) {
-    if (viewport.isEmpty) return;
-    final end = Matrix4.translationValues(
-      (viewport.width - canvas.width) / 2,
-      (viewport.height - canvas.height) / 2,
-      0,
-    );
-    final begin = _transform.value.clone();
-    _panController.stop();
-    _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
-      CurvedAnimation(parent: _panController, curve: Curves.easeOutCubic),
-    );
-    unawaited(_panController.forward(from: 0).then((_) {
-      if (!mounted) return;
-      _panAnimation = null;
-    }));
   }
 
   Matrix4 _matrixCentering(Offset scenePoint, Size viewport, {required double scale}) {
