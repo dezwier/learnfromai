@@ -1395,7 +1395,8 @@ class _GraphScreenState extends State<GraphScreen>
           transformationController: _transform,
           constrained: false,
           minScale: 0.45,
-          maxScale: 3.5,
+          // Default view is the closest allowed; only zoom out.
+          maxScale: 1.0,
           boundaryMargin: EdgeInsets.symmetric(
             horizontal: panSlack,
             vertical: panSlack,
