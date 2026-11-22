@@ -7,13 +7,12 @@ import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
 import '../../../core/widgets/study_card.dart';
-import '../../auth/auth_controller.dart';
 import '../../profile/overlay_panel_chrome.dart';
 import '../graph_controller.dart';
-import 'admin_content_delete.dart';
 import 'learn_card.dart';
 import 'learn_session_chrome.dart';
 import 'leitner_distribution_card.dart';
+import 'pack_actions_sheet.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -474,6 +473,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     if (thumb != null && thumb.isNotEmpty) return thumb;
     final full = item.imageUrl?.trim();
     if (full != null && full.isNotEmpty) return full;
+    final packBest = item.pack.bestImageUrl;
+    if (packBest != null) return packBest;
     final nodes = graph.categoryGraph?['nodes'];
     if (nodes is! List) return null;
     for (final raw in nodes) {
@@ -486,11 +487,55 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     return null;
   }
 
+  Future<void> _onPackLongPress(GraphController graph, _ReviewCard card) async {
+    final result = await showPackActionsSheet(
+      context,
+      nodeId: card.item.nodeId,
+      title: card.item.title,
+      pack: card.item.pack,
+      checkKind: card.checkKind,
+      hasPackImage: card.item.hasPackImage || card.item.pack.hasPackImage,
+    );
+    if (!mounted || result == null) return;
+    if (result.deleted) {
+      await _afterAdminDelete();
+      return;
+    }
+    if (result.hasPackImage == true) {
+      final thumb = result.imageThumbUrl;
+      final full = result.imageUrl;
+      setState(() {
+        final item = card.item;
+        final updated = ReviewDueItem(
+          nodeId: item.nodeId,
+          title: item.title,
+          packIndex: item.packIndex,
+          leitnerBin: item.leitnerBin,
+          nextReviewAt: item.nextReviewAt,
+          imageUrl: full ?? item.imageUrl,
+          imageThumbUrl: thumb ?? item.imageThumbUrl,
+          packImageUrl: full ?? item.packImageUrl,
+          packImageThumbUrl: thumb ?? item.packImageThumbUrl,
+          pack: item.pack.copyWith(
+            imageUrl: full,
+            imageThumbUrl: thumb,
+            packImageUrl: full,
+            packImageThumbUrl: thumb,
+          ),
+        );
+        final next = List<_ReviewCard>.from(_queue);
+        next[_queueIndex] = _ReviewCard(item: updated, checkKind: card.checkKind);
+        _queue = next;
+      });
+    }
+  }
+
   Widget _buildReview(BuildContext context, double bottomClearance) {
     final graph = context.watch<GraphController>();
     final card = _queue[_queueIndex];
     final imageUrl = _cardImageUrl(card.item, graph);
     final entry = LearnDeckEntry(pack: card.item.pack, checkKind: card.checkKind);
+    final packBusy = graph.isPackImageJobActive(card.item.nodeId, card.item.packIndex);
     return LearnSessionCardStage(
       title: card.item.title,
       meta: '${_queueIndex + 1} / ${_queue.length}',
@@ -506,7 +551,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
             entry: entry,
             imageUrl: imageUrl,
             startOnCheck: true,
-            imageLoading: graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
+            imageLoading:
+                packBusy || graph.isJobTypeActive(card.item.nodeId, 'generate_image'),
             loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
             cachedBytes: graph.cachedImageBytes(imageUrl),
             onShown: () {},
@@ -526,22 +572,9 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
               );
             },
           );
-          final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
-          // Always wrap — inserting GestureDetector only after answer remounts
-          // LearnFlipCard and resets the quiz to unanswered.
+          // Always wrap so long-press does not remount after answer.
           return GestureDetector(
-            onLongPress: (isAdmin && _answered)
-                ? () async {
-                    final deleted = await showAdminContentDeleteMenu(
-                      context,
-                      nodeId: card.item.nodeId,
-                      pack: card.item.pack,
-                      checkKind: card.checkKind,
-                    );
-                    if (!deleted || !mounted) return;
-                    await _afterAdminDelete();
-                  }
-                : null,
+            onLongPress: () => unawaited(_onPackLongPress(graph, card)),
             child: flip,
           );
         },

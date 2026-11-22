@@ -297,12 +297,19 @@ def content_for_node(
                 recipe_version=recipe_version,
             )
         )
+        from app.features.node_image.pack_service import pack_image_fields
+
+        image_fields = pack_image_fields(session, node, pack_index)
         packs.append(
             {
                 "pack_index": pack_index,
                 "incomplete": incomplete,
                 "title": _pack_title(bits),
                 "bits": bits,
+                "image_url": image_fields.get("image_url"),
+                "image_thumb_url": image_fields.get("image_thumb_url"),
+                "pack_image_url": image_fields.get("pack_image_url"),
+                "pack_image_thumb_url": image_fields.get("pack_image_thumb_url"),
             }
         )
     completed = (

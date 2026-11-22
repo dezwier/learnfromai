@@ -5,13 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
-import '../../auth/auth_controller.dart';
 import '../graph_controller.dart';
-import 'admin_content_delete.dart';
 import 'learn_card.dart';
 import 'learn_edge_dismiss.dart';
 import 'learn_session_chrome.dart';
 import 'learning_track_support.dart';
+import 'pack_actions_sheet.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -77,6 +76,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   String? _topicTitle;
   String? _nodeId;
   String? _cardImageUrl;
+  var _hasPackImage = false;
   LearnDeckEntry? _entry;
   int _cardEpoch = 0;
 
@@ -249,6 +249,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _nodeId = next.nodeId;
       _topicTitle = next.title;
       _cardImageUrl = next.bestImageUrl ?? graphUrls.$1 ?? graphUrls.$2;
+      _hasPackImage = next.hasPackImage || pack.hasPackImage;
       _entry = LearnDeckEntry(pack: pack, checkKind: kind);
       _trackedKinds.clear();
       _quizDone = false;
@@ -258,6 +259,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _advancing = false;
     });
     unawaited(_setCardImage(next));
+    _listen(graph);
     support.schedulePrefetch(
       next,
       focusNodeId: widget.seedNodeId,
@@ -277,8 +279,35 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   void _onGraphChanged() {
     if (!mounted) return;
     final graph = _graph ?? context.read<GraphController>();
+    final entry = _entry;
+    final nodeId = _nodeId;
+    if (entry != null &&
+        nodeId != null &&
+        graph.lastCompletedJobType == 'generate_pack_image' &&
+        graph.lastCompletedNodeId == nodeId &&
+        !graph.isPackImageJobActive(nodeId, entry.packIndex)) {
+      final thumb =
+          '/knowledge/nodes/$nodeId/packs/${entry.packIndex}/image/file?variant=thumb';
+      final full = '/knowledge/nodes/$nodeId/packs/${entry.packIndex}/image/file';
+      setState(() {
+        _cardImageUrl = thumb;
+        _hasPackImage = true;
+        _entry = LearnDeckEntry(
+          pack: entry.pack.copyWith(
+            imageUrl: full,
+            imageThumbUrl: thumb,
+            packImageUrl: full,
+            packImageThumbUrl: thumb,
+          ),
+          checkKind: entry.checkKind,
+        );
+      });
+    }
     final genId = _generateNodeId;
-    if (genId == null) return;
+    if (genId == null) {
+      setState(() {});
+      return;
+    }
     final active = graph.jobForNode(genId, type: 'expand_content');
     if (active != null) {
       _watchedJobId = active.jobId;
@@ -289,7 +318,6 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final completedHere =
         graph.lastCompletedNodeId == genId && graph.lastCompletedJobType == 'expand_content';
     if (watched == null && !completedHere) return;
-    _stopListening();
     _watchedJobId = null;
     // Failed jobs clear the tracker without setting lastCompleted*.
     if (!completedHere) {
@@ -307,6 +335,32 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         opening: _cardEpoch == 0,
       ),
     );
+  }
+
+  Future<void> _onPackLongPress(GraphController graph, LearnDeckEntry entry) async {
+    final nodeId = _nodeId;
+    if (nodeId == null) return;
+    _listen(graph);
+    final result = await showPackActionsSheet(
+      context,
+      nodeId: nodeId,
+      title: _topicTitle ?? widget.seedTitle,
+      pack: entry.pack,
+      checkKind: entry.checkKind,
+      hasPackImage: _hasPackImage,
+    );
+    if (!mounted || result == null) return;
+    if (result.deleted) {
+      await _onNext();
+      return;
+    }
+    if (result.hasPackImage == true) {
+      final url = result.imageThumbUrl ?? result.imageUrl;
+      setState(() {
+        _hasPackImage = true;
+        if (url != null && url.isNotEmpty) _cardImageUrl = url;
+      });
+    }
   }
 
   void _dismiss() {
@@ -445,11 +499,13 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         ),
       );
     } else {
+      final nodeId = _nodeId ?? '';
+      final packBusy = graph.isPackImageJobActive(nodeId, entry.packIndex);
       final flip = LearnFlipCard(
         key: ValueKey('track-$_cardEpoch-${entry.packIndex}-${entry.checkKind}'),
         entry: entry,
         imageUrl: imageUrl,
-        imageLoading: graph.isJobTypeActive(_nodeId ?? '', 'generate_image'),
+        imageLoading: packBusy || graph.isJobTypeActive(nodeId, 'generate_image'),
         loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
         cachedBytes: graph.cachedImageBytes(imageUrl),
         onShown: () => _trackLearn(graph, entry),
@@ -469,23 +525,9 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
           );
         },
       );
-      final isAdmin = context.watch<AuthController>().user?.isAdmin == true;
-      final nodeId = _nodeId;
-      // Always wrap — toggling GestureDetector after answer remounts the card
-      // and clears the revealed selection.
+      // Always wrap — toggling GestureDetector remounts the card and clears selection.
       cardBody = GestureDetector(
-        onLongPress: (isAdmin && _quizDone && nodeId != null)
-            ? () async {
-                final deleted = await showAdminContentDeleteMenu(
-                  context,
-                  nodeId: nodeId,
-                  pack: entry.pack,
-                  checkKind: entry.checkKind,
-                );
-                if (!deleted || !mounted) return;
-                await _onNext();
-              }
-            : null,
+        onLongPress: () => unawaited(_onPackLongPress(graph, entry)),
         child: flip,
       );
     }

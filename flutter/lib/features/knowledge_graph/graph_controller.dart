@@ -66,6 +66,7 @@ class GraphController extends ChangeNotifier {
   /// Set when an expand job succeeds; UI consumes then [clearLastCompleted].
   String? lastCompletedNodeId;
   String? lastCompletedJobType;
+  int? lastCompletedPackIndex;
   /// Auth-fetched image bytes keyed by API image path (full or thumb).
   final Map<String, Uint8List> imageBytesByUrl = {};
   final Map<String, Future<Uint8List?>> _imageFetchesInFlight = {};
@@ -165,6 +166,15 @@ class GraphController extends ChangeNotifier {
   bool isJobTypeActive(String nodeId, String type) =>
       jobForNode(nodeId, type: type) != null;
 
+  bool isPackImageJobActive(String nodeId, int packIndex) {
+    for (final job in trackedJobs) {
+      if (!job.isActive || job.nodeId != nodeId) continue;
+      if (job.type != 'generate_pack_image') continue;
+      if (job.packIndex == packIndex) return true;
+    }
+    return false;
+  }
+
   /// Pull active jobs for a node (any user) and track them so same-type actions can disable.
   Future<void> syncNodeJobs(String id, {String? title}) async {
     try {
@@ -184,6 +194,7 @@ class GraphController extends ChangeNotifier {
             title: item['title']?.toString() ?? title ?? _titleForNode(nodeId) ?? 'Topic',
             state: item['state']?.toString() ?? 'queued',
             type: item['type']?.toString() ?? 'expand_neighborhood',
+            packIndex: (item['pack_index'] as num?)?.toInt(),
             progressMessage: progress is Map ? progress['message']?.toString() : null,
             fraction: progress is Map ? (progress['fraction'] as num?)?.toDouble() ?? 0 : 0,
           ),
@@ -294,6 +305,7 @@ class GraphController extends ChangeNotifier {
   void clearLastCompleted() {
     lastCompletedNodeId = null;
     lastCompletedJobType = null;
+    lastCompletedPackIndex = null;
   }
 
   /// GET neighborhood for [id] without changing the current focus graph.
@@ -609,6 +621,7 @@ class GraphController extends ChangeNotifier {
     required String id,
     String? title,
     String type = 'expand_neighborhood',
+    int? packIndex,
   }) {
     final jobId = payload['job_id']?.toString();
     if (jobId == null) return;
@@ -623,6 +636,7 @@ class GraphController extends ChangeNotifier {
         title: title ?? _titleForNode(focusNodeId) ?? 'Topic',
         state: 'queued',
         type: type,
+        packIndex: packIndex ?? (payload['pack_index'] as num?)?.toInt(),
         progressMessage: message ?? 'Waiting for a worker…',
         fraction: fraction,
       ),
@@ -933,6 +947,8 @@ class GraphController extends ChangeNotifier {
             final loadId = resultFocus ?? tracked.nodeId;
             lastCompletedNodeId = loadId;
             lastCompletedJobType = tracked.type;
+            lastCompletedPackIndex = tracked.packIndex ??
+                (result is Map ? (result['pack_index'] as num?)?.toInt() : null);
             if (tracked.type == 'generate_image') {
               final imageUrl = result is Map ? result['image_url']?.toString() : null;
               final thumbUrl = result is Map ? result['image_thumb_url']?.toString() : null;
@@ -949,6 +965,19 @@ class GraphController extends ChangeNotifier {
                 } on ApiException {
                   // Keep current graph.
                 }
+              }
+            } else if (tracked.type == 'generate_pack_image') {
+              final imageUrl = result is Map ? result['image_url']?.toString() : null;
+              final thumbUrl = result is Map ? result['image_thumb_url']?.toString() : null;
+              final packIndex = tracked.packIndex ??
+                  (result is Map ? (result['pack_index'] as num?)?.toInt() : null);
+              if (imageUrl != null && imageUrl.isNotEmpty) {
+                cachePackImageUrls(
+                  loadId,
+                  packIndex: packIndex ?? 1,
+                  imageUrl: imageUrl,
+                  imageThumbUrl: thumbUrl,
+                );
               }
             } else if (tracked.type != 'expand_content' &&
                 (focusId == tracked.nodeId || focusId == loadId)) {
@@ -969,7 +998,8 @@ class GraphController extends ChangeNotifier {
               error = job['error_message']?.toString() ??
                   (tracked.type == 'expand_content'
                       ? 'Content generation failed'
-                      : tracked.type == 'generate_image'
+                      : tracked.type == 'generate_image' ||
+                              tracked.type == 'generate_pack_image'
                           ? 'Image generation failed'
                           : 'Neighborhood generation failed');
             }

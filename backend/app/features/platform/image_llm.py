@@ -27,10 +27,25 @@ _FAKE_PNG = base64.b64decode(
 )
 
 
+_IMAGE_STYLE = (
+    "Style: photorealistic, mature editorial photography, clean single-subject "
+    "composition, soft natural light, shallow depth of field, no text, no logos, "
+    "no UI, no watermarks, no collage, no borders. "
+    "Prefer a realistic mature look unless the topic clearly demands another medium "
+    "(myth, fantasy, abstract math, cartoon characters, etc.). "
+)
+
+
 class ImageLLM(Protocol):
     name: str
 
-    def generate_image(self, name: str, description: str | None) -> tuple[bytes, dict]: ...
+    def generate_image(
+        self,
+        name: str,
+        description: str | None,
+        *,
+        prompt: str | None = None,
+    ) -> tuple[bytes, dict]: ...
 
 
 def build_topic_image_prompt(name: str, description: str | None) -> str:
@@ -41,20 +56,50 @@ def build_topic_image_prompt(name: str, description: str | None) -> str:
         subject = f"{topic}: {desc}"
     return (
         "Create one iconic square image that represents the learning topic below. "
-        "Style: photorealistic, mature editorial photography, clean single-subject "
-        "composition, soft natural light, shallow depth of field, no text, no logos, "
-        "no UI, no watermarks, no collage, no borders. "
-        "Prefer a realistic mature look unless the topic clearly demands another medium "
-        "(myth, fantasy, abstract math, cartoon characters, etc.). "
+        f"{_IMAGE_STYLE}"
         f"Topic: {subject}"
+    )
+
+
+def build_pack_image_prompt(
+    name: str,
+    description: str | None,
+    *,
+    learn_title: str,
+    learn_markdown: str,
+) -> str:
+    topic = (name or "Topic").strip() or "Topic"
+    desc = (description or "").strip()
+    title = (learn_title or "").strip()
+    bit = (learn_markdown or "").strip()
+    if len(bit) > 600:
+        bit = bit[:600].rstrip() + "…"
+    subject_lines = [f"Topic: {topic}."]
+    if desc:
+        subject_lines.append(f"Topic context: {desc}")
+    if title:
+        subject_lines.append(f"Learning bit title: {title}")
+    if bit:
+        subject_lines.append(f"Learning bit: {bit}")
+    return (
+        "Create one square image that appropriately supports the atomic learning below "
+        "(illustrate the specific learning bit, not a generic topic icon). "
+        f"{_IMAGE_STYLE}"
+        + " ".join(subject_lines)
     )
 
 
 class FakeImageLLM:
     name = "fake"
 
-    def generate_image(self, name: str, description: str | None) -> tuple[bytes, dict]:
-        _ = (name, description)
+    def generate_image(
+        self,
+        name: str,
+        description: str | None,
+        *,
+        prompt: str | None = None,
+    ) -> tuple[bytes, dict]:
+        _ = (name, description, prompt)
         return _FAKE_PNG, usage_from_image_cost("fake-image", 0.0)
 
 
@@ -71,10 +116,16 @@ class GeminiImageLLM:
         self.before_call = None
         self.heartbeat = None
 
-    def generate_image(self, name: str, description: str | None) -> tuple[bytes, dict]:
+    def generate_image(
+        self,
+        name: str,
+        description: str | None,
+        *,
+        prompt: str | None = None,
+    ) -> tuple[bytes, dict]:
         if not self.api_key:
             raise generation_unavailable("GOOGLE_GEMINI_API_KEY is not configured", terminal=True)
-        prompt = build_topic_image_prompt(name, description)
+        prompt = prompt or build_topic_image_prompt(name, description)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -135,10 +186,16 @@ class OpenAIImageLLM:
         self.before_call = None
         self.heartbeat = None
 
-    def generate_image(self, name: str, description: str | None) -> tuple[bytes, dict]:
+    def generate_image(
+        self,
+        name: str,
+        description: str | None,
+        *,
+        prompt: str | None = None,
+    ) -> tuple[bytes, dict]:
         if not self.api_key:
             raise generation_unavailable("OPENAI_API_KEY is not configured", terminal=True)
-        prompt = build_topic_image_prompt(name, description)
+        prompt = prompt or build_topic_image_prompt(name, description)
         url = "https://api.openai.com/v1/images/generations"
         # GPT image models always return b64_json; do not send response_format.
         body = {

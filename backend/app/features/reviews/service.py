@@ -23,7 +23,7 @@ from app.features.content.models import (
 )
 from app.features.content.service import content_for_node
 from app.features.knowledge_graph.node_models import KnowledgeNode
-from app.features.node_image.service import has_image, image_path_for, thumb_path_for
+from app.features.node_image.pack_service import pack_image_fields
 from app.features.reviews.models import (
     GRADUATION_BIN,
     LEITNER_BIN_8_HOURS,
@@ -38,13 +38,12 @@ MAX_DUE_LIMIT = 20
 DEFAULT_DUE_LIMIT = 10
 
 
-def _image_fields(node: KnowledgeNode) -> dict[str, str | None]:
-    if not has_image(node):
-        return {"image_url": None, "image_thumb_url": None}
-    return {
-        "image_url": image_path_for(node.id),
-        "image_thumb_url": thumb_path_for(node.id),
-    }
+def _image_fields(
+    session: Session,
+    node: KnowledgeNode,
+    pack_index: int,
+) -> dict[str, str | None]:
+    return pack_image_fields(session, node, pack_index)
 
 
 def _pack_kinds_from_events(
@@ -292,7 +291,7 @@ def due_reviews(
                     "title": pack.get("title"),
                     "bits": pack.get("bits") or [],
                 },
-                **_image_fields(node),
+                **_image_fields(session, node, row.pack_index),
             }
         )
 

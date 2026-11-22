@@ -39,7 +39,7 @@ def job_public_dict(job: GenerationJob, *, node_id: UUID | None = None, title: s
     progress = job.progress if isinstance(job.progress, dict) else {}
     payload = job.payload or {}
     focus = payload.get("focus_id") or payload.get("node_id") or (str(node_id) if node_id else None)
-    return {
+    out = {
         "id": str(job.id),
         "type": job.type,
         "state": job.state,
@@ -49,6 +49,13 @@ def job_public_dict(job: GenerationJob, *, node_id: UUID | None = None, title: s
         "error_code": job.error_code,
         "error_message": job.error_message,
     }
+    pack_index = payload.get("pack_index")
+    if pack_index is not None:
+        try:
+            out["pack_index"] = int(pack_index)
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def list_and_watch_node_jobs(
@@ -64,6 +71,23 @@ def list_and_watch_node_jobs(
         job = active_job_for_node(session, job_type=job_type, node_id=node_id)
         if job is None:
             continue
+        watcher = ensure_watcher(
+            session,
+            job=job,
+            user_id=user_id,
+            node_id=node_id,
+            title=title or (job.payload or {}).get("topic") or "Topic",
+        )
+        out.append(
+            job_public_dict(
+                job,
+                node_id=node_id,
+                title=watcher.title or title,
+            )
+        )
+    from app.features.node_image.pack_service import active_pack_image_jobs
+
+    for job in active_pack_image_jobs(session, node_id):
         watcher = ensure_watcher(
             session,
             job=job,

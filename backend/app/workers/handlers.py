@@ -11,6 +11,7 @@ from app.features.content.generate import expand_content
 from app.features.graph_extend.models import ExtendRequest
 from app.features.knowledge_graph.neighborhood import expand_neighborhood
 from app.features.node_image.generate import generate_image
+from app.features.node_image.pack_generate import generate_pack_image
 from app.features.platform.jobs import finish
 from app.features.platform.models import GenerationJob, WorkerHeartbeat
 
@@ -26,6 +27,7 @@ def handle(job_id: UUID, token: UUID) -> None:
             "expand_neighborhood": _expand_neighborhood,
             "expand_content": _expand_content,
             "generate_image": _generate_image,
+            "generate_pack_image": _generate_pack_image,
         }
         fn = dispatch.get(job.type)
         if fn is None:
@@ -71,6 +73,10 @@ def _expand_content(session: Session, job: GenerationJob) -> dict:
 
 def _generate_image(session: Session, job: GenerationJob) -> dict:
     return generate_image(session, job)
+
+
+def _generate_pack_image(session: Session, job: GenerationJob) -> dict:
+    return generate_pack_image(session, job)
 
 
 def _fail_request(job_id: UUID, code: str) -> None:

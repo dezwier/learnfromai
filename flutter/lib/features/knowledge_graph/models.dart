@@ -100,12 +100,36 @@ class TopicPack {
     required this.incomplete,
     required this.bits,
     this.title,
+    this.imageUrl,
+    this.imageThumbUrl,
+    this.packImageUrl,
+    this.packImageThumbUrl,
   });
 
   final int packIndex;
   final bool incomplete;
   final String? title;
   final List<TopicBit> bits;
+  /// Effective card image (pack override else topic).
+  final String? imageUrl;
+  final String? imageThumbUrl;
+  /// Pack-only image when present (for Replace / Regenerate labels).
+  final String? packImageUrl;
+  final String? packImageThumbUrl;
+
+  bool get hasPackImage {
+    final url = packImageUrl?.trim();
+    final thumb = packImageThumbUrl?.trim();
+    return (url != null && url.isNotEmpty) || (thumb != null && thumb.isNotEmpty);
+  }
+
+  String? get bestImageUrl {
+    final thumb = imageThumbUrl?.trim();
+    if (thumb != null && thumb.isNotEmpty) return thumb;
+    final full = imageUrl?.trim();
+    if (full != null && full.isNotEmpty) return full;
+    return null;
+  }
 
   String get badgeLabel {
     final raw = title?.trim();
@@ -127,12 +151,34 @@ class TopicPack {
     return null;
   }
 
+  TopicPack copyWith({
+    String? imageUrl,
+    String? imageThumbUrl,
+    String? packImageUrl,
+    String? packImageThumbUrl,
+  }) {
+    return TopicPack(
+      packIndex: packIndex,
+      incomplete: incomplete,
+      title: title,
+      bits: bits,
+      imageUrl: imageUrl ?? this.imageUrl,
+      imageThumbUrl: imageThumbUrl ?? this.imageThumbUrl,
+      packImageUrl: packImageUrl ?? this.packImageUrl,
+      packImageThumbUrl: packImageThumbUrl ?? this.packImageThumbUrl,
+    );
+  }
+
   factory TopicPack.fromJson(Map<String, dynamic> raw) {
     final rows = raw['bits'];
     return TopicPack(
       packIndex: (raw['pack_index'] as num?)?.toInt() ?? 1,
       incomplete: raw['incomplete'] == true,
       title: raw['title']?.toString(),
+      imageUrl: raw['image_url']?.toString(),
+      imageThumbUrl: raw['image_thumb_url']?.toString(),
+      packImageUrl: raw['pack_image_url']?.toString(),
+      packImageThumbUrl: raw['pack_image_thumb_url']?.toString(),
       bits: [
         if (rows is List)
           for (final row in rows)
@@ -246,6 +292,8 @@ class LearningNext {
     this.completedPacks = const [],
     this.imageUrl,
     this.imageThumbUrl,
+    this.packImageUrl,
+    this.packImageThumbUrl,
   });
 
   /// `ready` or `generate`.
@@ -258,9 +306,17 @@ class LearningNext {
   final List<int> completedPacks;
   final String? imageUrl;
   final String? imageThumbUrl;
+  final String? packImageUrl;
+  final String? packImageThumbUrl;
 
   bool get needsGenerate => status == 'generate';
   bool get isReady => status == 'ready' && pack != null;
+
+  bool get hasPackImage {
+    final url = packImageUrl?.trim();
+    final thumb = packImageThumbUrl?.trim();
+    return (url != null && url.isNotEmpty) || (thumb != null && thumb.isNotEmpty);
+  }
 
   String? get bestImageUrl {
     final thumb = imageThumbUrl?.trim();
@@ -287,6 +343,8 @@ class LearningNext {
       ],
       imageUrl: raw['image_url']?.toString(),
       imageThumbUrl: raw['image_thumb_url']?.toString(),
+      packImageUrl: raw['pack_image_url']?.toString(),
+      packImageThumbUrl: raw['pack_image_thumb_url']?.toString(),
     );
   }
 }
@@ -360,6 +418,8 @@ class ReviewDueItem {
     this.nextReviewAt,
     this.imageUrl,
     this.imageThumbUrl,
+    this.packImageUrl,
+    this.packImageThumbUrl,
   });
 
   final String nodeId;
@@ -370,6 +430,14 @@ class ReviewDueItem {
   final String? nextReviewAt;
   final String? imageUrl;
   final String? imageThumbUrl;
+  final String? packImageUrl;
+  final String? packImageThumbUrl;
+
+  bool get hasPackImage {
+    final url = packImageUrl?.trim();
+    final thumb = packImageThumbUrl?.trim();
+    return (url != null && url.isNotEmpty) || (thumb != null && thumb.isNotEmpty);
+  }
 
   factory ReviewDueItem.fromJson(Map<String, dynamic> raw) {
     final packRaw = raw['pack'];
@@ -381,6 +449,8 @@ class ReviewDueItem {
       nextReviewAt: raw['next_review_at']?.toString(),
       imageUrl: raw['image_url']?.toString(),
       imageThumbUrl: raw['image_thumb_url']?.toString(),
+      packImageUrl: raw['pack_image_url']?.toString(),
+      packImageThumbUrl: raw['pack_image_thumb_url']?.toString(),
       pack: packRaw is Map
           ? TopicPack.fromJson(Map<String, dynamic>.from(packRaw))
           : const TopicPack(packIndex: 1, incomplete: true, bits: []),
@@ -446,6 +516,7 @@ class TrackedJob {
     required this.title,
     required this.state,
     this.type = 'expand_neighborhood',
+    this.packIndex,
     this.progressMessage,
     this.fraction = 0,
     this.errorMessage,
@@ -456,6 +527,7 @@ class TrackedJob {
   final String title;
   final String state;
   final String type;
+  final int? packIndex;
   final String? progressMessage;
   final double fraction;
   final String? errorMessage;
@@ -469,6 +541,7 @@ class TrackedJob {
     String? errorMessage,
     String? title,
     String? type,
+    int? packIndex,
   }) {
     return TrackedJob(
       jobId: jobId,
@@ -476,6 +549,7 @@ class TrackedJob {
       title: title ?? this.title,
       state: state ?? this.state,
       type: type ?? this.type,
+      packIndex: packIndex ?? this.packIndex,
       progressMessage: progressMessage ?? this.progressMessage,
       fraction: fraction ?? this.fraction,
       errorMessage: errorMessage,

@@ -55,7 +55,23 @@ Future<bool> showAdminContentDeleteMenu(
     },
   );
   if (choice == null || !context.mounted) return false;
+  return executeAdminContentDelete(
+    context,
+    nodeId: nodeId,
+    pack: pack,
+    checkKind: checkKind,
+    choice: choice,
+  );
+}
 
+/// Run admin delete for [choice] `'quiz'` or `'pack'` (after confirmations).
+Future<bool> executeAdminContentDelete(
+  BuildContext context, {
+  required String nodeId,
+  required TopicPack pack,
+  required String checkKind,
+  required String choice,
+}) async {
   final graph = context.read<GraphController>();
   if (choice == 'pack') {
     final ok = await _confirm(

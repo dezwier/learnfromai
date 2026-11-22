@@ -10,6 +10,7 @@ import '../graph_controller.dart';
 import '../models.dart';
 import 'learn_card.dart';
 import 'learn_edge_dismiss.dart';
+import 'pack_actions_sheet.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 const _overscrollDismissDistance = 96.0;
@@ -140,10 +141,10 @@ class _LearnSheetState extends State<LearnSheet> {
         _loading = false;
       });
     }
+    _listen(graph);
     final contentJob = graph.jobForNode(widget.nodeId, type: 'expand_content');
     if (contentJob != null) {
       _watchedJobId = contentJob.jobId;
-      _listen(graph);
     }
   }
 
@@ -160,16 +161,47 @@ class _LearnSheetState extends State<LearnSheet> {
   void _onGraphChanged() {
     if (!mounted) return;
     final graph = _graph ?? context.read<GraphController>();
+    final donePack = graph.lastCompletedPackIndex;
+    if (graph.lastCompletedJobType == 'generate_pack_image' &&
+        graph.lastCompletedNodeId == widget.nodeId &&
+        donePack != null) {
+      final full =
+          '/knowledge/nodes/${widget.nodeId}/packs/$donePack/image/file';
+      final thumb = '$full?variant=thumb';
+      setState(() {
+        _deck = [
+          for (final row in _deck)
+            if (row.packIndex == donePack)
+              LearnDeckEntry(
+                pack: row.pack.copyWith(
+                  imageUrl: full,
+                  imageThumbUrl: thumb,
+                  packImageUrl: full,
+                  packImageThumbUrl: thumb,
+                ),
+                checkKind: row.checkKind,
+              )
+            else
+              row,
+        ];
+      });
+    }
     final active = graph.jobForNode(widget.nodeId, type: 'expand_content');
     if (active != null) {
       _watchedJobId = active.jobId;
       setState(() {});
       return;
     }
-    if (_watchedJobId == null && graph.lastCompletedNodeId != widget.nodeId) {
+    if (_watchedJobId == null) {
+      setState(() {});
       return;
     }
-    _stopListening();
+    if (graph.lastCompletedNodeId != widget.nodeId ||
+        graph.lastCompletedJobType != 'expand_content') {
+      _watchedJobId = null;
+      setState(() {});
+      return;
+    }
     _watchedJobId = null;
     unawaited(_reloadAfterJob());
   }
@@ -271,7 +303,7 @@ class _LearnSheetState extends State<LearnSheet> {
     _maybeMarkPackCompleted(entry.packIndex, entry.checkKind);
   }
 
-  (String?, String?) _imageUrls(GraphController graph) {
+  (String?, String?) _topicImageUrls(GraphController graph) {
     final nodes = graph.categoryGraph?['nodes'];
     if (nodes is! List) return (null, null);
     for (final raw in nodes) {
@@ -287,6 +319,53 @@ class _LearnSheetState extends State<LearnSheet> {
     return (null, null);
   }
 
+  String? _effectiveImageUrl(GraphController graph, TopicPack pack) {
+    final packBest = pack.bestImageUrl;
+    if (packBest != null) return packBest;
+    final urls = _topicImageUrls(graph);
+    return urls.$1 ?? urls.$2;
+  }
+
+  Future<void> _onPackLongPress(
+    GraphController graph,
+    LearnDeckEntry entry,
+  ) async {
+    final result = await showPackActionsSheet(
+      context,
+      nodeId: widget.nodeId,
+      title: widget.title,
+      pack: entry.pack,
+      checkKind: entry.checkKind,
+      hasPackImage: entry.pack.hasPackImage,
+    );
+    if (!mounted || result == null) return;
+    if (result.deleted) {
+      await _bootstrap();
+      return;
+    }
+    if (result.hasPackImage == true) {
+      final full = result.imageUrl;
+      final thumb = result.imageThumbUrl;
+      setState(() {
+        _deck = [
+          for (final row in _deck)
+            if (row.packIndex == entry.packIndex)
+              LearnDeckEntry(
+                pack: row.pack.copyWith(
+                  imageUrl: full ?? row.pack.imageUrl,
+                  imageThumbUrl: thumb ?? row.pack.imageThumbUrl,
+                  packImageUrl: full ?? row.pack.packImageUrl,
+                  packImageThumbUrl: thumb ?? row.pack.packImageThumbUrl,
+                ),
+                checkKind: row.checkKind,
+              )
+            else
+              row,
+        ];
+      });
+    }
+  }
+
   @override
   void dispose() {
     _stopListening();
@@ -300,8 +379,6 @@ class _LearnSheetState extends State<LearnSheet> {
     final job = graph.jobForNode(widget.nodeId, type: 'expand_content');
     final generating = job != null ||
         (_content != null && _content!.packs.isEmpty && _content!.incomplete);
-    final urls = _imageUrls(graph);
-    final imageUrl = urls.$1 ?? urls.$2;
     final padding = MediaQuery.paddingOf(context);
     final listPadding = EdgeInsets.fromLTRB(
       20,
@@ -349,30 +426,37 @@ class _LearnSheetState extends State<LearnSheet> {
             );
           }
           final entry = _deck[index];
-          return LearnFlipCard(
-            key: ValueKey('pack-${entry.packIndex}-${entry.checkKind}'),
-            entry: entry,
-            imageUrl: imageUrl,
-            imageLoading: graph.isJobTypeActive(widget.nodeId, 'generate_image'),
-            loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
-            cachedBytes: graph.cachedImageBytes(imageUrl),
-            completed: _completedPacks.contains(entry.packIndex),
-            onShown: () => _trackLearn(graph, entry),
-            onCheckAnswer: ({
-              required bool correct,
-              int? choiceIndex,
-              bool? answerBool,
-              String? answerText,
-            }) {
-              _trackCheck(
-                graph,
-                entry,
-                correct: correct,
-                choiceIndex: choiceIndex,
-                answerBool: answerBool,
-                answerText: answerText,
-              );
-            },
+          final imageUrl = _effectiveImageUrl(graph, entry.pack);
+          final packBusy =
+              graph.isPackImageJobActive(widget.nodeId, entry.packIndex);
+          return GestureDetector(
+            onLongPress: () => unawaited(_onPackLongPress(graph, entry)),
+            child: LearnFlipCard(
+              key: ValueKey('pack-${entry.packIndex}-${entry.checkKind}'),
+              entry: entry,
+              imageUrl: imageUrl,
+              imageLoading:
+                  packBusy || graph.isJobTypeActive(widget.nodeId, 'generate_image'),
+              loadImageBytes: (url) => graph.fetchImageBytes(url, notify: false),
+              cachedBytes: graph.cachedImageBytes(imageUrl),
+              completed: _completedPacks.contains(entry.packIndex),
+              onShown: () => _trackLearn(graph, entry),
+              onCheckAnswer: ({
+                required bool correct,
+                int? choiceIndex,
+                bool? answerBool,
+                String? answerText,
+              }) {
+                _trackCheck(
+                  graph,
+                  entry,
+                  correct: correct,
+                  choiceIndex: choiceIndex,
+                  answerBool: answerBool,
+                  answerText: answerText,
+                );
+              },
+            ),
           );
         },
       );

@@ -143,6 +143,9 @@ def delete_pack(
     session.execute(delete(KnowledgeBit).where(col(KnowledgeBit.id).in_(bit_ids)))
     events = _delete_pack_events(session, node_id=node_id, pack_index=pack_index)
     reviews = _delete_pack_reviews(session, node_id=node_id, pack_index=pack_index)
+    from app.features.node_image.pack_service import delete_pack_image
+
+    images_deleted = delete_pack_image(session, node_id=node_id, pack_index=pack_index)
     session.flush()
     return {
         "deleted": "pack",
@@ -151,6 +154,7 @@ def delete_pack(
         "bits_deleted": len(bit_ids),
         "events_deleted": events,
         "reviews_deleted": reviews,
+        "images_deleted": images_deleted,
     }
 
 

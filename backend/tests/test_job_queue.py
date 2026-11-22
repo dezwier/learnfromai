@@ -120,6 +120,7 @@ def test_different_job_types_parallel_same_type_coalesces(client, auth, other_au
     assert listed.status_code == 200
     types = {row["type"] for row in listed.json()["jobs"]}
     assert types == {"expand_neighborhood", "expand_content", "generate_image"}
+    # generate_pack_image jobs are listed separately when active (see pack image tests).
     # Listing attaches the caller as a watcher for jobs they had not requested.
     other_jobs = client.get("/api/v1/jobs?state=queued,running", headers=other_auth)
     assert len(other_jobs.json()["jobs"]) == 3

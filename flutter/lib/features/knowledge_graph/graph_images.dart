@@ -55,6 +55,103 @@ extension GraphControllerImages on GraphController {
     }
   }
 
+  /// Request pack-level image generation (or regeneration when [regenerate] is true).
+  Future<Map<String, String?>?> enqueuePackImage(
+    String id, {
+    required int packIndex,
+    String? title,
+    bool regenerate = false,
+  }) async {
+    if (isPackImageJobActive(id, packIndex)) {
+      _ensurePoller();
+      return null;
+    }
+    try {
+      final body = regenerate ? {'regenerate': true} : {'generate': true};
+      final payload = await _post(
+        '/knowledge/nodes/$id/packs/$packIndex/image',
+        body: body,
+      );
+      final jobId = payload['job_id']?.toString();
+      if (jobId == null) {
+        final imageUrl = payload['image_url']?.toString();
+        final thumbUrl = payload['image_thumb_url']?.toString();
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          cachePackImageUrls(
+            id,
+            packIndex: packIndex,
+            imageUrl: imageUrl,
+            imageThumbUrl: thumbUrl,
+          );
+        }
+        return {'image_url': imageUrl, 'image_thumb_url': thumbUrl};
+      }
+      _trackJobFromPayload(
+        payload,
+        id: id,
+        title: title,
+        type: 'generate_pack_image',
+        packIndex: packIndex,
+      );
+      return null;
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Upload a user-picked image for one pack (replaces any existing pack image).
+  Future<Map<String, String?>?> uploadPackImage(
+    String id, {
+    required int packIndex,
+    required List<int> bytes,
+    required String filename,
+    String? contentType,
+  }) async {
+    try {
+      final payload = await _upload(
+        '/knowledge/nodes/$id/packs/$packIndex/image',
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+      );
+      final imageUrl = payload['image_url']?.toString();
+      final thumbUrl = payload['image_thumb_url']?.toString();
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        cachePackImageUrls(
+          id,
+          packIndex: packIndex,
+          imageUrl: imageUrl,
+          imageThumbUrl: thumbUrl,
+        );
+      }
+      return {'image_url': imageUrl, 'image_thumb_url': thumbUrl};
+    } on ApiException catch (exc) {
+      error = exc.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Bust cache and preload pack image paths after generate/upload.
+  void cachePackImageUrls(
+    String nodeId, {
+    required int packIndex,
+    required String imageUrl,
+    String? imageThumbUrl,
+  }) {
+    imageBytesByUrl.removeWhere(
+      (key, _) => key.contains('/packs/$packIndex/image'),
+    );
+    ensureImageCached(imageThumbUrl ?? imageUrl);
+    ensureImageCached(imageUrl);
+    lastCompletedNodeId = nodeId;
+    lastCompletedJobType = 'generate_pack_image';
+    lastCompletedPackIndex = packIndex;
+    notifyListeners();
+  }
+
   /// Authenticated image bytes for a topic image path from the graph payload.
   ///
   /// Concurrent callers share one in-flight request per path. Pass [notify] false

@@ -16,16 +16,15 @@ from app.features.content.service import (
     is_pack_complete,
 )
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
-from app.features.node_image.service import has_image, image_path_for, thumb_path_for
+from app.features.node_image.pack_service import pack_image_fields
 
 
-def _image_fields(node: KnowledgeNode) -> dict[str, str | None]:
-    if not has_image(node):
-        return {"image_url": None, "image_thumb_url": None}
-    return {
-        "image_url": image_path_for(node.id),
-        "image_thumb_url": thumb_path_for(node.id),
-    }
+def _image_fields(
+    session: Session,
+    node: KnowledgeNode,
+    pack_index: int | None = None,
+) -> dict[str, str | None]:
+    return pack_image_fields(session, node, pack_index)
 
 
 def _neighbor_buckets(
@@ -131,16 +130,16 @@ def _ready_payload(
         "completed_packs": completed_pack_indexes(
             session, user_id=user_id, node_id=node.id
         ),
-        **_image_fields(node),
+        **_image_fields(session, node, pack["pack_index"]),
     }
 
 
-def _generate_payload(node: KnowledgeNode) -> dict:
+def _generate_payload(session: Session, node: KnowledgeNode) -> dict:
     return {
         "status": "generate",
         "node_id": str(node.id),
         "title": node.name,
-        **_image_fields(node),
+        **_image_fields(session, node, None),
     }
 
 
@@ -184,7 +183,7 @@ def _opening_pack(
         return _ready_payload(
             session, user_id=user.id, node=focus, pack=_pick_pack(learned, rng)
         )
-    return _generate_payload(focus)
+    return _generate_payload(session, focus)
 
 
 def _dice_tile(
@@ -236,12 +235,12 @@ def _pack_for_tile(
     )
     node = focus if tile_id == focus.id else session.get(KnowledgeNode, tile_id)
     if node is None:
-        return _generate_payload(focus)
+        return _generate_payload(session, focus)
     if unlearned:
         return _ready_payload(
             session, user_id=user.id, node=node, pack=_pick_pack(unlearned, rng)
         )
-    return _generate_payload(node)
+    return _generate_payload(session, node)
 
 
 def _continue_pack(

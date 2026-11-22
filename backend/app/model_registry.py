@@ -11,6 +11,7 @@ from app.features.knowledge_graph.node_models import (
     KnowledgeRequest,
     KnowledgeRequestNode,
 )
+from app.features.node_image.pack_models import KnowledgePackImage
 from app.features.platform.models import (
     GenerationJob,
     GenerationJobWatcher,
@@ -40,6 +41,7 @@ def register_models() -> None:
         KnowledgeRequest,
         KnowledgeRequestNode,
         KnowledgeBit,
+        KnowledgePackImage,
         UserTopicEvent,
         UserPackReview,
         CronRun,

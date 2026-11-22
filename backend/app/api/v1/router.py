@@ -32,6 +32,12 @@ from app.features.knowledge_graph.preferences import (
 from app.features.knowledge_graph.search import search_nodes
 from app.features.knowledge_graph.service import remove_concept, remove_request
 from app.features.knowledge_graph.workspace import workspace_graph
+from app.features.node_image.pack_service import (
+    image_bytes_for_pack,
+    image_for_pack,
+    pack_image_or_generate,
+)
+from app.features.node_image.pack_upload import upload_pack_image
 from app.features.node_image.service import (
     image_bytes_for_node,
     image_for_node,
@@ -590,6 +596,79 @@ async def put_knowledge_node_image(
     _ = user
     raw = await file.read()
     payload = upload_node_image(session, node_id, raw=raw, content_type=file.content_type)
+    session.commit()
+    return payload
+
+
+@router.get("/knowledge/nodes/{node_id}/packs/{pack_index}/image/file")
+def get_knowledge_pack_image_file(
+    node_id: UUID,
+    pack_index: int,
+    variant: str = "full",
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    choice = (variant or "full").strip().lower()
+    if choice not in {"full", "thumb"}:
+        raise AppError("VALIDATION_ERROR", "variant must be full or thumb", 422)
+    payload, media_type = image_bytes_for_pack(
+        session, node_id, pack_index, variant=choice
+    )
+    session.commit()
+    return RawResponse(content=payload, media_type=media_type)
+
+
+@router.get("/knowledge/nodes/{node_id}/packs/{pack_index}/image")
+def get_knowledge_pack_image(
+    node_id: UUID,
+    pack_index: int,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    return image_for_pack(session, node_id, pack_index)
+
+
+@router.post("/knowledge/nodes/{node_id}/packs/{pack_index}/image")
+def post_knowledge_pack_image(
+    node_id: UUID,
+    pack_index: int,
+    body: KnowledgeImageBody,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    payload, status = pack_image_or_generate(
+        session,
+        user=user,
+        node_id=node_id,
+        pack_index=pack_index,
+        generate=body.generate,
+        regenerate=body.regenerate,
+    )
+    session.commit()
+    response.status_code = status
+    return payload
+
+
+@router.put("/knowledge/nodes/{node_id}/packs/{pack_index}/image")
+async def put_knowledge_pack_image(
+    node_id: UUID,
+    pack_index: int,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _ = user
+    raw = await file.read()
+    payload = upload_pack_image(
+        session,
+        node_id,
+        pack_index,
+        raw=raw,
+        content_type=file.content_type,
+    )
     session.commit()
     return payload
 
