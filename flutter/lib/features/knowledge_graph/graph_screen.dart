@@ -57,10 +57,6 @@ class _GraphScreenState extends State<GraphScreen>
   Matrix4? _morphCameraBegin;
   Matrix4? _morphCameraEnd;
   Size _viewport = Size.zero;
-  Timer? _dwellTimer;
-  Timer? _motionSettleTimer;
-  /// True while a finger is actively dragging/pinching the graph.
-  var _graphGestureActive = false;
   /// Cached completeness for highlighted nodes: true = under the user's budget.
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
@@ -69,8 +65,6 @@ class _GraphScreenState extends State<GraphScreen>
   List<FocusTrailEntry> _trailShown = const [];
   /// Relation tap in flight — keep topic screen stable until the new focus lands.
   String? _openingRelatedId;
-  /// Next dwell/open came from a graph tap (not free-pan settle or cold start).
-  var _countNextOpenAsInterest = false;
 
   @override
   void initState() {
@@ -101,8 +95,6 @@ class _GraphScreenState extends State<GraphScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _dwellTimer?.cancel();
-    _motionSettleTimer?.cancel();
     _suggestDebounce?.cancel();
     _panController
       ..removeListener(_onPanTick)
@@ -114,52 +106,6 @@ class _GraphScreenState extends State<GraphScreen>
     _searchFocus.dispose();
     _transform.dispose();
     super.dispose();
-  }
-
-  static bool _transformNearlyStill(Matrix4 a, Matrix4 b) {
-    final ta = a.getTranslation();
-    final tb = b.getTranslation();
-    // Looser than a pixel-perfect still check so dwell/morph starts soon after lift.
-    return (ta - tb).length < 1.6 &&
-        (a.getMaxScaleOnAxis() - b.getMaxScaleOnAxis()).abs() < 0.002;
-  }
-
-  void _cancelDwellAndSettle() {
-    _dwellTimer?.cancel();
-    _motionSettleTimer?.cancel();
-  }
-
-  /// After the finger lifts, wait until inertia dies, then open the highlight.
-  void _armSettleThenDwell() {
-    _motionSettleTimer?.cancel();
-    _dwellTimer?.cancel();
-    if (_graphGestureActive || _panController.isAnimating) return;
-    var previous = _transform.value.clone();
-    var stillTicks = 0;
-    // First sample quickly so a soft release (little inertia) opens almost immediately.
-    _motionSettleTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_graphGestureActive || _panController.isAnimating) {
-        timer.cancel();
-        return;
-      }
-      final now = _transform.value;
-      if (_transformNearlyStill(previous, now)) {
-        stillTicks += 1;
-        // ~32ms of stillness after lift is enough to commit.
-        if (stillTicks >= 2) {
-          timer.cancel();
-          _scheduleDwell(_highlighted?.id);
-        }
-      } else {
-        stillTicks = 0;
-        previous = now.clone();
-        _dwellTimer?.cancel();
-      }
-    });
   }
 
   void _onPanTick() {
@@ -275,7 +221,6 @@ class _GraphScreenState extends State<GraphScreen>
     }
     _transformFocusId = focusId;
     _panTargetId = null;
-    _cancelDwellAndSettle();
     _beginFocusMorph(previous: previous, next: next, focusId: focusId, viewport: viewport);
   }
 
@@ -288,7 +233,6 @@ class _GraphScreenState extends State<GraphScreen>
     _panController.stop();
     _panAnimation = null;
     _panTargetId = null;
-    _cancelDwellAndSettle();
     _transform.value = Matrix4.translationValues(
       (viewport.width - canvas.width) / 2,
       (viewport.height - canvas.height) / 2,
@@ -327,7 +271,6 @@ class _GraphScreenState extends State<GraphScreen>
     final graph = context.read<GraphController>();
     // Focus tile: organic learning track (generates a pack if none nearby).
     if (node.id == graph.focusId) {
-      _dwellTimer?.cancel();
       setState(() {
         _highlighted = node;
         _profileOpen = false;
@@ -335,12 +278,10 @@ class _GraphScreenState extends State<GraphScreen>
       unawaited(_openFocusPrimary(node, source: 'graph'));
       return;
     }
-    // Tap → open immediately. Morph pins the tile; no pan/settle delay.
-    _cancelDwellAndSettle();
+    // Tap only — free pan never refocuses.
     _panController.stop();
     _panAnimation = null;
     _panTargetId = node.id;
-    _countNextOpenAsInterest = true;
     setState(() {
       _highlighted = node;
       _openingRelatedId = node.id;
@@ -349,13 +290,11 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _openTappedNeighbor(GraphController graph, PlacedNode node) async {
-    final source = _countNextOpenAsInterest ? 'graph' : null;
-    _countNextOpenAsInterest = false;
     try {
       await graph.openExisting(
         node.id,
         title: node.title,
-        interestSource: source,
+        interestSource: 'graph',
       );
       if (!mounted) return;
       // Wait for LayoutBuilder's post-frame adopt — not merely the network return.
@@ -384,52 +323,13 @@ class _GraphScreenState extends State<GraphScreen>
         node?.description == _highlighted?.description) {
       return;
     }
-    final idChanged = _highlighted?.id != node?.id;
     setState(() => _highlighted = node);
-    // Free-pan dwell is armed from InteractiveViewer settle (finger up + no velocity).
-    if (idChanged) _dwellTimer?.cancel();
   }
 
   /// null = unknown, true = incomplete, false = complete.
   bool? _knownIncomplete(String id, GraphController graph) {
     if (id == graph.focusId) return graph.categoryGraph?['incomplete'] == true;
     return _incompleteByNode[id];
-  }
-
-  void _scheduleDwell(String? nodeId) {
-    _dwellTimer?.cancel();
-    if (nodeId == null) return;
-    final graph = context.read<GraphController>();
-    if (nodeId == graph.focusId) {
-      _incompleteByNode[nodeId] = graph.categoryGraph?['incomplete'] == true;
-      return;
-    }
-    // No intentional pause — fetch/open as soon as the camera has settled.
-    unawaited(_onDwell(nodeId));
-  }
-
-  Future<void> _onDwell(String nodeId) async {
-    if (!mounted || _highlighted?.id != nodeId) return;
-    final graph = context.read<GraphController>();
-    if (nodeId == graph.focusId) return;
-    final payload = await graph.fetchGraph(nodeId);
-    if (!mounted || _highlighted?.id != nodeId) return;
-    if (payload == null) return;
-    final incomplete = payload['incomplete'] == true;
-    setState(() => _incompleteByNode[nodeId] = incomplete);
-    // Always refocus — show whatever neighbors exist; Request only if under budget.
-    final source = _countNextOpenAsInterest ? 'graph' : null;
-    _countNextOpenAsInterest = false;
-    await graph.openExisting(
-      nodeId,
-      title: _highlighted?.title,
-      knownPayload: payload,
-      interestSource: source,
-    );
-    if (!mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    _syncHighlightedFromLayout(graph.focusId);
   }
 
   Future<void> _requestNeighbors(GraphController graph) async {
@@ -671,7 +571,6 @@ class _GraphScreenState extends State<GraphScreen>
   }
 
   Future<void> _onLongPressNode(PlacedNode node) async {
-    _dwellTimer?.cancel();
     final graph = context.read<GraphController>();
     setState(() {
       _highlighted = node;
@@ -1500,21 +1399,10 @@ class _GraphScreenState extends State<GraphScreen>
             vertical: panSlack,
           ),
           onInteractionStart: (_) {
-            _graphGestureActive = true;
-            _cancelDwellAndSettle();
-            // Finger pan/pinch is not a tap — don't credit the next dwell open.
-            _countNextOpenAsInterest = false;
             if (!_panController.isAnimating) return;
             _panController.stop();
             _panAnimation = null;
             _panTargetId = null;
-          },
-          onInteractionUpdate: (_) {
-            _dwellTimer?.cancel();
-          },
-          onInteractionEnd: (_) {
-            _graphGestureActive = false;
-            _armSettleThenDwell();
           },
           child: SizedBox(
             width: layout.width,
