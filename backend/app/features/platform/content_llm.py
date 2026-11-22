@@ -26,7 +26,7 @@ from app.features.platform.openai_chat import openai_chat_body, set_openai_max_o
 
 logger = logging.getLogger(__name__)
 
-PROMPT_CONTENT = "content_bits_v5"
+PROMPT_CONTENT = "content_bits_v6"
 
 
 class ContentLLM(Protocol):
@@ -68,7 +68,7 @@ def build_content_prompt(
         + ".\n\n"
         "Shape:\n"
         "- learn: one short, standalone atomic learning bit — concrete, interesting, worth knowing\n"
-        "- three tests (check1–check3): genuinely useful checks of that same bit\n\n"
+        "- three tests (check1–check3): one of each type below, all checking that same bit\n\n"
         "Rules:\n"
         "- Stay on this topic only.\n"
         "- Do not teach neighboring topics.\n"
@@ -85,12 +85,12 @@ def build_content_prompt(
         )
     if checks_needed:
         parts.append(
-            "Each check is one of:\n"
+            "Use these three check types (one each when writing a full pack):\n"
             "- mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}\n"
             "- true_false: {type:'true_false', statement, answer (boolean), explanation}\n"
-            "- cloze: {type:'cloze', prompt (with ___), answer, aliases (optional), explanation}; "
-            "answer and aliases must each be exactly one word or one number (no phrases)\n"
-            "Mix types when useful. Wrong answers should be plausible near-misses.\n"
+            "- cloze: {type:'cloze', prompt (with ___), choices (exactly 4 single-word or "
+            "single-number strings), answer_index 0..3, explanation}\n"
+            "Wrong answers should be plausible near-misses.\n"
         )
         if existing_checks:
             parts.append(
@@ -168,30 +168,17 @@ class FakeContentLLM:
                     "explanation": f"The first choice matches how we introduce {topic}.",
                 },
                 "check2": {
-                    "type": "mc",
-                    "question": f"What is a useful next step when learning {topic}?",
-                    "choices": [
-                        f"Start from the core idea of {topic}, then add one concrete example.",
-                        f"Ignore {topic} and memorize unrelated trivia.",
-                        f"Assume {topic} has no connection to nearby ideas.",
-                        f"Skip explanations and only collect buzzwords about {topic}.",
-                    ],
-                    "answer_index": 0,
-                    "explanation": (
-                        f"Building from the core idea with an example is the useful next step for {topic}."
-                    ),
+                    "type": "true_false",
+                    "statement": f"{topic} can be introduced with one clear core idea.",
+                    "answer": True,
+                    "explanation": f"Atomic learning starts from a clear core idea for {topic}.",
                 },
                 "check3": {
-                    "type": "mc",
-                    "question": f"Which claim about {topic} is weakest?",
-                    "choices": [
-                        f"{topic} can be explained in plain language without jargon.",
-                        f"{topic} is only a random string of letters with no meaning.",
-                        f"{topic} often sits near related ideas in a knowledge map.",
-                        f"{topic} can be checked with a short multiple-choice question.",
-                    ],
-                    "answer_index": 1,
-                    "explanation": f"Calling {topic} meaningless is the weakest claim.",
+                    "type": "cloze",
+                    "prompt": f"Learning {topic} works best in ___ steps.",
+                    "choices": ["short", "endless", "random", "silent"],
+                    "answer_index": 0,
+                    "explanation": f"Short standalone steps fit {topic} best.",
                 },
             }
         else:
@@ -205,8 +192,8 @@ class FakeContentLLM:
                 "check2": {
                     "type": "cloze",
                     "prompt": f"A pack about {topic} always includes exactly ___ checks.",
-                    "answer": "3",
-                    "aliases": ["three"],
+                    "choices": ["3", "1", "5", "10"],
+                    "answer_index": 0,
                     "explanation": "Each pack has three test bits.",
                 },
                 "check3": {
@@ -507,7 +494,7 @@ def _normalize_true_false(check: dict, *, kind: str) -> dict:
 
 
 def _is_single_cloze_token(value: str) -> bool:
-    """Cloze answers must be one word or one number (no spaces/phrases)."""
+    """Cloze choices must be one word or one number (no spaces/phrases)."""
     text = value.strip()
     if not text or any(ch.isspace() for ch in text):
         return False
@@ -515,29 +502,30 @@ def _is_single_cloze_token(value: str) -> bool:
 
 
 def _normalize_cloze(check: dict, *, kind: str) -> dict:
+    """Cloze = fill-in blank with one-word multiple choice (not free text)."""
     prompt = str(check.get("prompt") or check.get("question") or "").strip()
-    answer = str(check.get("answer") or "").strip()
     if not prompt:
         raise ValueError(f"{kind} is missing prompt")
-    if not answer:
-        raise ValueError(f"{kind} is missing answer")
-    if not _is_single_cloze_token(answer):
-        raise ValueError(f"{kind} answer must be a single word or number")
-    aliases_raw = check.get("aliases") if isinstance(check.get("aliases"), list) else []
-    aliases: list[str] = []
-    for item in aliases_raw:
-        alias = str(item).strip()
-        if not alias:
-            continue
-        if not _is_single_cloze_token(alias):
-            raise ValueError(f"{kind} aliases must each be a single word or number")
-        aliases.append(alias)
+    choices_raw = check.get("choices") if isinstance(check.get("choices"), list) else []
+    choices = [str(item).strip() for item in choices_raw if str(item).strip()]
+    if len(choices) < 4:
+        raise ValueError(f"{kind} must include 4 one-word choices")
+    choices = choices[:4]
+    for choice in choices:
+        if not _is_single_cloze_token(choice):
+            raise ValueError(f"{kind} choices must each be a single word or number")
+    try:
+        answer_index = int(check.get("answer_index"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{kind} answer_index must be an integer") from exc
+    if answer_index < 0 or answer_index > 3:
+        raise ValueError(f"{kind} answer_index must be 0..3")
     explanation = str(check.get("explanation") or "").strip() or None
     return {
         "type": "cloze",
         "prompt": prompt,
-        "answer": answer,
-        "aliases": aliases,
+        "choices": choices,
+        "answer_index": answer_index,
         "explanation": explanation,
     }
 

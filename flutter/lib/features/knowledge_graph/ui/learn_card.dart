@@ -69,9 +69,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   var _revealed = false;
   bool? _answerCorrect;
   var _trackedLearn = false;
-  final _clozeController = TextEditingController();
-  /// Separate controller so offstage height measurement never shares a TextField.
-  final _measureClozeController = TextEditingController();
   double _frontBodyH = 0;
   double _backBodyH = 0;
 
@@ -83,13 +80,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
       _trackedLearn = true;
       widget.onShown();
     });
-  }
-
-  @override
-  void dispose() {
-    _clozeController.dispose();
-    _measureClozeController.dispose();
-    super.dispose();
   }
 
   void _markRevealed() {
@@ -121,18 +111,6 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
     widget.onCheckAnswer(correct: correct, answerBool: value);
   }
 
-  void _onSubmitCloze() {
-    if (_revealed) return;
-    final bit = widget.entry.pack.bit(widget.entry.checkKind);
-    if (bit == null) return;
-    final text = _clozeController.text;
-    final correct = gradeCloze(bit, text);
-    _measureClozeController.text = text;
-    FocusManager.instance.primaryFocus?.unfocus();
-    _reveal(correct: correct);
-    widget.onCheckAnswer(correct: correct, answerText: text.trim());
-  }
-
   void _onFrontBodySize(Size size) {
     if (!mounted) return;
     if ((size.height - _frontBodyH).abs() < 0.5) return;
@@ -147,10 +125,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
 
   Widget _frontBody() => LearnMarkdownBit(bit: widget.entry.pack.bit('learn'));
 
-  Widget _backBody({
-    required TextEditingController clozeController,
-    bool interactive = true,
-  }) {
+  Widget _backBody({bool interactive = true}) {
     return GestureDetector(
       onTap: interactive ? () {} : null,
       behavior: HitTestBehavior.deferToChild,
@@ -158,10 +133,8 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
         bit: widget.entry.pack.bit(widget.entry.checkKind),
         selected: _selectedChoice,
         revealed: _revealed,
-        clozeController: clozeController,
         onSelectChoice: interactive ? _onSelectMc : (_) {},
         onSelectBool: interactive ? _onSelectBool : (_) {},
-        onSubmitCloze: interactive ? _onSubmitCloze : () {},
       ),
     );
   }
@@ -244,10 +217,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                           onChange: _onBackBodySize,
                           child: Padding(
                             padding: _bodyPadding,
-                            child: _backBody(
-                              clozeController: _measureClozeController,
-                              interactive: false,
-                            ),
+                            child: _backBody(interactive: false),
                           ),
                         ),
                       ],
@@ -291,9 +261,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
                             correct: _answerCorrect!,
                           )
                         : null,
-                    child: _backBody(
-                      clozeController: _clozeController,
-                    ),
+                    child: _backBody(),
                   ),
                 ),
               ),

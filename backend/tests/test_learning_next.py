@@ -29,7 +29,12 @@ def _add_pack(session, node_id, *, pack_index=1):
         (
             "check3",
             3,
-            {"type": "cloze", "prompt": "Fill ___", "answers": ["x"]},
+            {
+                "type": "cloze",
+                "prompt": "Fill ___",
+                "choices": ["x", "y", "z", "w"],
+                "answer_index": 0,
+            },
         ),
     ]
     for kind, position, body in bits:

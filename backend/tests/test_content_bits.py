@@ -67,11 +67,17 @@ def test_content_expand_generates_five_bits(client, auth, session):
     assert pack["pack_index"] == 1
     assert pack["incomplete"] is False
     assert _kinds(pack) == {"learn", "check1", "check2", "check3"}
-    for kind in ("check1", "check2", "check3"):
-        check = next(bit for bit in pack["bits"] if bit["kind"] == kind)
-        assert check["body"]["type"] == "mc"
-        assert len(check["body"]["choices"]) == 4
-        assert check["body"]["answer_index"] in (0, 1, 2, 3)
+    by_kind = {
+        bit["kind"]: bit["body"]
+        for bit in pack["bits"]
+        if bit["kind"] in {"check1", "check2", "check3"}
+    }
+    assert by_kind["check1"]["type"] == "mc"
+    assert len(by_kind["check1"]["choices"]) == 4
+    assert by_kind["check2"]["type"] == "true_false"
+    assert by_kind["check3"]["type"] == "cloze"
+    assert len(by_kind["check3"]["choices"]) == 4
+    assert by_kind["check3"]["answer_index"] in (0, 1, 2, 3)
 
 
 def test_content_expand_coalesces_and_skips_when_complete(client, auth, other_auth, session):
@@ -291,8 +297,8 @@ def test_normalize_bits_typed_checks():
             "check3": {
                 "type": "cloze",
                 "prompt": "Outputs are ___.",
-                "answer": "probabilities",
-                "aliases": ["probs"],
+                "choices": ["probabilities", "logits", "scores", "vectors"],
+                "answer_index": 0,
                 "explanation": "Probabilities.",
             },
         }
@@ -302,10 +308,16 @@ def test_normalize_bits_typed_checks():
     assert normalized["check2"]["type"] == "true_false"
     assert normalized["check2"]["answer"] is True
     assert normalized["check3"]["type"] == "cloze"
-    assert normalized["check3"]["aliases"] == ["probs"]
+    assert normalized["check3"]["choices"] == [
+        "probabilities",
+        "logits",
+        "scores",
+        "vectors",
+    ]
+    assert normalized["check3"]["answer_index"] == 0
 
 
-def test_normalize_cloze_rejects_multi_word_answer():
+def test_normalize_cloze_rejects_multi_word_choice():
     import pytest
 
     with pytest.raises(ValueError, match="single word or number"):
@@ -326,7 +338,8 @@ def test_normalize_cloze_rejects_multi_word_answer():
                 "check3": {
                     "type": "cloze",
                     "prompt": "Fill ___.",
-                    "answer": "two words",
+                    "choices": ["two words", "a", "b", "c"],
+                    "answer_index": 0,
                 },
             }
         )
@@ -355,10 +368,10 @@ def test_build_content_prompt_includes_existing_packs_and_neighbors():
     assert "Attention" in prompt
     assert "true_false" in prompt
     assert "cloze" in prompt
+    assert "single-word" in prompt
     assert '"pack_index": 2' in prompt
     assert "Do not overlap other atomic learnings" in prompt
     assert "Do not teach neighboring topics" in prompt
     assert "Never mention neighbors, other learnings" in prompt
     assert "worth knowing" in prompt
-    assert "genuinely useful" in prompt
-    assert "exactly one word or one number" in prompt
+    assert "one of each type" in prompt

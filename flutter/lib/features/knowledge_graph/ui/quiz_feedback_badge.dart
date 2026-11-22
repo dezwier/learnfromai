@@ -25,7 +25,7 @@ class QuizFeedbackBadge extends StatelessWidget {
     final body = bit?.body;
     final type = checkTypeOf(bit);
     String? detail;
-    if (!correct && type == 'cloze') {
+    if (!correct && (type == 'cloze' || type == 'mc')) {
       final expected = quizExpectedAnswerOf(body);
       if (expected != null) detail = 'Answer: $expected';
     }
@@ -97,7 +97,14 @@ String? quizExplanationOf(Map<String, dynamic>? body) {
 }
 
 String? quizExpectedAnswerOf(Map<String, dynamic>? body) {
-  final raw = body?['answer']?.toString().trim();
+  if (body == null) return null;
+  final choices = body['choices'];
+  final index = (body['answer_index'] as num?)?.toInt();
+  if (choices is List && index != null && index >= 0 && index < choices.length) {
+    final pick = choices[index].toString().trim();
+    if (pick.isNotEmpty) return pick;
+  }
+  final raw = body['answer']?.toString().trim();
   if (raw == null || raw.isEmpty) return null;
   return raw;
 }

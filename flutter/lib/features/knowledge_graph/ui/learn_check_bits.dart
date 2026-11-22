@@ -6,24 +6,13 @@ import 'learn_pack_chrome.dart';
 String checkTypeOf(TopicBit? bit) {
   final raw = bit?.body['type']?.toString().trim().toLowerCase();
   if (raw == 'true_false' || raw == 'cloze' || raw == 'mc') return raw!;
+  if (bit?.body['choices'] is List && bit?.body.containsKey('prompt') == true) {
+    return 'cloze';
+  }
   if (bit?.body['choices'] is List) return 'mc';
   if (bit?.body.containsKey('statement') == true) return 'true_false';
   if (bit?.body.containsKey('prompt') == true) return 'cloze';
   return 'mc';
-}
-
-bool gradeCloze(TopicBit bit, String input) {
-  final needle = input.trim().toLowerCase();
-  if (needle.isEmpty) return false;
-  final answer = bit.body['answer']?.toString().trim().toLowerCase() ?? '';
-  if (answer.isNotEmpty && needle == answer) return true;
-  final aliases = bit.body['aliases'];
-  if (aliases is List) {
-    for (final row in aliases) {
-      if (row.toString().trim().toLowerCase() == needle) return true;
-    }
-  }
-  return false;
 }
 
 class LearnCheckBit extends StatelessWidget {
@@ -32,19 +21,15 @@ class LearnCheckBit extends StatelessWidget {
     required this.bit,
     required this.selected,
     required this.revealed,
-    required this.clozeController,
     required this.onSelectChoice,
     required this.onSelectBool,
-    required this.onSubmitCloze,
   });
 
   final TopicBit? bit;
   final int selected;
   final bool revealed;
-  final TextEditingController clozeController;
   final ValueChanged<int> onSelectChoice;
   final ValueChanged<bool> onSelectBool;
-  final VoidCallback onSubmitCloze;
 
   @override
   Widget build(BuildContext context) {
@@ -66,11 +51,11 @@ class LearnCheckBit extends StatelessWidget {
           revealed: revealed,
           onSelect: onSelectBool,
         ),
-      'cloze' => _ClozeCheck(
+      'cloze' => _ClozeMcCheck(
           bit: bit!,
+          selected: selected,
           revealed: revealed,
-          controller: clozeController,
-          onSubmit: onSubmitCloze,
+          onSelect: onSelectChoice,
         ),
       _ => _McCheck(
           bit: bit!,
@@ -180,18 +165,19 @@ class _TrueFalseCheck extends StatelessWidget {
   }
 }
 
-class _ClozeCheck extends StatelessWidget {
-  const _ClozeCheck({
+/// Cloze = blank in a prompt + one-word multiple choice (not free text).
+class _ClozeMcCheck extends StatelessWidget {
+  const _ClozeMcCheck({
     required this.bit,
+    required this.selected,
     required this.revealed,
-    required this.controller,
-    required this.onSubmit,
+    required this.onSelect,
   });
 
   final TopicBit bit;
+  final int selected;
   final bool revealed;
-  final TextEditingController controller;
-  final VoidCallback onSubmit;
+  final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -199,10 +185,21 @@ class _ClozeCheck extends StatelessWidget {
     final prompt = bit.body['prompt']?.toString() ??
         bit.body['question']?.toString() ??
         '';
-    final correct = revealed && gradeCloze(bit, controller.text);
-    final dark = scheme.brightness == Brightness.dark;
-    final resultColor =
-        correct ? learnOkColor(scheme.brightness) : learnBadColor(scheme.brightness);
+    final choicesRaw = bit.body['choices'];
+    final choices = [
+      if (choicesRaw is List)
+        for (final row in choicesRaw) row.toString(),
+    ];
+    final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
+    if (choices.length < 2) {
+      return Text(
+        'This cloze check needs regenerating.',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurface.withValues(alpha: 0.45),
+              fontStyle: FontStyle.italic,
+            ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -214,53 +211,16 @@ class _ClozeCheck extends StatelessWidget {
               ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: controller,
-          enabled: !revealed,
-          textInputAction: TextInputAction.done,
-          // Keep ensureVisible tight — default padding lifts the field too high.
-          scrollPadding: const EdgeInsets.only(bottom: 12, top: 8),
-          onTapOutside: (_) {
-            FocusManager.instance.primaryFocus?.unfocus();
-          },
-          onSubmitted: (_) {
-            if (!revealed) onSubmit();
-          },
-          decoration: InputDecoration(
-            hintText: 'Fill in the blank',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            enabledBorder: revealed
-                ? OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: resultColor.withValues(alpha: 0.75)),
-                  )
-                : null,
-            disabledBorder: revealed
-                ? OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: resultColor.withValues(alpha: 0.75)),
-                  )
-                : null,
-            filled: revealed,
-            fillColor: revealed ? resultColor.withValues(alpha: dark ? 0.22 : 0.12) : null,
+        for (var i = 0; i < choices.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _ChoiceTile(
+            label: choices[i],
+            selected: selected == i,
+            revealed: revealed,
+            correct: i == answerIndex,
+            onTap: () => onSelect(i),
           ),
-        ),
-        const SizedBox(height: 10),
-        // Keep Check row height so reveal doesn't resize the card.
-        // Disable (don't remove) so the Check tap can't retarget onto Next/Done.
-        Align(
-          alignment: Alignment.centerRight,
-          child: Opacity(
-            opacity: revealed ? 0 : 1,
-            child: IgnorePointer(
-              ignoring: revealed,
-              child: FilledButton(
-                onPressed: revealed ? null : onSubmit,
-                child: const Text('Check'),
-              ),
-            ),
-          ),
-        ),
+        ],
       ],
     );
   }

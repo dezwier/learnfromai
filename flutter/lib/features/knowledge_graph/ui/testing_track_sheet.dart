@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
@@ -39,9 +38,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   List<_ReviewCard> _queue = const [];
   int _queueIndex = 0;
   var _answered = false;
-  /// Prevents the cloze Check / keyboard Done tap from also hitting Next/Done.
+  /// Brief gate so the answer tap doesn't also hit Next/Done.
   var _continueArmed = false;
-  /// Wall-clock gate so a residual pointer-up after keyboard dismiss can't hit Done.
   DateTime _nextAllowedAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _hubLoadGen = 0;
   int _reviewSessionGen = 0;
@@ -135,22 +133,13 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     });
   }
 
-  /// Unfocus + hide keyboard before unmounting the cloze field / hub swap.
   Future<void> _leaveReviewForHub({bool quiet = false}) async {
     if (!_reviewing) {
       await _loadHub(quiet: quiet);
       return;
     }
-    final sessionGen = ++_reviewSessionGen;
+    ++_reviewSessionGen;
     FocusManager.instance.primaryFocus?.unfocus();
-    // ignore: discarded_futures
-    SystemChannels.textInput.invokeMethod('TextInput.hide');
-    for (var i = 0; i < 40; i++) {
-      if (!mounted || sessionGen != _reviewSessionGen) return;
-      if (MediaQuery.viewInsetsOf(context).bottom <= 0.5) break;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-    if (!mounted || sessionGen != _reviewSessionGen) return;
     await _loadHub(quiet: quiet);
   }
 
@@ -222,8 +211,6 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _answered = true;
       _continueArmed = false;
     });
-    // Submit in the background; keep Next completely unmounted until the
-    // answering gesture + keyboard are gone (cloze Done sits where Done is).
     unawaited(
       graph
           .submitReview(
@@ -237,26 +224,18 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
           )
           .then((_) {}),
     );
-    // Wait out keyboard dismiss.
-    for (var i = 0; i < 40; i++) {
-      if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
-      if (MediaQuery.viewInsetsOf(context).bottom <= 0.5) break;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-    if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
-    // Extra beat after insets clear — residual pointer-up still arrives then.
-    await Future<void>.delayed(const Duration(milliseconds: 450));
+    // Short settle so the answer tap doesn't also hit Next.
+    await Future<void>.delayed(const Duration(milliseconds: 220));
     if (!mounted || sessionGen != _reviewSessionGen || !_answered) return;
     setState(() {
       _submitting = false;
       _continueArmed = true;
-      _nextAllowedAt = DateTime.now().add(const Duration(milliseconds: 350));
+      _nextAllowedAt = DateTime.now().add(const Duration(milliseconds: 180));
     });
   }
 
   Future<void> _onNextCard() async {
     if (!_answered || !_continueArmed || _submitting) return;
-    if (MediaQuery.viewInsetsOf(context).bottom > 0.5) return;
     if (DateTime.now().isBefore(_nextAllowedAt)) return;
     if (_queueIndex + 1 >= _queue.length) {
       await _leaveReviewForHub();
@@ -306,9 +285,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     final canReview = dueCount > 0 && !_loading;
     // Reserve CTA space during review (even before Next appears) so the card fits.
     final reserveNext = _reviewing && _answered;
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0.5;
-    final nextReady =
-        reserveNext && _continueArmed && !_submitting && !keyboardOpen;
+    final nextReady = reserveNext && _continueArmed && !_submitting;
     final bottomClearance = LearnSessionFloatingCta.clearance(
       context,
       reserveCta: _reviewing,
@@ -357,7 +334,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
                         bottomClearance,
                       ),
           ),
-          // Eat taps while settling so keyboard Done / Check can't hit through.
+          // Eat taps while settling so the answer tap can't hit Next/Done.
           if (reserveNext && !nextReady)
             const Positioned.fill(
               child: AbsorbPointer(
