@@ -117,6 +117,7 @@ class _GraphViewState extends State<GraphView> {
                       node: node,
                       focused: node.id == widget.focusId,
                       pending: node.id == widget.pendingId,
+                      morphing: widget.morphing,
                       centerHighlight:
                           !widget.morphing && node.id == (widget.highlightId ?? _centerId),
                       onTap: () => widget.onSelect(node),
@@ -205,6 +206,7 @@ class _NodeCard extends StatelessWidget {
     required this.pending,
     required this.centerHighlight,
     required this.onTap,
+    required this.morphing,
     this.onLongPress,
     this.imageBytes,
   });
@@ -213,6 +215,7 @@ class _NodeCard extends StatelessWidget {
   final bool focused;
   final bool pending;
   final bool centerHighlight;
+  final bool morphing;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final Uint8List? imageBytes;
@@ -225,6 +228,8 @@ class _NodeCard extends StatelessWidget {
         ? (dark ? const Color(0xFF3A4554) : const Color(0xFFDDE7F4))
         : nodeFill(node, scheme);
     final flower = node.effectiveFlowerAmount;
+    // Morph on solid fills; fade thumbs in after settle (and when bytes arrive).
+    final revealImages = !morphing;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: centerHighlight ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
@@ -241,6 +246,7 @@ class _NodeCard extends StatelessWidget {
           dark: dark,
           spotlight: spotlight,
           imageBytes: imageBytes,
+          revealImages: revealImages,
         );
         final bloom = _flowerCard(
           scheme: scheme,
@@ -248,6 +254,7 @@ class _NodeCard extends StatelessWidget {
           dark: dark,
           spotlight: spotlight,
           imageBytes: imageBytes,
+          revealImages: revealImages,
           contentOpacity: Curves.easeOut.transform(flower.clamp(0.0, 1.0)),
         );
         // Crossfade the whole range so flowerAmount never pops widgets in/out.
@@ -286,10 +293,11 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
     Uint8List? imageBytes,
+    required bool revealImages,
     double contentOpacity = 1,
   }) {
     final description = (node.description ?? '').trim();
-    final hasImage = imageBytes != null;
+    final hasImage = imageBytes != null && revealImages;
     final titleColor = hasImage ? Colors.white : scheme.onSurface;
     final descColor = hasImage
         ? Colors.white.withValues(alpha: 0.88)
@@ -301,7 +309,8 @@ class _NodeCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (hasImage) _hexImageFill(imageBytes!, flower: true),
+            if (imageBytes != null)
+              _hexImageFill(imageBytes, flower: true, reveal: revealImages),
             if (hasImage)
               ClipPath(
                 clipper: const _FlowerTapClipper(),
@@ -406,14 +415,16 @@ class _NodeCard extends StatelessWidget {
     required bool dark,
     required double spotlight,
     Uint8List? imageBytes,
+    required bool revealImages,
   }) {
-    final hasImage = imageBytes != null;
+    final hasImage = imageBytes != null && revealImages;
     return CustomPaint(
       painter: _HexTilePainter(color: fill, dark: dark, spotlight: spotlight),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasImage) _hexImageFill(imageBytes!, flower: false),
+          if (imageBytes != null)
+            _hexImageFill(imageBytes, flower: false, reveal: revealImages),
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: node.radius * 0.34,
@@ -443,11 +454,17 @@ class _NodeCard extends StatelessWidget {
 
   static const _hexImageOpacity = 0.4;
 
-  Widget _hexImageFill(Uint8List bytes, {required bool flower}) {
+  Widget _hexImageFill(
+    Uint8List bytes, {
+    required bool flower,
+    required bool reveal,
+  }) {
     return ClipPath(
       clipper: flower ? const _FlowerTapClipper() : const _HexTapClipper(),
-      child: Opacity(
-        opacity: _hexImageOpacity,
+      child: AnimatedOpacity(
+        opacity: reveal ? _hexImageOpacity : 0,
+        duration: Duration(milliseconds: reveal ? 280 : 0),
+        curve: Curves.easeOutCubic,
         child: Image.memory(
           bytes,
           fit: BoxFit.cover,

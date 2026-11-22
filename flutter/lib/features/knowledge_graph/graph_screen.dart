@@ -171,7 +171,10 @@ class _GraphScreenState extends State<GraphScreen>
     if (!_layoutMorph.isCompleted) return;
     _morphFrom = null;
     _morphTo = null;
-    _trailShown = List.of(context.read<GraphController>().focusTrail);
+    final graph = context.read<GraphController>();
+    _trailShown = List.of(graph.focusTrail);
+    // Morph first; thumbs load (and fade in) only after tiles have settled.
+    graph.preloadGraphImages();
     // Neighbors finished rearranging — ease the grown focus into true center.
     _animateCameraToCanvasCenter(
       viewport: _viewport,
@@ -337,21 +340,41 @@ class _GraphScreenState extends State<GraphScreen>
       unawaited(_openFocusPrimary(node, source: 'graph'));
       return;
     }
+    // Tap → open immediately. Morph pins the tile; no pan/settle delay.
+    _cancelDwellAndSettle();
+    _panController.stop();
+    _panAnimation = null;
     _panTargetId = node.id;
     _countNextOpenAsInterest = true;
-    final changed = _highlighted?.id != node.id ||
-        _highlighted?.title != node.title ||
-        _highlighted?.description != node.description;
-    if (changed) {
-      _dwellTimer?.cancel();
-      setState(() => _highlighted = node);
+    setState(() {
+      _highlighted = node;
+      _openingRelatedId = node.id;
+    });
+    unawaited(_openTappedNeighbor(graph, node));
+  }
+
+  Future<void> _openTappedNeighbor(GraphController graph, PlacedNode node) async {
+    final source = _countNextOpenAsInterest ? 'graph' : null;
+    _countNextOpenAsInterest = false;
+    try {
+      await graph.openExisting(
+        node.id,
+        title: node.title,
+        interestSource: source,
+      );
+      if (!mounted) return;
+      // Wait for LayoutBuilder's post-frame adopt — not merely the network return.
+      for (var i = 0; i < 12; i++) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        if (graph.focusId == node.id && _transformFocusId == node.id) break;
+      }
+      _syncHighlightedFromLayout(graph.focusId);
+    } finally {
+      if (mounted && _openingRelatedId == node.id) {
+        setState(() => _openingRelatedId = null);
+      }
     }
-    // Dwell only after the animated pan finishes and the viewport is still.
-    unawaited(() async {
-      await _animatePanTo(node.center, _viewport);
-      if (!mounted || _highlighted?.id != node.id) return;
-      _armSettleThenDwell();
-    }());
   }
 
   void _onHighlightFromCenter(PlacedNode? node) {
@@ -1064,7 +1087,10 @@ class _GraphScreenState extends State<GraphScreen>
   @override
   Widget build(BuildContext context) {
     final graph = context.watch<GraphController>();
-    graph.preloadGraphImages();
+    // Don't compete with focus morph — preload after settle (see _onLayoutMorphTick).
+    if (!_layoutMorph.isAnimating) {
+      graph.preloadGraphImages();
+    }
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
