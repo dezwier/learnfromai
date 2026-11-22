@@ -758,6 +758,8 @@ PlacedNode _hex(
     imageUrl: node.imageUrl,
     imageThumbUrl: node.imageThumbUrl,
     viaRole: viaRole,
+    // Neighbors-of-neighbors sit quieter than directs.
+    opacity: node.role == NodeRole.extended ? 0.48 : 1.0,
     radius: radius,
     x: cx - bounds.width / 2,
     y: cy - bounds.height / 2,
@@ -817,7 +819,7 @@ Color _fillForRole(NodeRole role, NodeRole? viaRole, ColorScheme scheme) {
   final paper = scheme.brightness == Brightness.dark
       ? const Color(0xFF16181C)
       : const Color(0xFFF4F1EA);
-  return Color.lerp(base, paper, 0.42)!;
+  return Color.lerp(base, paper, 0.58)!;
 }
 
 /// Tile fill: extended neighbors inherit their via-neighbor color, faded toward paper.

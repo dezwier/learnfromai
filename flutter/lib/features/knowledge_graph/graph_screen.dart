@@ -437,16 +437,6 @@ class _GraphScreenState extends State<GraphScreen>
     _syncHighlightedFromLayout(graph.focusId);
   }
 
-  Future<void> _goToHighlighted(GraphController graph) async {
-    final node = _highlighted;
-    if (node == null || node.id == graph.focusId) return;
-    await graph.openExisting(node.id, title: node.title, interestSource: 'graph');
-    if (!mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    _syncHighlightedFromLayout(graph.focusId);
-  }
-
   Future<void> _requestNeighbors(GraphController graph) async {
     final node = _highlighted;
     if (node == null) return;
@@ -1094,15 +1084,6 @@ class _GraphScreenState extends State<GraphScreen>
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final scheme = Theme.of(context).colorScheme;
-    final highlight = _highlighted;
-    final overlayOpen = _profileOpen || _testingOpen || _learnOpen;
-    final openingRelated =
-        _openingRelatedId != null && _openingRelatedId == highlight?.id;
-    final canGoToHighlight = !_searchOpen &&
-        !overlayOpen &&
-        highlight != null &&
-        highlight.id != graph.focusId &&
-        !openingRelated;
     // Keep chrome mounted while learn cards are open so HUD can fade out/in.
     final showChrome = !_searchOpen && !_profileOpen && !_testingOpen;
     final chromeOpaque = showChrome && !_learnOpen;
@@ -1297,21 +1278,6 @@ class _GraphScreenState extends State<GraphScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      if (canGoToHighlight) ...[
-                        FloatingActionButton.small(
-                          heroTag: 'graph-go',
-                          tooltip: 'Go to topic',
-                          backgroundColor: scheme.primary,
-                          foregroundColor: scheme.onPrimary,
-                          elevation: 1.5,
-                          focusElevation: 2,
-                          hoverElevation: 2,
-                          highlightElevation: 2,
-                          onPressed: () => unawaited(_goToHighlighted(graph)),
-                          child: const Icon(Icons.arrow_forward, size: 20),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
                       FloatingActionButton.small(
                         heroTag: 'graph-testing',
                         tooltip: 'Testing track',
