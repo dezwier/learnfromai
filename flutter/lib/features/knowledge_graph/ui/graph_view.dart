@@ -111,8 +111,11 @@ class _GraphViewState extends State<GraphView> {
               height: node.height + shadowPad * 2,
               child: Padding(
                 padding: const EdgeInsets.all(shadowPad),
-                child: Opacity(
+                // Morph drives opacity per-frame; after settle, ease role fades (e.g. extended).
+                child: AnimatedOpacity(
                   opacity: node.opacity.clamp(0.0, 1.0),
+                  duration: Duration(milliseconds: widget.morphing ? 0 : 380),
+                  curve: Curves.easeOutCubic,
                   child: IgnorePointer(
                     ignoring: node.opacity < 0.35,
                     child: _NodeCard(

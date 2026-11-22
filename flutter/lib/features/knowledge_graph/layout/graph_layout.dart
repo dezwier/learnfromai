@@ -261,13 +261,17 @@ GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
     if (a != null && b != null) {
       nodes.add(lerpPlacedNode(a, b, tt));
     } else if (a != null) {
-      // Leave: shrink slightly and fade.
-      nodes.add(_scaledAboutCenter(a, lerpDouble(1.0, 0.62, tt)!).copyWith(opacity: 1 - tt));
+      // Leave: shrink slightly and fade from the tile's settled opacity (e.g. 0.48 extended).
+      nodes.add(
+        _scaledAboutCenter(a, lerpDouble(1.0, 0.62, tt)!).copyWith(
+          opacity: lerpDouble(a.opacity, 0, tt)!,
+        ),
+      );
     } else if (b != null) {
-      // Arrive: grow from small and fade in.
+      // Arrive: grow from small and fade toward target opacity (extended stays quieter).
       nodes.add(
         _scaledAboutCenter(b, lerpDouble(0.55, 1.0, tt)!).copyWith(
-          opacity: tt,
+          opacity: lerpDouble(0, b.opacity, tt)!,
           colorFromRole: b.role,
           colorT: 1,
         ),
