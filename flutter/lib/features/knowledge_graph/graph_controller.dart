@@ -725,6 +725,8 @@ class GraphController extends ChangeNotifier {
   Future<bool> deleteNode(String id) async {
     if (refreshing || loading) return false;
     final wasFocus = focusId == id;
+    // Capture neighbors before the API wipe so we can land on one of them.
+    final neighborIds = wasFocus ? _canvasNodeIdsExcluding(id) : const <String>[];
     error = null;
     notifyListeners();
     try {
@@ -732,12 +734,7 @@ class GraphController extends ChangeNotifier {
       focusHistory.removeWhere((entry) => entry == id);
       trackedJobs.removeWhere((j) => j.nodeId == id);
       if (wasFocus) {
-        if (focusHistory.isNotEmpty) {
-          await openExisting(focusHistory.last);
-        } else {
-          categoryGraph = null;
-          notifyListeners();
-        }
+        await _openAfterFocusDeleted(neighborIds);
       } else {
         final focus = focusId;
         if (focus != null) {
@@ -750,6 +747,39 @@ class GraphController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Node ids currently on the canvas, excluding [id] (neighbors of focus).
+  List<String> _canvasNodeIdsExcluding(String id) {
+    final nodes = categoryGraph?['nodes'];
+    if (nodes is! List) return const [];
+    final out = <String>[];
+    for (final raw in nodes) {
+      if (raw is! Map) continue;
+      final nodeId = raw['id']?.toString();
+      if (nodeId == null || nodeId.isEmpty || nodeId == id) continue;
+      out.add(nodeId);
+    }
+    return out;
+  }
+
+  /// After deleting the focus: random neighbor → trail → any shared topic.
+  Future<void> _openAfterFocusDeleted(List<String> neighborIds) async {
+    final shuffled = List<String>.of(neighborIds)..shuffle();
+    final seen = <String>{};
+    final candidates = <String>[
+      for (final id in shuffled)
+        if (seen.add(id)) id,
+      for (final id in focusHistory.reversed)
+        if (seen.add(id)) id,
+    ];
+    for (final nextId in candidates) {
+      error = null;
+      await openExisting(nextId, interestSource: 'graph');
+      if (error == null && focusId == nextId) return;
+    }
+    // No local candidate — resume (backend picks a random shared topic if any).
+    await _focus(body: const {});
   }
 
   void _patchLocalNode(String id, {String? title, String? description}) {

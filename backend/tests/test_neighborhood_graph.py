@@ -182,7 +182,9 @@ def test_resume_empty_and_latest(client, auth, other_auth, session):
 
     other = client.get("/api/v1/knowledge/graph", headers=other_auth)
     assert other.status_code == 200
-    assert other.json()["nodes"] == []
+    # No personal history → resume lands on a random shared topic (not an empty canvas).
+    assert other.json()["focus_node_id"] is not None
+    assert other.json()["nodes"]
 
 
 def test_knowledge_nodes_autocomplete(client, auth, session):

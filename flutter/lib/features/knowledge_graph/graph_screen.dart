@@ -1314,16 +1314,12 @@ class _GraphScreenState extends State<GraphScreen>
       );
     }
     if (!_hasNodes(graph)) {
-      return ListView(
-        padding: studyPagePadding,
-        children: const [
-          StudyCard(
-            eyebrow: 'GRAPH',
-            title: 'Explore the graph',
-            subtitle: 'Search a topic to see parents, siblings, children, and related neighbors.',
-          ),
-        ],
-      );
+      // Never paint the old "Explore the graph" card under the HUD — keep the
+      // canvas quiet (pulse while loading; blank scaffold otherwise).
+      if (graph.loading || graph.refreshing) {
+        return const Padding(padding: studyPagePadding, child: PulsePlaceholder.map());
+      }
+      return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
     }
     return LayoutBuilder(
       builder: (context, constraints) {

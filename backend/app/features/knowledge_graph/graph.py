@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from app.features.accounts.models import User
@@ -12,7 +13,7 @@ from app.features.knowledge_graph.neighborhood import (
     ensure_focus_node,
     is_complete,
 )
-from app.features.knowledge_graph.node_models import KnowledgeRequest
+from app.features.knowledge_graph.node_models import KnowledgeNode, KnowledgeRequest
 from app.features.knowledge_graph.preferences import neighborhood_counts
 from app.features.platform.jobs import active_job_for_node, enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
@@ -110,14 +111,22 @@ def _resume(session: Session, *, user: User) -> tuple[dict, int]:
     latest = session.exec(
         select(KnowledgeRequest).where(KnowledgeRequest.user_id == user.id).order_by(col(KnowledgeRequest.created_at).desc())
     ).first()
-    if latest is None:
+    if latest is not None:
+        # Never auto top-up on resume — show whatever neighbors already exist.
+        # Do not record focus: resume is not intentional interest.
+        return (
+            graph_for_focus(
+                session, user=user, focus_id=latest.focus_id, record_event=False
+            ),
+            200,
+        )
+
+    # No personal history (e.g. just deleted the last focus): land on any shared topic.
+    any_node = session.exec(select(KnowledgeNode).order_by(func.random()).limit(1)).first()
+    if any_node is None:
         return {"focus_node_id": None, "incomplete": False, "request_id": None, "nodes": [], "edges": []}, 200
-    # Never auto top-up on resume — show whatever neighbors already exist.
-    # Do not record focus: resume is not intentional interest.
     return (
-        graph_for_focus(
-            session, user=user, focus_id=latest.focus_id, record_event=False
-        ),
+        graph_for_focus(session, user=user, focus_id=any_node.id, record_event=False),
         200,
     )
 

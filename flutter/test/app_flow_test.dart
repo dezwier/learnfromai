@@ -3,6 +3,7 @@ import 'package:adaptive_mastery/core/networking/api_client.dart';
 import 'package:adaptive_mastery/core/networking/api_exception.dart';
 import 'package:adaptive_mastery/core/networking/token_storage.dart';
 import 'package:adaptive_mastery/core/widgets/pulse_placeholder.dart';
+import 'package:adaptive_mastery/core/widgets/study_card.dart';
 import 'package:adaptive_mastery/features/auth/auth_controller.dart';
 import 'package:adaptive_mastery/features/auth/auth_gateway.dart';
 import 'package:adaptive_mastery/features/knowledge_graph/graph_controller.dart';
@@ -50,7 +51,7 @@ void main() {
     expect(find.text('Sign in'), findsWidgets);
   });
 
-  testWidgets('an empty graph asks for a topic', (tester) async {
+  testWidgets('an empty graph stays quiet under the HUD', (tester) async {
     final graph = GraphController(
       poster: (path, {body}) async {
         expect(path, '/knowledge/focus');
@@ -70,7 +71,8 @@ void main() {
     );
     await tester.pumpWidget(_app(_signedIn(), graph));
     await tester.pumpAndSettle();
-    expect(find.text('Explore the graph'), findsOneWidget);
+    expect(find.text('Explore the graph'), findsNothing);
+    expect(find.byType(StudyCard), findsNothing);
   });
 
   testWidgets('graph shows parents, siblings, children, related', (tester) async {
