@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../../core/audio/quiz_feedback_sounds.dart';
 import '../../../core/widgets/pulse_placeholder.dart';
 import '../models.dart';
 import 'learn_check_bits.dart';
@@ -89,6 +90,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   void _reveal({required bool correct}) {
     _answerCorrect = correct;
     _markRevealed();
+    unawaited(QuizFeedbackSounds.play(correct: correct));
   }
 
   void _onSelectMc(int choiceIndex) {

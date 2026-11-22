@@ -39,6 +39,7 @@ dependencies:
   firebase_auth: ^6.0.2
   image_picker: ^1.2.3
   http_parser: ^4.1.2
+  audioplayers: ^6.7.1
 
 dev_dependencies:
   flutter_test:
@@ -92,6 +93,8 @@ flutter:
     - assets/branding/app_icon_fg_dark.png
     - assets/branding/splash_mark.png
     - assets/branding/splash_mark_dark.png
+    - assets/sounds/quiz_correct.wav
+    - assets/sounds/quiz_incorrect.wav
 
 
   fonts:
