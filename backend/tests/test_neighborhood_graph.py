@@ -274,6 +274,107 @@ def test_patch_and_delete_knowledge_node(client, auth, session):
     assert session.exec(select(KnowledgeEdge)).all() == []
 
 
+def test_delete_knowledge_node_cascades_atoms_and_progress(client, auth, session, user):
+    from app.features.content.models import KnowledgeBit
+    from app.features.node_image.pack_models import KnowledgePackImage
+    from app.features.platform.models import GenerationJob, GenerationJobWatcher
+    from app.features.reviews.models import UserPackReview
+    from app.features.user_events.models import UserTopicEvent
+
+    node = KnowledgeNode(name="Softmax", name_key="softmax-del", description="Normalize.")
+    other = KnowledgeNode(name="Attention", name_key="attention-del", description="Weights.")
+    session.add_all([node, other])
+    session.commit()
+    session.add_all(
+        [
+            KnowledgeEdge(from_id=node.id, relation="sibling", to_id=other.id),
+            KnowledgeEdge(from_id=other.id, relation="sibling", to_id=node.id),
+            KnowledgeBit(
+                node_id=node.id,
+                pack_index=1,
+                kind="learn",
+                body={"title": "Tip", "markdown": "About Softmax."},
+            ),
+            KnowledgeBit(
+                node_id=node.id,
+                pack_index=1,
+                kind="check1",
+                body={
+                    "type": "mc",
+                    "question": "Q?",
+                    "choices": ["a", "b", "c", "d"],
+                    "answer_index": 0,
+                    "explanation": "a",
+                },
+            ),
+            KnowledgePackImage(
+                node_id=node.id,
+                pack_index=1,
+                image_url=f"/knowledge/nodes/{node.id}/packs/1/image/file",
+                image_bytes=b"\x89PNG\r\n\x1a\n",
+            ),
+            UserTopicEvent(
+                user_id=user.id,
+                node_id=node.id,
+                kind="learn",
+                payload={"pack_index": 1},
+            ),
+            UserTopicEvent(
+                user_id=user.id,
+                node_id=node.id,
+                kind="check1",
+                payload={"pack_index": 1, "correct": True},
+            ),
+            UserPackReview(user_id=user.id, node_id=node.id, pack_index=1, leitner_bin=1),
+        ]
+    )
+    job = GenerationJob(
+        type="expand_content",
+        state="succeeded",
+        payload={"node_id": str(node.id)},
+    )
+    session.add(job)
+    session.flush()
+    session.add(
+        GenerationJobWatcher(
+            job_id=job.id,
+            user_id=user.id,
+            node_id=node.id,
+            title=node.name,
+        )
+    )
+    session.commit()
+
+    node_id = node.id
+    deleted = client.delete(f"/api/v1/knowledge/nodes/{node_id}", headers=auth)
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body["deleted"] is True
+    assert body["edges_removed"] == 2
+    assert body["bits_deleted"] == 2
+    assert body["images_deleted"] == 1
+    assert body["events_deleted"] == 2
+    assert body["reviews_deleted"] == 1
+    assert body["watchers_deleted"] == 1
+
+    session.expire_all()
+    assert session.get(KnowledgeNode, node_id) is None
+    assert session.exec(select(KnowledgeBit).where(KnowledgeBit.node_id == node_id)).all() == []
+    assert (
+        session.exec(select(KnowledgePackImage).where(KnowledgePackImage.node_id == node_id)).all()
+        == []
+    )
+    assert session.exec(select(UserTopicEvent).where(UserTopicEvent.node_id == node_id)).all() == []
+    assert session.exec(select(UserPackReview).where(UserPackReview.node_id == node_id)).all() == []
+    assert (
+        session.exec(select(GenerationJobWatcher).where(GenerationJobWatcher.node_id == node_id)).all()
+        == []
+    )
+    # Sibling remains; only the deleted node's edges are gone.
+    assert session.get(KnowledgeNode, other.id) is not None
+    assert session.exec(select(KnowledgeEdge)).all() == []
+
+
 def test_build_subgraph_hides_near_duplicate_neighbors(session, user):
     from app.features.knowledge_graph.neighborhood import build_subgraph
 

@@ -851,7 +851,8 @@ class _GraphScreenState extends State<GraphScreen>
         return AlertDialog(
           title: const Text('Delete topic?'),
           content: Text(
-            'Delete “${node.title}” and all of its edges from the shared graph? This cannot be undone.',
+            'Delete “${node.title}” from the shared graph? This also removes its edges, '
+            'learning atoms, images, and everyone’s progress on it. This cannot be undone.',
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -869,7 +870,12 @@ class _GraphScreenState extends State<GraphScreen>
     );
     if (confirmed != true || !mounted) return;
     final ok = await graph.deleteNode(node.id);
-    if (!ok || !mounted) return;
+    if (!mounted) return;
+    if (!ok) {
+      final message = graph.error ?? 'Could not delete topic';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
     setState(() => _highlighted = null);
   }
 

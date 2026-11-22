@@ -169,14 +169,29 @@ class ApiClient {
   }
 
   dynamic _decode(http.Response response) {
-    final dynamic payload = response.body.isEmpty ? null : jsonDecode(response.body);
+    dynamic payload;
+    if (response.body.isNotEmpty) {
+      try {
+        payload = jsonDecode(response.body);
+      } on FormatException {
+        throw ApiException(
+          response.statusCode,
+          'HTTP_${response.statusCode}',
+          response.statusCode >= 500
+              ? 'Server error (${response.statusCode})'
+              : 'Request failed (${response.statusCode})',
+        );
+      }
+    }
     if (response.statusCode >= 200 && response.statusCode < 300) return payload;
     if (payload is Map<String, dynamic>) {
       throw ApiException(
         response.statusCode,
         payload['code']?.toString() ?? 'HTTP_${response.statusCode}',
         payload['message']?.toString() ?? 'Request failed',
-        details: payload['details'] is Map<String, dynamic> ? payload['details'] as Map<String, dynamic> : const {},
+        details: payload['details'] is Map<String, dynamic>
+            ? payload['details'] as Map<String, dynamic>
+            : const {},
       );
     }
     throw ApiException(response.statusCode, 'HTTP_${response.statusCode}', 'Request failed');

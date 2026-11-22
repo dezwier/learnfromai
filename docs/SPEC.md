@@ -56,6 +56,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `POST /api/v1/knowledge/nodes/{node_id}/packs/{pack_index}/image` `{generate?, regenerate?}` → metadata (200) or `{job_id, pack_index}` (202 `generate_pack_image`)
 - `PUT /api/v1/knowledge/nodes/{node_id}/packs/{pack_index}/image` multipart `file` → metadata (200)
 - `GET /api/v1/knowledge/nodes/{node_id}/packs/{pack_index}/image/file?variant=full|thumb` → PNG/JPEG bytes (auth)
+- `DELETE /api/v1/knowledge/nodes/{node_id}` → delete topic + edges + atoms (+ pack images) + user events/reviews + job watchers for that node
 - `GET /api/v1/knowledge/graph` resume latest neighborhood only (no expand)
 - `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
 - `GET /api/v1/jobs/{job_id}`
