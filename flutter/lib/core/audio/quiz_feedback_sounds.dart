@@ -1,20 +1,19 @@
-import 'dart:typed_data';
-
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Short, gentle SFX for quiz correct / incorrect answers.
+/// Short, gentle SFX + haptics for quiz correct / incorrect answers.
+///
+/// Uses [AssetSource] (not BytesSource — unimplemented on iOS) and the media
+/// volume stream on both platforms.
 class QuizFeedbackSounds {
   QuizFeedbackSounds._();
 
   static AudioPlayer? _player;
   static Future<AudioPlayer>? _init;
-  static Uint8List? _correctBytes;
-  static Uint8List? _incorrectBytes;
 
-  static const _correctPath = 'assets/sounds/quiz_correct.wav';
-  static const _incorrectPath = 'assets/sounds/quiz_incorrect.wav';
+  static const _correctAsset = 'sounds/quiz_correct.wav';
+  static const _incorrectAsset = 'sounds/quiz_incorrect.wav';
 
   static Future<AudioPlayer> _playerReady() {
     final existing = _init;
@@ -25,7 +24,7 @@ class QuizFeedbackSounds {
   }
 
   static Future<AudioPlayer> _createPlayer() async {
-    // Playback category: hear SFX even with the iPhone mute switch on.
+    // Media / playback stream so hardware volume buttons control these SFX.
     await AudioPlayer.global.setAudioContext(
       AudioContext(
         iOS: AudioContextIOS(
@@ -38,8 +37,8 @@ class QuizFeedbackSounds {
         android: const AudioContextAndroid(
           isSpeakerphoneOn: false,
           stayAwake: false,
-          contentType: AndroidContentType.sonification,
-          usageType: AndroidUsageType.assistanceSonification,
+          contentType: AndroidContentType.music,
+          usageType: AndroidUsageType.media,
           audioFocus: AndroidAudioFocus.gainTransientMayDuck,
         ),
       ),
@@ -48,27 +47,48 @@ class QuizFeedbackSounds {
     await player.setReleaseMode(ReleaseMode.stop);
     await player.setPlayerMode(PlayerMode.mediaPlayer);
     await player.setVolume(1.0);
-    _correctBytes = (await rootBundle.load(_correctPath)).buffer.asUint8List();
-    _incorrectBytes = (await rootBundle.load(_incorrectPath)).buffer.asUint8List();
+    // Also set on the instance — some platforms ignore the global context alone.
+    await player.setAudioContext(
+      AudioContext(
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {
+            AVAudioSessionOptions.mixWithOthers,
+            AVAudioSessionOptions.duckOthers,
+          },
+        ),
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: false,
+          stayAwake: false,
+          contentType: AndroidContentType.music,
+          usageType: AndroidUsageType.media,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+      ),
+    );
     _player = player;
     return player;
   }
 
+  static void _haptic({required bool correct}) {
+    // Correct: soft success tap. Incorrect: lighter selection tick — both subtle.
+    if (correct) {
+      HapticFeedback.lightImpact();
+    } else {
+      HapticFeedback.selectionClick();
+    }
+  }
+
   static Future<void> play({required bool correct}) async {
+    _haptic(correct: correct);
     try {
       final player = await _playerReady();
-      final bytes = correct ? _correctBytes : _incorrectBytes;
-      if (bytes == null || bytes.isEmpty) {
-        throw StateError('Quiz feedback sound bytes missing');
-      }
+      final asset = correct ? _correctAsset : _incorrectAsset;
       await player.stop();
-      // BytesSource avoids AssetSource/cache path issues on iOS release builds.
-      await player.play(BytesSource(bytes), volume: 1.0);
+      await player.play(AssetSource(asset), volume: 1.0);
     } catch (err, stack) {
       _init = null;
       _player = null;
-      _correctBytes = null;
-      _incorrectBytes = null;
       debugPrint('QuizFeedbackSounds: $err\n$stack');
     }
   }

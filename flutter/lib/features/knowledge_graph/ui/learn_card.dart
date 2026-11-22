@@ -72,10 +72,13 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
   var _trackedLearn = false;
   double _frontBodyH = 0;
   double _backBodyH = 0;
+  /// Stable MC/cloze display order for this card (not reshuffled on reveal).
+  List<int>? _choiceOrder;
 
   @override
   void initState() {
     super.initState();
+    _choiceOrder = choiceOrderForBit(widget.entry.pack.bit(widget.entry.checkKind));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _trackedLearn) return;
       _trackedLearn = true;
@@ -135,6 +138,7 @@ class _LearnFlipCardState extends State<LearnFlipCard> {
         bit: widget.entry.pack.bit(widget.entry.checkKind),
         selected: _selectedChoice,
         revealed: _revealed,
+        choiceOrder: _choiceOrder,
         onSelectChoice: interactive ? _onSelectMc : (_) {},
         onSelectBool: interactive ? _onSelectBool : (_) {},
       ),

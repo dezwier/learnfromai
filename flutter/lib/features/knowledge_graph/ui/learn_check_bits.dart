@@ -15,6 +15,15 @@ String checkTypeOf(TopicBit? bit) {
   return 'mc';
 }
 
+/// Shuffled original indices for MC/cloze, or null for true/false / no choices.
+List<int>? choiceOrderForBit(TopicBit? bit) {
+  if (bit == null) return null;
+  if (checkTypeOf(bit) == 'true_false') return null;
+  final choices = _readChoices(bit);
+  if (choices.length < 2) return null;
+  return _shuffledOrder(choices.length);
+}
+
 class LearnCheckBit extends StatelessWidget {
   const LearnCheckBit({
     super.key,
@@ -23,6 +32,7 @@ class LearnCheckBit extends StatelessWidget {
     required this.revealed,
     required this.onSelectChoice,
     required this.onSelectBool,
+    this.choiceOrder,
   });
 
   final TopicBit? bit;
@@ -30,6 +40,9 @@ class LearnCheckBit extends StatelessWidget {
   final bool revealed;
   final ValueChanged<int> onSelectChoice;
   final ValueChanged<bool> onSelectBool;
+  /// Display order of original choice indexes; owned by the card so reveal
+  /// rebuilds do not reshuffle.
+  final List<int>? choiceOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -55,12 +68,14 @@ class LearnCheckBit extends StatelessWidget {
           bit: bit!,
           selected: selected,
           revealed: revealed,
+          order: choiceOrder,
           onSelect: onSelectChoice,
         ),
       _ => _McCheck(
           bit: bit!,
           selected: selected,
           revealed: revealed,
+          order: choiceOrder,
           onSelect: onSelectChoice,
         ),
     };
@@ -73,22 +88,21 @@ class _McCheck extends StatelessWidget {
     required this.selected,
     required this.revealed,
     required this.onSelect,
+    this.order,
   });
 
   final TopicBit bit;
   final int selected;
   final bool revealed;
   final ValueChanged<int> onSelect;
+  final List<int>? order;
 
   @override
   Widget build(BuildContext context) {
     final question = bit.body['question']?.toString() ?? '';
-    final choicesRaw = bit.body['choices'];
-    final choices = [
-      if (choicesRaw is List)
-        for (final row in choicesRaw) row.toString(),
-    ];
+    final choices = _readChoices(bit);
     final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
+    final displayOrder = _effectiveOrder(order, choices.length);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -100,14 +114,14 @@ class _McCheck extends StatelessWidget {
               ),
         ),
         const SizedBox(height: 12),
-        for (var i = 0; i < choices.length; i++) ...[
-          if (i > 0) const SizedBox(height: 8),
+        for (var display = 0; display < displayOrder.length; display++) ...[
+          if (display > 0) const SizedBox(height: 8),
           _ChoiceTile(
-            label: choices[i],
-            selected: selected == i,
+            label: choices[displayOrder[display]],
+            selected: selected == displayOrder[display],
             revealed: revealed,
-            correct: i == answerIndex,
-            onTap: () => onSelect(i),
+            correct: displayOrder[display] == answerIndex,
+            onTap: () => onSelect(displayOrder[display]),
           ),
         ],
       ],
@@ -172,27 +186,26 @@ class _ClozeMcCheck extends StatelessWidget {
     required this.selected,
     required this.revealed,
     required this.onSelect,
+    this.order,
   });
 
   final TopicBit bit;
   final int selected;
   final bool revealed;
   final ValueChanged<int> onSelect;
+  final List<int>? order;
 
   @override
   Widget build(BuildContext context) {
     final prompt = bit.body['prompt']?.toString() ??
         bit.body['question']?.toString() ??
         '';
-    final choicesRaw = bit.body['choices'];
-    final choices = [
-      if (choicesRaw is List)
-        for (final row in choicesRaw) row.toString(),
-    ];
+    final choices = _readChoices(bit);
     final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
     if (choices.length < 2) {
       return const SizedBox.shrink();
     }
+    final displayOrder = _effectiveOrder(order, choices.length);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -204,19 +217,43 @@ class _ClozeMcCheck extends StatelessWidget {
               ),
         ),
         const SizedBox(height: 12),
-        for (var i = 0; i < choices.length; i++) ...[
-          if (i > 0) const SizedBox(height: 8),
+        for (var display = 0; display < displayOrder.length; display++) ...[
+          if (display > 0) const SizedBox(height: 8),
           _ChoiceTile(
-            label: choices[i],
-            selected: selected == i,
+            label: choices[displayOrder[display]],
+            selected: selected == displayOrder[display],
             revealed: revealed,
-            correct: i == answerIndex,
-            onTap: () => onSelect(i),
+            correct: displayOrder[display] == answerIndex,
+            onTap: () => onSelect(displayOrder[display]),
           ),
         ],
       ],
     );
   }
+}
+
+List<String> _readChoices(TopicBit bit) {
+  final choicesRaw = bit.body['choices'];
+  return [
+    if (choicesRaw is List)
+      for (final row in choicesRaw) row.toString(),
+  ];
+}
+
+List<int> _shuffledOrder(int length) {
+  final order = List<int>.generate(length, (i) => i);
+  order.shuffle();
+  return order;
+}
+
+List<int> _effectiveOrder(List<int>? order, int length) {
+  if (order != null &&
+      order.length == length &&
+      order.toSet().length == length &&
+      order.every((i) => i >= 0 && i < length)) {
+    return order;
+  }
+  return List<int>.generate(length, (i) => i);
 }
 
 class _ChoiceTile extends StatelessWidget {

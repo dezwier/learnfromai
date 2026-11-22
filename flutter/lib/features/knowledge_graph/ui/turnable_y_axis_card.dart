@@ -330,25 +330,29 @@ class _TurnableYAxisCardState extends State<TurnableYAxisCard>
       },
     );
 
-    final wrappedCard = widget.interactionEnabled
-        ? GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: (details) {
-              final tapX = details.localPosition.dx;
-              final isLeftHalf = tapX <= (_cardWidth / 2);
-              _flipByOneFace(turnLeft: isLeftHalf);
-            },
-            onHorizontalDragStart: _onHorizontalDragStart,
-            onHorizontalDragUpdate: _onHorizontalDragUpdate,
-            onHorizontalDragEnd: _onHorizontalDragEnd,
-            onHorizontalDragCancel: _onHorizontalDragCancel,
-            child: cardContent,
-          )
-        : cardContent;
-
+    // Always keep the same widget tree shape so enabling interaction after
+    // reveal does not remount faces (which would reshuffle MC choices).
     return Padding(
       padding: widget.outerPadding,
-      child: wrappedCard,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: widget.interactionEnabled
+            ? (details) {
+                final tapX = details.localPosition.dx;
+                final isLeftHalf = tapX <= (_cardWidth / 2);
+                _flipByOneFace(turnLeft: isLeftHalf);
+              }
+            : null,
+        onHorizontalDragStart:
+            widget.interactionEnabled ? _onHorizontalDragStart : null,
+        onHorizontalDragUpdate:
+            widget.interactionEnabled ? _onHorizontalDragUpdate : null,
+        onHorizontalDragEnd:
+            widget.interactionEnabled ? _onHorizontalDragEnd : null,
+        onHorizontalDragCancel:
+            widget.interactionEnabled ? _onHorizontalDragCancel : null,
+        child: cardContent,
+      ),
     );
   }
 }
