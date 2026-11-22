@@ -19,7 +19,7 @@ from app.features.platform.neighborhood_llm import resolve_llm_provider
 
 logger = logging.getLogger(__name__)
 
-PROMPT_IMAGE = "topic_image_v1"
+PROMPT_IMAGE = "topic_image_v2"
 
 # 1×1 PNG used by the fake provider in tests.
 _FAKE_PNG = base64.b64decode(
@@ -29,8 +29,13 @@ _FAKE_PNG = base64.b64decode(
 
 _IMAGE_STYLE = (
     "Style: photorealistic, mature editorial photography, clean single-subject "
-    "composition, soft natural light, shallow depth of field, no text, no logos, "
-    "no UI, no watermarks, no collage, no borders. "
+    "composition, soft natural light, shallow depth of field, no logos, no UI, "
+    "no watermarks, no collage, no borders. "
+    "Do not put any text, letters, numbers, captions, labels, signs, handwriting, "
+    "or typography in the image unless the topic or learning bit clearly requires "
+    "readable writing as the subject itself (for example calligraphy, a street sign "
+    "central to the idea, sheet music, or a specific formula that must be shown). "
+    "When in doubt, leave the image text-free and convey the idea visually. "
     "Prefer a realistic mature look unless the topic clearly demands another medium "
     "(myth, fantasy, abstract math, cartoon characters, etc.). "
 )

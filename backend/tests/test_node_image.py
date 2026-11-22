@@ -134,7 +134,8 @@ def test_image_prompt_and_costs():
     prompt = build_topic_image_prompt("Photosynthesis", "How plants make sugar.")
     assert "Photosynthesis" in prompt
     assert "photorealistic" in prompt
-    assert "no text" in prompt.lower()
+    assert "text-free" in prompt
+    assert "unless the topic or learning bit clearly requires" in prompt
     assert image_cost_usd("gemini-3.1-flash-lite-image") == 0.034
     assert image_cost_usd("gpt-image-2.5-flare", quality="low") == 0.04
     assert get_image_llm("fake").name == "fake"

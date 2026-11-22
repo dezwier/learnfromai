@@ -66,6 +66,8 @@ def test_pack_image_prompt_includes_learn_bit():
     assert "Softmax tip" in prompt
     assert "logits into probabilities" in prompt
     assert "photorealistic" in prompt
+    assert "text-free" in prompt
+    assert "unless the topic or learning bit clearly requires" in prompt
 
 
 def test_pack_image_generate_and_learning_next_fallback(client, auth, session):
