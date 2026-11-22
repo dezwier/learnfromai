@@ -374,21 +374,27 @@ class _NodeCard extends StatelessWidget {
                 final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
                 final lockedSize = node.titleFontSize;
                 final lockedLaid = node.titleLaid;
-                final titleLaid = lockedLaid != null && lockedSize != null
-                    ? (text: lockedLaid, fontSize: lockedSize)
-                    : layoutTitle(
-                        text: node.title,
-                        style: titleStyleBase,
-                        maxWidth: maxW,
-                        maxHeight: titleBudget,
-                        maxLines: titleMaxLines,
-                        minFontSize: 13,
-                        maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
-                        textScaler: scaler,
-                        hyphenateAtMinSize: true,
-                      );
+                // Morph focus ease: size set, laid null → raw title (no mid-anim wrap).
+                // Morph freeze: both set → pre-wrapped lines.
+                final ({String text, double fontSize}) titleLaid =
+                    lockedLaid != null && lockedSize != null
+                        ? (text: lockedLaid, fontSize: lockedSize)
+                        : lockedSize != null
+                            ? (text: node.title, fontSize: lockedSize)
+                            : layoutTitle(
+                                text: node.title,
+                                style: titleStyleBase,
+                                maxWidth: maxW,
+                                maxHeight: titleBudget,
+                                maxLines: titleMaxLines,
+                                minFontSize: 13,
+                                maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
+                                textScaler: scaler,
+                                hyphenateAtMinSize: true,
+                              );
                 final titleStyle = titleStyleBase.copyWith(fontSize: titleLaid.fontSize);
                 final gap = (node.radius * 0.08).clamp(4.0, 10.0);
+                final morphingText = lockedSize != null;
                 final descStyle = TextStyle(
                   fontFamily: 'tt_ramilas',
                   height: 1.25,
@@ -416,8 +422,9 @@ class _NodeCard extends StatelessWidget {
                           Text(
                             description,
                             textAlign: TextAlign.center,
-                            softWrap: true,
-                            maxLines: 5,
+                            // Morph: no reflow — single-line fade; settle wraps normally.
+                            softWrap: !morphingText,
+                            maxLines: morphingText ? 2 : 5,
                             overflow: TextOverflow.ellipsis,
                             style: descStyle,
                           ),
@@ -461,9 +468,9 @@ class _NodeCard extends StatelessWidget {
               vertical: node.radius * 0.24,
             ),
             child: Center(
-              child: node.titleLaid != null && node.titleFontSize != null
+              child: node.titleFontSize != null
                   ? Text(
-                      node.titleLaid!,
+                      node.titleLaid ?? node.title,
                       textAlign: TextAlign.center,
                       softWrap: false,
                       maxLines: 4,

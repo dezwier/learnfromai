@@ -147,6 +147,7 @@ class PlacedNode {
     double? colorT,
     double? titleFontSize,
     String? titleLaid,
+    bool clearTitleLaid = false,
   }) {
     return PlacedNode(
       id: id,
@@ -170,7 +171,7 @@ class PlacedNode {
       colorFromRole: colorFromRole ?? this.colorFromRole,
       colorT: colorT ?? this.colorT,
       titleFontSize: titleFontSize ?? this.titleFontSize,
-      titleLaid: titleLaid ?? this.titleLaid,
+      titleLaid: clearTitleLaid ? null : (titleLaid ?? this.titleLaid),
     );
   }
 }
@@ -340,14 +341,27 @@ GraphLayout morphGraphLayouts(
     final a = fromById[id];
     final b = toById[id];
     if (a != null && b != null) {
-      // Shared: freeze prior wrap + size (no reflow / font-size animation).
-      final fit = idx.fromTitle[id]!;
-      nodes.add(
-        lerpPlacedNode(a, b, tt).copyWith(
-          titleFontSize: fit.fontSize,
-          titleLaid: fit.text,
-        ),
-      );
+      final fromFit = idx.fromTitle[id]!;
+      final toFit = idx.toTitle[id]!;
+      final fromFocus = a.effectiveFlowerAmount >= 0.5;
+      final toFocus = b.effectiveFlowerAmount >= 0.5;
+      if (fromFocus != toFocus) {
+        // Focus ↔ hex: ease title size; raw title (no frozen wrap) while size moves.
+        nodes.add(
+          lerpPlacedNode(a, b, tt).copyWith(
+            titleFontSize: lerpDouble(fromFit.fontSize, toFit.fontSize, tt),
+            clearTitleLaid: true,
+          ),
+        );
+      } else {
+        // Same role band: freeze prior wrap + size.
+        nodes.add(
+          lerpPlacedNode(a, b, tt).copyWith(
+            titleFontSize: fromFit.fontSize,
+            titleLaid: fromFit.text,
+          ),
+        );
+      }
     } else if (a != null) {
       // Leave: shrink slightly and fade; keep outgoing title layout.
       final fit = idx.fromTitle[id]!;
