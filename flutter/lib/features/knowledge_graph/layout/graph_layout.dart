@@ -4,6 +4,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import 'geometry.dart';
+import 'title_wrap.dart';
 
 enum NodeRole { parent, focus, sibling, child, related, extended }
 
@@ -78,6 +79,7 @@ class PlacedNode {
     this.flowerAmount,
     this.colorFromRole,
     this.colorT = 1,
+    this.titleFontSize,
   });
 
   final String id;
@@ -107,6 +109,8 @@ class PlacedNode {
   final NodeRole? colorFromRole;
   /// 0 = [colorFromRole] fill, 1 = [role] fill.
   final double colorT;
+  /// When set (morph), skip live re-fit — use this stable size.
+  final double? titleFontSize;
 
   Offset get center => Offset(x + width / 2, y + height / 2);
 
@@ -138,6 +142,7 @@ class PlacedNode {
     double? flowerAmount,
     NodeRole? colorFromRole,
     double? colorT,
+    double? titleFontSize,
   }) {
     return PlacedNode(
       id: id,
@@ -160,6 +165,7 @@ class PlacedNode {
       flowerAmount: flowerAmount ?? this.flowerAmount,
       colorFromRole: colorFromRole ?? this.colorFromRole,
       colorT: colorT ?? this.colorT,
+      titleFontSize: titleFontSize ?? this.titleFontSize,
     );
   }
 }
@@ -207,6 +213,13 @@ PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
   // Prefer destination metadata once the tile is mostly the new role, but keep
   // fill color lerping the whole way via [colorFromRole]/[colorT].
   final useTo = tt >= 0.5;
+  // Keep a non-empty description across the morph so the UI can fade it with flowerAmount
+  // (don't snap the string at t=0.5).
+  final descA = (a.description ?? '').trim();
+  final descB = (b.description ?? '').trim();
+  final description = descB.isNotEmpty
+      ? b.description
+      : (descA.isNotEmpty ? a.description : null);
   return PlacedNode(
     id: b.id,
     title: useTo ? b.title : a.title,
@@ -214,7 +227,7 @@ PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
     distance: b.distance,
     kind: b.kind,
     role: b.role,
-    description: useTo ? b.description : a.description,
+    description: description,
     imageUrl: useTo ? b.imageUrl : a.imageUrl,
     imageThumbUrl: useTo ? b.imageThumbUrl : a.imageThumbUrl,
     viaRole: useTo ? b.viaRole : a.viaRole,
@@ -228,6 +241,9 @@ PlacedNode lerpPlacedNode(PlacedNode a, PlacedNode b, double t) {
     flowerAmount: flower,
     colorFromRole: a.role,
     colorT: tt,
+    titleFontSize: a.titleFontSize != null || b.titleFontSize != null
+        ? lerpDouble(a.titleFontSize ?? b.titleFontSize!, b.titleFontSize ?? a.titleFontSize!, tt)
+        : null,
   );
 }
 
@@ -246,34 +262,103 @@ PlacedNode _scaledAboutCenter(PlacedNode node, double scale) {
   );
 }
 
-/// Morph [from] → [to]. Shared ids lerp (size / flower / color); leavers shrink
-/// + fade out; arrivals grow from small + fade in.
-GraphLayout morphGraphLayouts(GraphLayout from, GraphLayout to, double t) {
-  // [t] is already eased by the animation controller — keep geometry linear in t.
-  final tt = t.clamp(0.0, 1.0);
+/// Fitted title size for a settled tile (hex vs flower padding / max size).
+double fittedTitleFontSize(PlacedNode node) {
+  final flower = node.effectiveFlowerAmount >= 0.5;
+  final padX = node.radius * (flower ? 0.62 : 0.34) * 2;
+  final padY = node.radius * (flower ? 0.58 : 0.24) * 2;
+  final maxW = (node.width - padX).clamp(8.0, 4000.0);
+  final maxH = (node.height - padY).clamp(8.0, 4000.0);
+  final hasDesc = flower && (node.description ?? '').trim().isNotEmpty;
+  final titleBudget = hasDesc ? maxH * 0.42 : maxH * (flower ? 0.92 : 1.0);
+  final maxFont = flower
+      ? (node.radius * 0.5).clamp(17.0, 34.0)
+      : (node.radius * 0.32).clamp(11.0, 17.0);
+  final minFont = flower ? 13.0 : 10.0;
+  return layoutTitle(
+    text: node.title,
+    style: TextStyle(
+      fontFamily: 'tt_ramilas',
+      height: flower ? 1.1 : 1.15,
+      fontWeight: flower ? FontWeight.w700 : FontWeight.w600,
+      fontSize: maxFont,
+    ),
+    maxWidth: maxW,
+    maxHeight: titleBudget,
+    maxLines: flower ? 3 : 4,
+    minFontSize: minFont,
+    maxFontSize: maxFont,
+    textScaler: TextScaler.noScaling,
+    hyphenateAtMinSize: true,
+  ).fontSize;
+}
+
+typedef MorphLayoutIndex = ({
+  Map<String, PlacedNode> fromById,
+  Map<String, PlacedNode> toById,
+  List<String> ids,
+  Map<String, double> fromTitleSize,
+  Map<String, double> toTitleSize,
+});
+
+/// Precomputed id maps + fitted title sizes for [morphGraphLayouts].
+MorphLayoutIndex morphLayoutIndex(GraphLayout from, GraphLayout to) {
   final fromById = {for (final n in from.nodes) n.id: n};
   final toById = {for (final n in to.nodes) n.id: n};
-  final ids = {...fromById.keys, ...toById.keys};
+  final ids = [...fromById.keys, ...toById.keys.where((id) => !fromById.containsKey(id))];
+  return (
+    fromById: fromById,
+    toById: toById,
+    ids: ids,
+    fromTitleSize: {for (final n in from.nodes) n.id: fittedTitleFontSize(n)},
+    toTitleSize: {for (final n in to.nodes) n.id: fittedTitleFontSize(n)},
+  );
+}
+
+/// Morph [from] → [to]. Shared ids lerp (size / flower / color); leavers shrink
+/// + fade out; arrivals grow from small + fade in.
+///
+/// Pass [index] from [morphLayoutIndex] to avoid rebuilding maps every tick.
+/// Title sizes: shared keep/lerp fitted sizes; arrivals use destination fit (fade via opacity).
+GraphLayout morphGraphLayouts(
+  GraphLayout from,
+  GraphLayout to,
+  double t, {
+  MorphLayoutIndex? index,
+}) {
+  // [t] is already eased by the animation controller — keep geometry linear in t.
+  final tt = t.clamp(0.0, 1.0);
+  final idx = index ?? morphLayoutIndex(from, to);
+  final fromById = idx.fromById;
+  final toById = idx.toById;
   final nodes = <PlacedNode>[];
-  for (final id in ids) {
+  for (final id in idx.ids) {
     final a = fromById[id];
     final b = toById[id];
     if (a != null && b != null) {
-      nodes.add(lerpPlacedNode(a, b, tt));
+      final fromSize = idx.fromTitleSize[id]!;
+      final toSize = idx.toTitleSize[id]!;
+      // Shared tile: hold prior size when both ends match; else ease toward destination fit.
+      final titleSize = (fromSize - toSize).abs() < 0.35
+          ? fromSize
+          : lerpDouble(fromSize, toSize, tt)!;
+      nodes.add(lerpPlacedNode(a, b, tt).copyWith(titleFontSize: titleSize));
     } else if (a != null) {
       // Leave: shrink slightly and fade from the tile's settled opacity (e.g. 0.48 extended).
       nodes.add(
         _scaledAboutCenter(a, lerpDouble(1.0, 0.62, tt)!).copyWith(
           opacity: lerpDouble(a.opacity, 0, tt)!,
+          titleFontSize: idx.fromTitleSize[id],
         ),
       );
     } else if (b != null) {
-      // Arrive: grow from small and fade toward target opacity (extended stays quieter).
+      // Arrive: grow from small and fade toward target opacity; title size = final fit.
       nodes.add(
         _scaledAboutCenter(b, lerpDouble(0.55, 1.0, tt)!).copyWith(
           opacity: lerpDouble(0, b.opacity, tt)!,
           colorFromRole: b.role,
           colorT: 1,
+          titleFontSize: idx.toTitleSize[id],
         ),
       );
     }

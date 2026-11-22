@@ -93,9 +93,19 @@ class _GraphViewState extends State<GraphView> {
   @override
   Widget build(BuildContext context) {
     const shadowPad = 14.0;
-    // Largest (focus flower) under smaller hexes so outer tiles stay tappable.
-    final ordered = [...widget.layout.nodes]
-      ..sort((a, b) => (b.width * b.height).compareTo(a.width * a.height));
+    final ordered = [...widget.layout.nodes];
+    if (widget.morphing) {
+      // Stable z-order — re-sorting by size every frame reshuffles Elements.
+      ordered.sort((a, b) {
+        final af = a.id == widget.focusId ? 0 : 1;
+        final bf = b.id == widget.focusId ? 0 : 1;
+        if (af != bf) return af.compareTo(bf);
+        return a.id.compareTo(b.id);
+      });
+    } else {
+      // Largest (focus flower) under smaller hexes so outer tiles stay tappable.
+      ordered.sort((a, b) => (b.width * b.height).compareTo(a.width * a.height));
+    }
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Stack(
@@ -362,14 +372,15 @@ class _NodeCard extends StatelessWidget {
                   shadows: hasImage ? _imageTitleShadows : null,
                 );
                 final titleBudget = hasDesc ? maxH * 0.42 : maxH * 0.92;
+                final locked = node.titleFontSize;
                 final titleLaid = layoutTitle(
                   text: node.title,
                   style: titleStyleBase,
                   maxWidth: maxW,
                   maxHeight: titleBudget,
                   maxLines: titleMaxLines,
-                  minFontSize: 13,
-                  maxFontSize: (node.radius * 0.5).clamp(17.0, 34.0),
+                  minFontSize: locked ?? 13,
+                  maxFontSize: locked ?? (node.radius * 0.5).clamp(17.0, 34.0),
                   textScaler: scaler,
                   hyphenateAtMinSize: true,
                 );
@@ -450,8 +461,8 @@ class _NodeCard extends StatelessWidget {
               child: _FittingLabel(
                 text: node.title,
                 maxLines: 4,
-                minFontSize: 10,
-                maxFontSize: (node.radius * 0.32).clamp(11.0, 17.0),
+                minFontSize: node.titleFontSize ?? 10,
+                maxFontSize: node.titleFontSize ?? (node.radius * 0.32).clamp(11.0, 17.0),
                 hyphenateWords: true,
                 style: TextStyle(
                   fontFamily: 'tt_ramilas',

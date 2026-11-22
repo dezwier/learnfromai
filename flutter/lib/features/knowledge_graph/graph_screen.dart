@@ -53,6 +53,7 @@ class _GraphScreenState extends State<GraphScreen>
   GraphLayout? _settledLayout;
   GraphLayout? _morphFrom;
   GraphLayout? _morphTo;
+  MorphLayoutIndex? _morphIndex;
   /// Camera eases to canvas-center in lockstep with tile morph (not after).
   Matrix4? _morphCameraBegin;
   Matrix4? _morphCameraEnd;
@@ -122,16 +123,18 @@ class _GraphScreenState extends State<GraphScreen>
       final t = Curves.easeOutCubic.transform(_layoutMorph.value.clamp(0.0, 1.0));
       _transform.value = Matrix4Tween(begin: camFrom, end: camTo).transform(t);
     }
-    setState(() {});
+    // Graph tiles rebuild via AnimatedBuilder(_layoutMorph) — avoid full-screen setState.
     if (!_layoutMorph.isCompleted) return;
     _morphFrom = null;
     _morphTo = null;
+    _morphIndex = null;
     _morphCameraBegin = null;
     _morphCameraEnd = null;
     final graph = context.read<GraphController>();
     _trailShown = List.of(graph.focusTrail);
     // Morph + camera done; thumbs fade in on settled tiles.
     graph.preloadGraphImages();
+    setState(() {});
   }
 
   GraphLayout _displayLayout(GraphLayout settled) {
@@ -141,7 +144,7 @@ class _GraphScreenState extends State<GraphScreen>
       if (_layoutMorph.isCompleted) return settled;
       // easeOutCubic: moves early, eases into place (single curve — morphGraphLayouts is linear).
       final t = Curves.easeOutCubic.transform(_layoutMorph.value);
-      return morphGraphLayouts(from, to, t);
+      return morphGraphLayouts(from, to, t, index: _morphIndex);
     }
     return settled;
   }
@@ -191,6 +194,7 @@ class _GraphScreenState extends State<GraphScreen>
     setState(() {
       _morphFrom = aligned;
       _morphTo = next;
+      _morphIndex = morphLayoutIndex(aligned, next);
       _settledLayout = next;
       // Reveal the new trail chip with the morph, not on the network frame before it.
       _trailShown = List.of(context.read<GraphController>().focusTrail);
@@ -209,6 +213,7 @@ class _GraphScreenState extends State<GraphScreen>
       _settledLayout = next;
       _morphFrom = null;
       _morphTo = null;
+      _morphIndex = null;
       _morphCameraBegin = null;
       _morphCameraEnd = null;
       _layoutMorph.stop();
@@ -1365,13 +1370,12 @@ class _GraphScreenState extends State<GraphScreen>
         if (!cameraReady) {
           return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
         }
-        final layout = _displayLayout(_settledLayout ?? nextLayout);
-        _layout = layout;
+        final settled = _settledLayout ?? nextLayout;
         final highlighted = _highlighted;
         if (highlighted != null && !_layoutMorph.isAnimating) {
           final focus = graph.focusId;
           final matchId = focus == highlighted.id ? focus : highlighted.id;
-          for (final n in layout.nodes) {
+          for (final n in settled.nodes) {
             if (n.id != matchId) continue;
             if (n.role != highlighted.role ||
                 n.title != highlighted.title ||
@@ -1404,22 +1408,30 @@ class _GraphScreenState extends State<GraphScreen>
             _panAnimation = null;
             _panTargetId = null;
           },
-          child: SizedBox(
-            width: layout.width,
-            height: layout.height,
-            child: GraphView(
-              layout: layout,
-              focusId: graph.focusId,
-              highlightId: _highlighted?.id,
-              pendingId: graph.refreshing ? graph.pendingNodeId : null,
-              morphing: _layoutMorph.isAnimating,
-              transform: _transform,
-              viewport: viewport,
-              onSelect: _selectNode,
-              onLongPress: (node) => unawaited(_onLongPressNode(node)),
-              onHighlight: _onHighlightFromCenter,
-              imageBytesFor: graph.cachedImageBytes,
-            ),
+          // Rebuild tiles from the morph ticker only — not the whole Scaffold.
+          child: AnimatedBuilder(
+            animation: _layoutMorph,
+            builder: (context, _) {
+              final layout = _displayLayout(settled);
+              _layout = layout;
+              return SizedBox(
+                width: layout.width,
+                height: layout.height,
+                child: GraphView(
+                  layout: layout,
+                  focusId: graph.focusId,
+                  highlightId: _highlighted?.id,
+                  pendingId: graph.refreshing ? graph.pendingNodeId : null,
+                  morphing: _layoutMorph.isAnimating,
+                  transform: _transform,
+                  viewport: viewport,
+                  onSelect: _selectNode,
+                  onLongPress: (node) => unawaited(_onLongPressNode(node)),
+                  onHighlight: _onHighlightFromCenter,
+                  imageBytesFor: graph.cachedImageBytes,
+                ),
+              );
+            },
           ),
         );
       },
