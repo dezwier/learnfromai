@@ -35,15 +35,19 @@ class NeighborhoodPrefs {
   const NeighborhoodPrefs({
     this.total = defaultTotal,
     this.extended = defaultExtended,
+    this.canvasMax = defaultCanvasMax,
   });
 
   static const defaultTotal = 16;
-  static const defaultExtended = 16;
+  static const defaultExtended = 14;
+  /// Focus + directs + extended on the canvas.
+  static const defaultCanvasMax = 30;
 
   /// Direct neighbors to generate around a focus.
   final int total;
-  /// Neighbors-of-neighbors to show around the focus.
+  /// Neighbors-of-neighbors to show (top-up after directs, within [canvasMax]).
   final int extended;
+  final int canvasMax;
 
   factory NeighborhoodPrefs.fromJson(Map<String, dynamic>? _) {
     // API may still echo sizes; always use globals.
@@ -53,6 +57,7 @@ class NeighborhoodPrefs {
   Map<String, int> toJson() => {
         'total': total,
         'extended': extended,
+        'canvas_max': canvasMax,
       };
 }
 

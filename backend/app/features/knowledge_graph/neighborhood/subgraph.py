@@ -20,13 +20,21 @@ def build_subgraph(
     session: Session,
     focus: KnowledgeNode,
     *,
-    max_extended: int = 36,
+    max_extended: int = 14,
     counts: dict[str, int] | None = None,
 ) -> dict:
-    """Direct neighborhood first, then unique neighbors-of-neighbors as `extended`."""
+    """Direct neighborhood first, then unique neighbors-of-neighbors as `extended`.
+
+    Always show every direct neighbor. Extended tops up toward `canvas_max`
+    (including focus), capped by `max_extended`. If directs alone exceed
+    `canvas_max`, the canvas grows — directs are never dropped.
+    """
     kinds: dict[UUID, str] = {focus.id: "focus"}
     depths: dict[UUID, int] = {focus.id: 0}
     nodes: dict[UUID, KnowledgeNode] = {focus.id: focus}
+    canvas_max = int((counts or {}).get("canvas_max") or 30)
+    if canvas_max < 1:
+        canvas_max = 30
 
     for edge in session.exec(select(KnowledgeEdge).where(KnowledgeEdge.from_id == focus.id)).all():
         other = session.get(KnowledgeNode, edge.to_id)
@@ -48,13 +56,8 @@ def build_subgraph(
         else:
             depths.setdefault(other.id, 0)
 
-    direct_ids = [node_id for node_id in nodes if node_id != focus.id]
-    # Collect extended candidates per via-kind, then round-robin so parents/siblings
-    # are not starved by child/acquaintance fan-out.
     via_order = ("parent", "sibling", "child", "related")
-    pools: dict[str, list[KnowledgeNode]] = {kind: [] for kind in via_order}
-    seen_extended: set[UUID] = set()
-    seen_extended_nodes: list[KnowledgeNode] = []
+    direct_ids = [node_id for node_id in nodes if node_id != focus.id]
     directs_sorted = sorted(
         direct_ids,
         key=lambda node_id: (
@@ -65,6 +68,13 @@ def build_subgraph(
             str(node_id),
         ),
     )
+    direct_ids = list(directs_sorted)
+
+    # Collect extended candidates per via-kind, then round-robin so parents/siblings
+    # are not starved by child/acquaintance fan-out.
+    pools: dict[str, list[KnowledgeNode]] = {kind: [] for kind in via_order}
+    seen_extended: set[UUID] = set()
+    seen_extended_nodes: list[KnowledgeNode] = []
     for direct_id in directs_sorted:
         via_kind = kinds.get(direct_id, "related")
         if via_kind not in pools:
@@ -85,14 +95,20 @@ def build_subgraph(
             seen_extended_nodes.append(other)
             pools[via_kind].append(other)
 
+    # Top up toward canvas_max after directs; zero extended if directs already fill it.
+    surrounding_slots = max(0, canvas_max - 1)
+    extended_budget = min(
+        max(0, int(max_extended)),
+        max(0, surrounding_slots - len(direct_ids)),
+    )
     extended: list[KnowledgeNode] = []
-    while len(extended) < max_extended and any(pools.values()):
+    while len(extended) < extended_budget and any(pools.values()):
         for via_kind in via_order:
             bucket = pools[via_kind]
             if not bucket:
                 continue
             extended.append(bucket.pop(0))
-            if len(extended) >= max_extended:
+            if len(extended) >= extended_budget:
                 break
 
     for other in extended:

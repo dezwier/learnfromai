@@ -23,7 +23,8 @@ def test_preferences_neighborhood_is_global(client, auth, user, session):
     assert response.status_code == 200
     body = response.json()["neighborhood"]
     assert body["total"] == 16
-    assert body["extended"] == 16
+    assert body["extended"] == 14
+    assert body["canvas_max"] == 30
     assert body["min_per_bucket"] == 2
     assert response.json()["llm_provider"] == "openai"
 
@@ -36,14 +37,16 @@ def test_preferences_neighborhood_is_global(client, auth, user, session):
     assert patched.status_code == 200
     assert patched.json()["neighborhood"] == {
         "total": 16,
-        "extended": 16,
+        "extended": 14,
+        "canvas_max": 30,
         "min_per_bucket": 2,
     }
     session.refresh(user)
     assert "neighborhood" not in (user.preferences or {})
     assert neighborhood_counts(user) == {
         "total": 16,
-        "extended": 16,
+        "extended": 14,
+        "canvas_max": 30,
         "min_per_bucket": 2,
     }
 
@@ -93,7 +96,8 @@ def test_stored_personal_neighborhood_ignored(client, auth, user, session):
     session.commit()
     counts = neighborhood_counts(user)
     assert counts["total"] == 16
-    assert counts["extended"] == 16
+    assert counts["extended"] == 14
+    assert counts["canvas_max"] == 30
 
 
 def test_dinosaurs_expand_merge_and_bidirectional_edges(client, auth, session):
@@ -291,6 +295,76 @@ def test_build_subgraph_hides_near_duplicate_neighbors(session, user):
     payload = build_subgraph(session, focus, max_extended=12)
     titles = {node["title"] for node in payload["nodes"]}
     assert titles == {"Dinosaurs", "Theropods"}
+
+
+def test_build_subgraph_caps_extended_keeps_all_directs(session, user):
+    """All directs always shown; extended only fills leftover canvas slots."""
+    from app.features.knowledge_graph.neighborhood import build_subgraph
+
+    focus = KnowledgeNode(name="Focus", name_key="focus-cap", description="x")
+    session.add(focus)
+    session.flush()
+    directs = []
+    for i in range(20):
+        node = KnowledgeNode(name=f"Direct {i:02d}", name_key=f"direct-{i:02d}", description="d")
+        directs.append(node)
+        session.add(node)
+    session.flush()
+    for node in directs:
+        session.add(KnowledgeEdge(from_id=focus.id, relation="child", to_id=node.id))
+        session.add(KnowledgeEdge(from_id=node.id, relation="parent", to_id=focus.id))
+        # One extended hanging off each direct.
+        ext = KnowledgeNode(
+            name=f"Ext {node.name_key}",
+            name_key=f"ext-{node.name_key}",
+            description="e",
+        )
+        session.add(ext)
+        session.flush()
+        session.add(KnowledgeEdge(from_id=node.id, relation="child", to_id=ext.id))
+        session.add(KnowledgeEdge(from_id=ext.id, relation="parent", to_id=node.id))
+    session.commit()
+
+    payload = build_subgraph(
+        session,
+        focus,
+        max_extended=14,
+        counts={"total": 16, "extended": 14, "canvas_max": 30},
+    )
+    nodes = payload["nodes"]
+    assert len(nodes) == 30
+    kinds = [node["kind"] for node in nodes]
+    assert kinds.count("focus") == 1
+    assert kinds.count("child") == 20
+    assert kinds.count("extended") == 9
+
+    # Many directs: still show all of them; no extended; may exceed canvas_max.
+    focus2 = KnowledgeNode(name="Focus2", name_key="focus-cap-2", description="x")
+    session.add(focus2)
+    session.flush()
+    for i in range(35):
+        node = KnowledgeNode(name=f"D2 {i:02d}", name_key=f"d2-{i:02d}", description="d")
+        session.add(node)
+        session.flush()
+        session.add(KnowledgeEdge(from_id=focus2.id, relation="sibling", to_id=node.id))
+        session.add(KnowledgeEdge(from_id=node.id, relation="sibling", to_id=focus2.id))
+        ext = KnowledgeNode(name=f"E2 {i:02d}", name_key=f"e2-{i:02d}", description="e")
+        session.add(ext)
+        session.flush()
+        session.add(KnowledgeEdge(from_id=node.id, relation="child", to_id=ext.id))
+    session.commit()
+
+    big = build_subgraph(
+        session,
+        focus2,
+        max_extended=14,
+        counts={"total": 16, "extended": 14, "canvas_max": 30},
+    )
+    big_kinds = [node["kind"] for node in big["nodes"]]
+    assert big_kinds.count("focus") == 1
+    assert big_kinds.count("sibling") == 35
+    assert big_kinds.count("extended") == 0
+    assert len(big["nodes"]) == 36
 
 
 def test_build_subgraph_keeps_description_on_focus_only(session, user):

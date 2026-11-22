@@ -8,7 +8,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - There is one shared topic graph. A search merges into that universe; it does not create a private graph.
 - A node has a UUID, canonical `name`, `name_key`, a standalone `description`, and an optional shared iconic `image_url` (PNG bytes generated or uploaded on demand). Names are not globally unique when the model says two same-titled topics are different concepts.
 - Edges are typed `parent`, `child`, `sibling`, or `acquaintance`, and are stored in both directions.
-- Neighborhood size is global (not per-user): 16 direct neighbors around a focus and 16 neighbors-of-neighbors on the canvas. The model chooses how many parents, siblings, children, and acquaintances to return (a bit of each; usually most children).
+- Neighborhood size is global (not per-user): expand aims for 16 direct neighbors; the canvas targets at most 30 tiles (focus + directs + extended). Every direct neighbor is always shown (even if that exceeds 30); neighbors-of-neighbors top up the rest (max 14). The model chooses how many parents, siblings, children, and acquaintances to return (a bit of each; usually most children).
 - Focusing or opening a topic returns whatever neighbors already exist (`incomplete` when under the user’s total budget). A Railway worker runs `expand_neighborhood` when the user explicitly requests neighbors, and a separate daily Railway cron may also enqueue shared expand/content jobs from ranked affinity (defaults: 5 neighbor + 10 learn per day). Cron only enqueues; the always-on worker runs the LLM work.
 - Expand uses two reusable LLM prompts plus deterministic retrieve: `neighborhood_v6` (invent related topics for the deficit, excluding existing neighbor titles; model picks the parent/sibling/child/acquaintance mix) and `sameness_v3` (batched same-concept? → id or null). Atomic learning uses `content_bits_v6` separately (short title + interesting learning bit; cloze is one-word multiple choice).
 - Scenarios: (1) new topic → retrieve → sameness → exists → under budget → neighborhood → retrieve/sameness per result → write; (2) new → retrieve → sameness → not exists → neighborhood → …; (3) existing focus → under budget → neighborhood → …; (4) new → retrieve → sameness → exists → budget met → Done; (5) existing focus → budget met → Done. Existing-tile expand skips focus sameness.
@@ -59,7 +59,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `POST /api/v1/graph/extend` (410)
 - `GET /health`
 
-Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `related`, `extended` (neighbors of neighbors), or `focus`. Edge `type` uses the stored relation names. The canvas always shows every direct neighbor, then up to 16 unique neighbors-of-neighbors beside the direct they hang off. Only the focus node includes `description` and full `image_url`; every node may include `image_thumb_url` for tiles.
+Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `related`, `extended` (neighbors of neighbors), or `focus`. Edge `type` uses the stored relation names. The canvas always shows every direct neighbor, then tops up with unique neighbors-of-neighbors (≤14) beside the direct they hang off toward 30 tiles including focus (grows past 30 only when directs alone require it). Only the focus node includes `description` and full `image_url`; every node may include `image_thumb_url` for tiles.
 
 ## Client
 

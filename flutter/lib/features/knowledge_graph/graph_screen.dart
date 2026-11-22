@@ -1557,6 +1557,7 @@ class _GraphScreenState extends State<GraphScreen>
       focusId: graph.focusId,
       viewport: viewport,
       maxExtended: NeighborhoodPrefs.defaultExtended,
+      canvasMax: NeighborhoodPrefs.defaultCanvasMax,
     );
   }
 }

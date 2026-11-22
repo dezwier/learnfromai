@@ -7,10 +7,13 @@ from typing import Any
 from app.features.accounts.models import User
 from app.features.platform.neighborhood_llm import normalize_llm_provider
 
-# Shared expand / outer-ring budget (not per-user).
+# Shared expand / canvas budget (not per-user).
+# Expand aims for `total` direct neighbors; the canvas shows at most
+# `canvas_max` tiles (focus + directs + extended), filling extended after directs.
 DEFAULTS = {
     "total": 16,
-    "extended": 16,
+    "extended": 14,
+    "canvas_max": 30,
 }
 
 DEFAULT_LLM_PROVIDER = "openai"
@@ -24,6 +27,7 @@ def neighborhood_counts(user: User | None = None, raw: dict | None = None) -> di
     return {
         "total": total,
         "extended": DEFAULTS["extended"],
+        "canvas_max": DEFAULTS["canvas_max"],
         "min_per_bucket": min_per_bucket(total),
     }
 

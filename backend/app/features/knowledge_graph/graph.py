@@ -84,7 +84,10 @@ def _graph_payload(
     record_event: bool = True,
 ) -> dict:
     payload = build_subgraph(
-        session, focus, max_extended=counts["extended"], counts=counts
+        session,
+        focus,
+        max_extended=int(counts.get("extended") or 14),
+        counts=counts,
     )
     request = KnowledgeRequest(
         user_id=user.id,
@@ -155,7 +158,8 @@ def _enqueue_expand(
             "requested_by": str(user.id),
             "total": counts["total"],
             "min_per_bucket": counts.get("min_per_bucket", 2),
-            "extended": counts.get("extended", 16),
+            "extended": counts.get("extended", 14),
+            "canvas_max": counts.get("canvas_max", 30),
             # Known tile expand skips focus retrieve/sameness; new topic does not.
             "from_existing_focus": from_existing_focus,
         },

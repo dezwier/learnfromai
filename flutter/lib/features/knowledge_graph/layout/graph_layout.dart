@@ -403,7 +403,8 @@ GraphLayout layoutGraph(
   List<GraphEdge> edges, {
   required String focusId,
   Size viewport = const Size(390, 720),
-  int maxExtended = 12,
+  int maxExtended = 14,
+  int canvasMax = 30,
 }) {
   final width = math.max(viewport.width, 280.0);
   final height = math.max(viewport.height, 360.0);
@@ -482,8 +483,13 @@ GraphLayout layoutGraph(
     }
   }
 
-  // Always place every direct neighbor; outer ring is capped by settings.
-  final fillerSlots = math.max(0, maxExtended);
+  // Always place every direct; extended tops up to canvasMax (including focus).
+  // If directs alone exceed canvasMax, the canvas grows — directs are never dropped.
+  final surroundingSlots = math.max(0, canvasMax - 1);
+  final fillerSlots = math.max(
+    0,
+    math.min(maxExtended, surroundingSlots - directs.length),
+  );
   // Round-robin fillers by via role so parents/siblings get outer tiles too.
   final pools = <NodeRole, List<GraphNode>>{
     for (final role in viaPreference) role: <GraphNode>[],
@@ -508,7 +514,7 @@ GraphLayout layoutGraph(
   final occupied = {for (final c in flowerCells) '${c.$1},${c.$2}'};
   final cellPool = math.max(
     directs.length + fillers.length + 18,
-    fillers.isEmpty ? directs.length : 30,
+    fillers.isEmpty ? directs.length : canvasMax,
   );
   final cells = [
     for (final cell in _ringCells(fromRing: 2, count: math.max(cellPool, 1)))
@@ -834,7 +840,8 @@ GraphLayout layoutFromPayload(
   Map<String, dynamic>? payload, {
   required String? focusId,
   required Size viewport,
-  int maxExtended = 12,
+  int maxExtended = 14,
+  int canvasMax = 30,
 }) {
   if (payload == null) {
     return GraphLayout(nodes: const [], width: viewport.width, height: viewport.height);
@@ -869,5 +876,6 @@ GraphLayout layoutFromPayload(
     focusId: focus,
     viewport: viewport,
     maxExtended: maxExtended,
+    canvasMax: canvasMax,
   );
 }
