@@ -54,9 +54,42 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
 
-    missing = missing_content_kinds(
-        session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
-    )
+    # Prefer the kinds requested at enqueue (full new packs still ask for all
+    # three checks). Fall back to content-complete gaps (learn + ≥1 check).
+    requested = payload.get("missing_kinds")
+    if isinstance(requested, list) and requested:
+        gap = missing_content_kinds(
+            session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
+        )
+        if not gap:
+            # Already content-complete — don't force optional check2/check3 fills.
+            missing = []
+        else:
+            from app.features.content.service import _present_kinds, _rows_for_node
+
+            rows = [
+                row
+                for row in _rows_for_node(
+                    session, node.id, band=band, recipe_version=recipe_version
+                )
+                if row.pack_index == pack_index
+            ]
+            present = _present_kinds(rows)
+            missing = []
+            for kind in requested:
+                key = str(kind)
+                if key == "check1" and (
+                    "check1" in present or LEGACY_CHECK_KIND in present
+                ):
+                    continue
+                if key in present:
+                    continue
+                if key in CONTENT_KINDS:
+                    missing.append(key)
+    else:
+        missing = missing_content_kinds(
+            session, node.id, pack_index=pack_index, band=band, recipe_version=recipe_version
+        )
     if not missing:
         set_progress(session, job, stage="done", message="Content already ready", fraction=1.0)
         session.commit()

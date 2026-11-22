@@ -181,7 +181,6 @@ class _ClozeMcCheck extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final prompt = bit.body['prompt']?.toString() ??
         bit.body['question']?.toString() ??
         '';
@@ -192,13 +191,7 @@ class _ClozeMcCheck extends StatelessWidget {
     ];
     final answerIndex = (bit.body['answer_index'] as num?)?.toInt() ?? 0;
     if (choices.length < 2) {
-      return Text(
-        'This cloze check needs regenerating.',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.45),
-              fontStyle: FontStyle.italic,
-            ),
-      );
+      return const SizedBox.shrink();
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

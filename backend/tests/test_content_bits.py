@@ -112,8 +112,8 @@ def test_content_expand_coalesces_and_skips_when_complete(client, auth, other_au
     assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 1
 
 
-def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, session):
-    """Existing learn/example/check rows still enqueue only for missing check2/check3."""
+def test_content_legacy_learn_plus_one_check_is_complete(client, auth, session):
+    """learn + any one playable check is content-complete (no forced check2/check3)."""
     node = KnowledgeNode(name="Gradient", name_key="gradient", description="Direction of steepest ascent.")
     session.add(node)
     session.flush()
@@ -151,33 +151,20 @@ def test_content_backfills_missing_checks_for_legacy_recipe(client, auth, sessio
 
     before = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
     assert before.status_code == 200
-    assert before.json()["incomplete"] is True
+    assert before.json()["incomplete"] is False
     pack = before.json()["packs"][0]
     assert _kinds(pack) == {"learn", "example", "check1"}
 
-    queued = client.post(
+    # Expand is a no-op when already complete.
+    again = client.post(
         f"/api/v1/knowledge/nodes/{node.id}/content",
         headers=auth,
         json={"expand": True},
     )
-    assert queued.status_code == 202
-    job = session.get(GenerationJob, queued.json()["job_id"])
-    assert job is not None
-    assert job.payload.get("missing_kinds") == ["check2", "check3"]
-    assert job.payload.get("pack_index") == 1
-
-    done = _run_queued(session)
-    assert done is not None
-    assert done.state == "succeeded"
-
-    ready = client.get(f"/api/v1/knowledge/nodes/{node.id}/content", headers=auth)
-    assert ready.status_code == 200
-    body = ready.json()
-    assert body["incomplete"] is False
-    pack = body["packs"][0]
-    assert {"learn", "check1", "check2", "check3"} <= _kinds(pack)
-    check1 = next(bit for bit in pack["bits"] if bit["kind"] == "check1")
+    assert again.status_code == 200
+    check1 = next(bit for bit in again.json()["packs"][0]["bits"] if bit["kind"] == "check1")
     assert check1["body"]["question"] == "Which fits Gradient?"
+    assert check1["body"]["answer_index"] == 0
 
 
 def test_content_new_pack_after_complete(client, auth, session):

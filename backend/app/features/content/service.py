@@ -87,6 +87,48 @@ def _rows_for_node(
     )
 
 
+def is_playable_check_body(body: object) -> bool:
+    """True for mc / true_false / one-word cloze MC — not free-text cloze."""
+    if not isinstance(body, dict):
+        return False
+    raw_type = str(body.get("type") or "").strip().lower()
+    if not raw_type:
+        if "choices" in body or "answer_index" in body:
+            raw_type = "mc"
+        elif "statement" in body or isinstance(body.get("answer"), bool):
+            raw_type = "true_false"
+        elif "prompt" in body:
+            raw_type = "cloze"
+        else:
+            raw_type = "mc"
+    if raw_type == "true_false":
+        return True
+    if raw_type == "mc":
+        choices = body.get("choices")
+        return isinstance(choices, list) and len(choices) >= 2
+    if raw_type == "cloze":
+        choices = body.get("choices")
+        return (
+            isinstance(choices, list)
+            and len(choices) >= 2
+            and "answer_index" in body
+        )
+    return False
+
+
+def is_free_text_cloze_body(body: object) -> bool:
+    """Legacy open-answer cloze (no one-word MC choices)."""
+    if not isinstance(body, dict):
+        return False
+    raw_type = str(body.get("type") or "").strip().lower()
+    if raw_type == "cloze":
+        return not is_playable_check_body(body)
+    if raw_type:
+        return False
+    # Untyped prompt + free-text answer.
+    return "prompt" in body and not isinstance(body.get("choices"), list)
+
+
 def missing_content_kinds(
     session: Session,
     node_id: UUID,
@@ -95,6 +137,10 @@ def missing_content_kinds(
     band: str = DEFAULT_BAND,
     recipe_version: int = RECIPE_VERSION,
 ) -> list[str]:
+    """Kinds still needed so the pack is content-complete.
+
+    Complete = learn + at least one playable check (fewer than three is fine).
+    """
     rows = [
         row
         for row in _rows_for_node(session, node_id, band=band, recipe_version=recipe_version)
@@ -102,12 +148,16 @@ def missing_content_kinds(
     ]
     present = _present_kinds(rows)
     missing: list[str] = []
-    for kind in CONTENT_KINDS:
-        if kind == "check1":
-            if "check1" not in present:
-                missing.append("check1")
-        elif kind not in present:
-            missing.append(kind)
+    if "learn" not in present:
+        missing.append("learn")
+    playable_checks = [
+        row
+        for row in rows
+        if (row.kind in CHECK_KINDS or row.kind == LEGACY_CHECK_KIND)
+        and is_playable_check_body(row.body)
+    ]
+    if not playable_checks:
+        missing.append("check1")
     return missing
 
 
@@ -230,7 +280,11 @@ def content_for_node(
     rows = _rows_for_node(session, node_id, band=band, recipe_version=recipe_version)
     by_pack: dict[int, list[dict]] = {}
     for row in rows:
-        by_pack.setdefault(row.pack_index, []).append(_bit_payload(row))
+        payload = _bit_payload(row)
+        kind = payload["kind"]
+        if kind in CHECK_KINDS and not is_playable_check_body(payload.get("body")):
+            continue
+        by_pack.setdefault(row.pack_index, []).append(payload)
     packs: list[dict] = []
     for pack_index in sorted(by_pack):
         bits = _dedupe_bits(by_pack[pack_index])
