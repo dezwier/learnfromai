@@ -79,7 +79,7 @@ def image_bytes_for_pack(
 ) -> tuple[bytes, str]:
     row = get_pack_image(session, node_id, pack_index)
     if row is None or not row.image_bytes:
-        raise not_found("Pack image not found")
+        raise not_found("Atom image not found")
     if variant == "thumb":
         if not row.image_thumb_bytes:
             _, thumb = prepare_node_images(bytes(row.image_bytes))
@@ -160,12 +160,12 @@ def learn_bit_text(
         )
     ).first()
     if row is None:
-        raise not_found("Pack learn bit not found")
+        raise not_found("Atom learn bit not found")
     body = row.body if isinstance(row.body, dict) else {}
     title = str(body.get("title") or "").strip()
     markdown = str(body.get("markdown") or "").strip()
     if not title and not markdown:
-        raise AppError("VALIDATION_ERROR", "Pack learn bit is empty", 422, {"terminal": True})
+        raise AppError("VALIDATION_ERROR", "Atom learn bit is empty", 422, {"terminal": True})
     return title, markdown
 
 

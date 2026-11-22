@@ -172,7 +172,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     if (cards.isEmpty) {
       setState(() {
         _loading = false;
-        _error = 'Due packs have no quiz bits';
+        _error = 'Due atoms have no quiz bits';
       });
       return;
     }
@@ -373,7 +373,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Completed packs start in bin 1. Correct moves up; incorrect moves two down. Reach bin 8 to graduate.',
+          'Completed atoms start in bin 1. Correct moves up; incorrect moves two down. Reach bin 8 to graduate.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurface.withValues(alpha: 0.65),
               ),

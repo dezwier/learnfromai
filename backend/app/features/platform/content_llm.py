@@ -1,4 +1,4 @@
-"""LLM contracts for shared tile content (atomic learning packs)."""
+"""LLM contracts for shared tile content (atomic learning atoms)."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def build_content_prompt(
         )
     if checks_needed:
         parts.append(
-            "Use these three check types (one each when writing a full pack):\n"
+            "Use these three check types (one each when writing a full atom):\n"
             "- mc: {type:'mc', question, choices (exactly 4 short strings), answer_index 0..3, explanation}\n"
             "- true_false: {type:'true_false', statement, answer (boolean), explanation}\n"
             "- cloze: {type:'cloze', prompt (with ___), choices (exactly 4 single-word or "
@@ -93,13 +93,13 @@ def build_content_prompt(
         )
         if existing_checks:
             parts.append(
-                "Avoid duplicating these existing checks in this pack: "
+                "Avoid duplicating these existing checks in this atom: "
                 + json.dumps(existing_checks)
                 + "\n"
             )
     if existing_packs:
         parts.append(
-            "Other packs on this topic (do not repeat): "
+            "Other atoms on this topic (do not repeat): "
             + json.dumps(existing_packs)
             + "\n"
         )
@@ -133,7 +133,7 @@ class FakeContentLLM:
         topic = (name or "Topic").strip() or "Topic"
         desc = (description or "").strip()
         required = [k for k in (kinds or list(CONTENT_KINDS)) if k in CONTENT_KINDS]
-        facet = f"pack {pack_index}" if pack_index > 1 else "core idea"
+        facet = f"atom {pack_index}" if pack_index > 1 else "core idea"
         payload: dict = {}
         if "learn" in required:
             payload["learn"] = {
@@ -178,18 +178,18 @@ class FakeContentLLM:
                     "type": "true_false",
                     "statement": f"{topic} can be learned in short standalone steps.",
                     "answer": True,
-                    "explanation": f"Atomic packs are designed for short steps about {topic}.",
+                    "explanation": f"Learning atoms are designed for short steps about {topic}.",
                 },
                 "check2": {
                     "type": "cloze",
-                    "prompt": f"A pack about {topic} always includes exactly ___ checks.",
+                    "prompt": f"An atom about {topic} always includes exactly ___ checks.",
                     "choices": ["3", "1", "5", "10"],
                     "answer_index": 0,
-                    "explanation": "Each pack has three test bits.",
+                    "explanation": "Each atom has three test bits.",
                 },
                 "check3": {
                     "type": "mc",
-                    "question": f"Which focus fits a later pack about {topic}?",
+                    "question": f"Which focus fits a later atom about {topic}?",
                     "choices": [
                         f"A different facet of {topic} not covered yet.",
                         f"A survey of unrelated subjects besides {topic}.",
@@ -197,7 +197,7 @@ class FakeContentLLM:
                         f"Only memorizing the word {topic}.",
                     ],
                     "answer_index": 0,
-                    "explanation": f"Later packs deepen {topic} without leaving the topic.",
+                    "explanation": f"Later atoms deepen {topic} without leaving the topic.",
                 },
             }
         for kind in CHECK_KINDS:

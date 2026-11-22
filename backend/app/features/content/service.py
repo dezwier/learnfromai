@@ -1,4 +1,4 @@
-"""Load and enqueue shared tile content (atomic learning packs)."""
+"""Load and enqueue shared tile content (learning atoms)."""
 
 from __future__ import annotations
 
@@ -416,7 +416,7 @@ def enqueue_content_expand(
         if incomplete is not None:
             raise AppError(
                 "VALIDATION_ERROR",
-                "Finish the incomplete pack before generating another",
+                "Finish the incomplete atom before generating another",
                 422,
             )
         pack_index = next_pack_index(

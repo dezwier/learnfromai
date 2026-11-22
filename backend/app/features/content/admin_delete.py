@@ -138,7 +138,7 @@ def delete_pack(
         session, node_id, pack_index, band=band, recipe_version=recipe_version
     )
     if not bits:
-        raise not_found("Pack not found")
+        raise not_found("Atom not found")
     bit_ids = [row.id for row in bits]
     session.execute(delete(KnowledgeBit).where(col(KnowledgeBit.id).in_(bit_ids)))
     events = _delete_pack_events(session, node_id=node_id, pack_index=pack_index)
@@ -177,12 +177,12 @@ def delete_check_bit(
         session, node_id, pack_index, band=band, recipe_version=recipe_version
     )
     if check_kind not in remaining:
-        raise not_found("Quiz not found on this pack")
+        raise not_found("Quiz not found on this atom")
     if len(remaining) <= 1:
         if not confirm_last_pack:
             raise AppError(
                 "CONFIRM_PACK_DELETE",
-                "This is the last quiz on the pack; deleting it removes the whole pack.",
+                "This is the last quiz on the atom; deleting it removes the whole atom.",
                 409,
                 details={
                     "would_delete_pack": True,
@@ -213,7 +213,7 @@ def delete_check_bit(
         ).all()
     )
     if not bits:
-        raise not_found("Quiz not found on this pack")
+        raise not_found("Quiz not found on this atom")
     session.execute(
         delete(KnowledgeBit).where(col(KnowledgeBit.id).in_([row.id for row in bits]))
     )

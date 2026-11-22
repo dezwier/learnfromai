@@ -111,7 +111,7 @@ def expand_content(session: Session, job: GenerationJob) -> dict:
     message = (
         "Writing extra checks…"
         if only_checks
-        else f"Writing learning pack {pack_index}…"
+        else f"Writing learning atom {pack_index}…"
     )
     set_progress(session, job, stage="generate", message=message, fraction=0.35)
     assert_user_quota(session, user_id)

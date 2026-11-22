@@ -81,7 +81,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
       final n = preview?.neighborJobs.length ?? 0;
       final p = preview?.learnJobs.length ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enqueued $n neighbor · $p pack jobs.')),
+        SnackBar(content: Text('Enqueued $n neighbor · $p atom jobs.')),
       );
     } catch (exc) {
       if (!mounted) return;
@@ -128,7 +128,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Next neighbor expands and learn packs, ranked a priori.',
+          'Next neighbor expands and learn atoms, ranked a priori.',
           style: SettingsFormStyles.finePrintStyle(context),
         ),
         if (_preview?.latestRunLabel != null) ...[
@@ -176,10 +176,10 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
           ),
           const SizedBox(height: 18),
           CronQueueTable(
-            title: 'Packs',
+            title: 'Atoms',
             subtitle:
                 'Top ${_preview!.limits.learnJobsPerDay} · target ${_preview!.limits.desiredPacks}',
-            columns: const ['Topic', 'Aff', 'Pk', 'Fill', 'Score', 'Result'],
+            columns: const ['Topic', 'Aff', 'At', 'Fill', 'Score', 'Result'],
             flex: const [3, 1, 1, 1, 1, 2],
             rows: [
               for (final job in _preview!.learnJobs)
@@ -319,9 +319,9 @@ class _CronQueueRow {
 
   String get packResultLabel {
     final state = jobState;
-    if (state == 'succeeded' && packIndex != null) return 'pack $packIndex';
+    if (state == 'succeeded' && packIndex != null) return 'atom $packIndex';
     if (state == 'queued' || state == 'running') {
-      return packIndex != null ? 'pack $packIndex…' : _stateLabel(state);
+      return packIndex != null ? 'atom $packIndex…' : _stateLabel(state);
     }
     if (state == 'failed') return 'failed';
     return '—';

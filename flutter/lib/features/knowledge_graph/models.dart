@@ -134,7 +134,7 @@ class TopicPack {
   String get badgeLabel {
     final raw = title?.trim();
     final short = (raw == null || raw.isEmpty)
-        ? 'Pack $packIndex'
+        ? 'Atom $packIndex'
         : (raw.length <= 28 ? raw : '${raw.substring(0, 27)}…');
     return '$packIndex · $short';
   }

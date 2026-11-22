@@ -17,7 +17,7 @@ flowchart LR
   worker --> llm
 ```
 
-The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction. Provider choice comes from the user's `llm_provider` preference (Gemini or OpenAI/`gpt-5-mini`), falling back to `LLM_PROVIDER`. Topic images use the same preference for generation: Gemini Imagen or OpenAI Images (`generate_image` job). Uploaded topic images skip the worker and write full + thumb bytes on the knowledge node immediately. Pack images use the same providers (`generate_pack_image`, coalesced per `node_id`+`pack_index`) with the topic style prompt plus the pack learn bit; uploads write to `knowledge_pack_images`. Profile photos are uploaded to `users.photo_bytes` and served at `/me/photo`. Today each topic has one iconic image plus optional per-pack overrides on learn cards; a multi-visual gallery (testing variants) is anticipated but not implemented.
+The worker locks the graph row only while merging nodes and edges. It does not call the model inside that transaction. Provider choice comes from the user's `llm_provider` preference (Gemini or OpenAI/`gpt-5-mini`), falling back to `LLM_PROVIDER`. Topic images use the same preference for generation: Gemini Imagen or OpenAI Images (`generate_image` job). Uploaded topic images skip the worker and write full + thumb bytes on the knowledge node immediately. Atom images use the same providers (`generate_pack_image`, coalesced per `node_id`+`pack_index`) with the topic style prompt plus the atom learn bit; uploads write to `knowledge_pack_images`. Profile photos are uploaded to `users.photo_bytes` and served at `/me/photo`. Today each topic has one iconic image plus optional per-atom overrides on learn cards; a multi-visual gallery (testing variants) is anticipated but not implemented.
 
 A separate Railway **cron** service (`python -m app.cron`, schedule `0 6 * * *`) ranks tiles from user–tile affinity and enqueues top neighbor/learn jobs into `generation_jobs`. It does not call the LLM; the always-on worker runs those jobs.
 
@@ -54,7 +54,7 @@ flowchart TD
 
 - `accounts` — Firebase exchange and users
 - `knowledge_graph` — the shared graph, nodes, edges, and the workspace payload
-- `content` — shared atomic learning packs (`pack_index` + learn / typed checks) and `expand_content` jobs
+- `content` — shared learning atoms (`pack_index` + learn / typed checks) and `expand_content` jobs
 - `graph_extend` — extend requests and the merge
 - `platform` — jobs, LLM client, quota, worker heartbeat
 - `ranking` — user–tile affinity, neighbor/learn job scores, daily cron enqueue + `cron_runs`

@@ -362,5 +362,7 @@ def test_build_content_prompt_includes_existing_packs_and_stays_on_topic():
     assert "Parent and sibling" not in prompt
     assert "Neighbor topics" not in prompt
     assert "Attention" not in prompt
+    assert "Other atoms on this topic" in prompt
+    assert "full atom" in prompt
     assert "worth knowing" in prompt
     assert "one of each type" in prompt

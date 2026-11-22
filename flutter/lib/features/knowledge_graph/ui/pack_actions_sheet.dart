@@ -54,8 +54,8 @@ Future<PackActionResult?> showPackActionsSheet(
                 leading: const Icon(Icons.auto_awesome_outlined),
                 title: Text(
                   imageBusy
-                      ? 'Pack image generating…'
-                      : (ownImage ? 'Regenerate pack image' : 'Generate pack image'),
+                      ? 'Atom image generating…'
+                      : (ownImage ? 'Regenerate atom image' : 'Generate atom image'),
                 ),
                 subtitle: const Text('Illustrates this learning bit'),
                 enabled: !imageBusy,
@@ -63,7 +63,7 @@ Future<PackActionResult?> showPackActionsSheet(
               ),
               ListTile(
                 leading: const Icon(Icons.upload_outlined),
-                title: Text(ownImage ? 'Replace pack image' : 'Upload pack image'),
+                title: Text(ownImage ? 'Replace atom image' : 'Upload atom image'),
                 onTap: () => Navigator.pop(context, 'upload'),
               ),
               if (isAdmin) ...[
@@ -71,13 +71,13 @@ Future<PackActionResult?> showPackActionsSheet(
                 ListTile(
                   leading: Icon(Icons.quiz_outlined, color: scheme.onSurface),
                   title: const Text('Delete this quiz'),
-                  subtitle: const Text('Removes only this question from the pack'),
+                  subtitle: const Text('Removes only this question from the atom'),
                   onTap: () => Navigator.pop(context, 'quiz'),
                 ),
                 ListTile(
                   leading: Icon(Icons.delete_outline_rounded, color: scheme.error),
-                  title: Text('Delete pack', style: TextStyle(color: scheme.error)),
-                  subtitle: const Text('Pack, quizzes, image, and related progress'),
+                  title: Text('Delete atom', style: TextStyle(color: scheme.error)),
+                  subtitle: const Text('Atom, quizzes, image, and related progress'),
                   onTap: () => Navigator.pop(context, 'pack'),
                 ),
               ],

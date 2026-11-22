@@ -39,13 +39,13 @@ Future<bool> showAdminContentDeleteMenu(
               ListTile(
                 leading: Icon(Icons.quiz_outlined, color: scheme.onSurface),
                 title: const Text('Delete this quiz'),
-                subtitle: const Text('Removes only this question from the pack'),
+                subtitle: const Text('Removes only this question from the atom'),
                 onTap: () => Navigator.pop(context, 'quiz'),
               ),
               ListTile(
                 leading: Icon(Icons.delete_outline_rounded, color: scheme.error),
-                title: Text('Delete pack', style: TextStyle(color: scheme.error)),
-                subtitle: const Text('Pack, quizzes, and related progress'),
+                title: Text('Delete atom', style: TextStyle(color: scheme.error)),
+                subtitle: const Text('Atom, quizzes, and related progress'),
                 onTap: () => Navigator.pop(context, 'pack'),
               ),
             ],
@@ -76,8 +76,8 @@ Future<bool> executeAdminContentDelete(
   if (choice == 'pack') {
     final ok = await _confirm(
       context,
-      title: 'Delete pack?',
-      body: 'This removes the pack, all quizzes, and related interactions/progress for everyone.',
+      title: 'Delete atom?',
+      body: 'This removes the atom, all quizzes, and related interactions/progress for everyone.',
       destructive: true,
     );
     if (!ok || !context.mounted) return false;
@@ -85,15 +85,15 @@ Future<bool> executeAdminContentDelete(
     return result != null;
   }
 
-  // Delete quiz — last remaining check deletes the pack (with confirm).
+  // Delete quiz — last remaining check deletes the atom (with confirm).
   if (remainingCheckCount(pack) <= 1) {
     final ok = await _confirm(
       context,
-      title: 'Last quiz on this pack',
+      title: 'Last quiz on this atom',
       body:
-          'This is the last quiz. Deleting it removes the whole pack, including related progress.',
+          'This is the last quiz. Deleting it removes the whole atom, including related progress.',
       destructive: true,
-      confirmLabel: 'Delete pack',
+      confirmLabel: 'Delete atom',
     );
     if (!ok || !context.mounted) return false;
     try {
@@ -115,7 +115,7 @@ Future<bool> executeAdminContentDelete(
   final ok = await _confirm(
     context,
     title: 'Delete this quiz?',
-    body: 'Only this question is removed. The pack and other quizzes stay.',
+    body: 'Only this question is removed. The atom and other quizzes stay.',
     destructive: true,
     confirmLabel: 'Delete quiz',
   );
@@ -132,10 +132,10 @@ Future<bool> executeAdminContentDelete(
       if (!context.mounted) return false;
       final proceed = await _confirm(
         context,
-        title: 'Last quiz on this pack',
+        title: 'Last quiz on this atom',
         body: exc.message,
         destructive: true,
-        confirmLabel: 'Delete pack',
+        confirmLabel: 'Delete atom',
       );
       if (!proceed || !context.mounted) return false;
       final result = await graph.adminDeleteQuiz(

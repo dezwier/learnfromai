@@ -43,7 +43,7 @@ def generate_pack_image(session: Session, job: GenerationJob) -> dict:
     if pack_index < 1:
         raise AppError("VALIDATION_ERROR", "Job is missing pack_index", 422)
 
-    set_progress(session, job, stage="resolve", message="Loading pack…", fraction=0.1)
+    set_progress(session, job, stage="resolve", message="Loading atom…", fraction=0.1)
     node = session.get(KnowledgeNode, node_id)
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
@@ -56,7 +56,7 @@ def generate_pack_image(session: Session, job: GenerationJob) -> dict:
     llm = get_image_llm(preferred_llm_provider(user))
     setattr(llm, "heartbeat", lambda: renew_lease(session, job))
     bind_usage_sink(llm, session, user_id=user_id, job_id=job.id, task="image")
-    set_progress(session, job, stage="generate", message="Creating pack image…", fraction=0.4)
+    set_progress(session, job, stage="generate", message="Creating atom image…", fraction=0.4)
     assert_user_quota(session, user_id)
     prompt = build_pack_image_prompt(
         node.name,
@@ -70,12 +70,12 @@ def generate_pack_image(session: Session, job: GenerationJob) -> dict:
     session.commit()
     assert_user_quota(session, user_id)
 
-    set_progress(session, job, stage="persist", message="Saving pack image…", fraction=0.85)
+    set_progress(session, job, stage="persist", message="Saving atom image…", fraction=0.85)
     node = session.get(KnowledgeNode, node_id)
     if node is None:
         raise AppError("NOT_FOUND", "Topic not found", 404, {"terminal": True})
     store_pack_image(session, node_id=node_id, pack_index=pack_index, raw=png)
-    set_progress(session, job, stage="done", message="Pack image ready", fraction=1.0)
+    set_progress(session, job, stage="done", message="Atom image ready", fraction=1.0)
     session.commit()
     return {
         "node_id": str(node_id),

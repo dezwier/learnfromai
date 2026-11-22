@@ -219,7 +219,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _applyReady(graph, next);
       return;
     }
-    graph.surfaceError('No new learning pack could be started for $topicTitle');
+    graph.surfaceError('No new learning atom could be started for $topicTitle');
     setState(() {
       _generateNodeId = null;
       _loading = false;
@@ -229,7 +229,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   void _applyReady(GraphController graph, LearningNext next, {bool trackOpen = false}) {
     final pack = next.pack;
     if (pack == null) {
-      graph.surfaceError('No learning pack available');
+      graph.surfaceError('No learning atom available');
       setState(() => _loading = false);
       return;
     }
@@ -238,7 +238,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         if (pack.bit(kind) != null) kind,
     ];
     if (available.isEmpty) {
-      graph.surfaceError('Pack has no quiz');
+      graph.surfaceError('Atom has no quiz');
       setState(() => _loading = false);
       return;
     }

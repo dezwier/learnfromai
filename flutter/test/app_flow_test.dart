@@ -404,7 +404,7 @@ void main() {
           'job_id': 'job-content',
           'focus_node_id': '2',
           'pack_index': 1,
-          'progress': {'message': 'Writing learning pack 1…'},
+          'progress': {'message': 'Writing learning atom 1…'},
         };
       },
       loader: (path) async {
@@ -443,7 +443,7 @@ void main() {
           'job_id': 'job-content-2',
           'focus_node_id': '2',
           'pack_index': 2,
-          'progress': {'message': 'Writing learning pack 2…'},
+          'progress': {'message': 'Writing learning atom 2…'},
         };
       },
       loader: (path) async => _contentReady(),
@@ -469,7 +469,7 @@ void main() {
           'job_id': 'job-content-3',
           'focus_node_id': '2',
           'pack_index': 2,
-          'progress': {'message': 'Writing learning pack 2…'},
+          'progress': {'message': 'Writing learning atom 2…'},
         };
       },
       loader: (path) async {
