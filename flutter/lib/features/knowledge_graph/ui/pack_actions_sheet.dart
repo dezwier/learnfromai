@@ -13,16 +13,20 @@ class PackActionResult {
     this.imageUrl,
     this.imageThumbUrl,
     this.hasPackImage,
+    this.topicImageUpdated = false,
   });
 
   final bool deleted;
   final String? imageUrl;
   final String? imageThumbUrl;
-  /// Set after upload (or when generate returns existing); null when only queued.
+  /// Set after pack upload (or when generate returns existing); null when only queued.
   final bool? hasPackImage;
+  /// Topic image was uploaded (or already present after generate). Display still
+  /// prefers atom image when [hasPackImage] is set.
+  final bool topicImageUpdated;
 }
 
-/// Long-press drawer: pack image upload/generate (+ admin delete when applicable).
+/// Long-press drawer: atom + topic image upload/generate (+ admin delete).
 Future<PackActionResult?> showPackActionsSheet(
   BuildContext context, {
   required String nodeId,
@@ -30,6 +34,7 @@ Future<PackActionResult?> showPackActionsSheet(
   required TopicPack pack,
   required String checkKind,
   bool hasPackImage = false,
+  bool hasTopicImage = false,
 }) async {
   final graph = context.read<GraphController>();
   await graph.syncNodeJobs(nodeId, title: title);
@@ -37,7 +42,9 @@ Future<PackActionResult?> showPackActionsSheet(
 
   final isAdmin = context.read<AuthController>().user?.isAdmin == true;
   final imageBusy = graph.isPackImageJobActive(nodeId, pack.packIndex);
+  final topicBusy = graph.isJobTypeActive(nodeId, 'generate_image');
   final ownImage = hasPackImage || pack.hasPackImage;
+  final topicHasImage = hasTopicImage || _topicHasImage(graph, nodeId);
 
   final choice = await showModalBottomSheet<String>(
     context: context,
@@ -65,6 +72,27 @@ Future<PackActionResult?> showPackActionsSheet(
                 leading: const Icon(Icons.upload_outlined),
                 title: Text(ownImage ? 'Replace atom image' : 'Upload atom image'),
                 onTap: () => Navigator.pop(context, 'upload'),
+              ),
+              const Divider(height: 16),
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: Text(
+                  topicBusy
+                      ? 'Topic image generating…'
+                      : (topicHasImage
+                          ? 'Regenerate topic image'
+                          : 'Generate topic image'),
+                ),
+                subtitle: const Text('Shown when this atom has no image'),
+                enabled: !topicBusy,
+                onTap: topicBusy ? null : () => Navigator.pop(context, 'generate_topic'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.upload_file_outlined),
+                title: Text(
+                  topicHasImage ? 'Replace topic image' : 'Upload topic image',
+                ),
+                onTap: () => Navigator.pop(context, 'upload_topic'),
               ),
               if (isAdmin) ...[
                 const Divider(height: 16),
@@ -136,6 +164,46 @@ Future<PackActionResult?> showPackActionsSheet(
     );
   }
 
+  if (choice == 'generate_topic') {
+    if (graph.isJobTypeActive(nodeId, 'generate_image')) {
+      return const PackActionResult();
+    }
+    final ok = await graph.enqueueImage(
+      nodeId,
+      title: title,
+      regenerate: topicHasImage,
+    );
+    if (!context.mounted) return null;
+    if (!ok && graph.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(graph.error!)));
+    }
+    // Queued or already had an image — graph patch / poller updates display.
+    return const PackActionResult(topicImageUpdated: true);
+  }
+
+  if (choice == 'upload_topic') {
+    final picked = await pickImageBytes();
+    if (picked == null || !context.mounted) return null;
+    final ok = await graph.uploadImage(
+      nodeId,
+      bytes: picked.bytes,
+      filename: picked.filename,
+      contentType: picked.mimeType,
+    );
+    if (!context.mounted) return null;
+    if (!ok) {
+      final message = graph.error ?? 'Image upload failed';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      return null;
+    }
+    final urls = _topicImageUrls(graph, nodeId);
+    return PackActionResult(
+      topicImageUpdated: true,
+      imageUrl: urls.$1,
+      imageThumbUrl: urls.$2,
+    );
+  }
+
   if (choice == 'quiz' || choice == 'pack') {
     final deleted = await executeAdminContentDelete(
       context,
@@ -149,4 +217,25 @@ Future<PackActionResult?> showPackActionsSheet(
   }
 
   return null;
+}
+
+bool _topicHasImage(GraphController graph, String nodeId) {
+  final urls = _topicImageUrls(graph, nodeId);
+  return urls.$1 != null || urls.$2 != null;
+}
+
+(String?, String?) _topicImageUrls(GraphController graph, String nodeId) {
+  final nodes = graph.categoryGraph?['nodes'];
+  if (nodes is! List) return (null, null);
+  for (final raw in nodes) {
+    if (raw is Map && raw['id']?.toString() == nodeId) {
+      final url = raw['image_url']?.toString().trim();
+      final thumb = raw['image_thumb_url']?.toString().trim();
+      return (
+        (url == null || url.isEmpty) ? null : url,
+        (thumb == null || thumb.isEmpty) ? null : thumb,
+      );
+    }
+  }
+  return (null, null);
 }

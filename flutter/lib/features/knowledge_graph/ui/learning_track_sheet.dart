@@ -302,6 +302,17 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
           checkKind: entry.checkKind,
         );
       });
+    } else if (entry != null &&
+        nodeId != null &&
+        !_hasPackImage &&
+        graph.lastCompletedJobType == 'generate_image' &&
+        graph.lastCompletedNodeId == nodeId &&
+        !graph.isJobTypeActive(nodeId, 'generate_image')) {
+      final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, nodeId);
+      final url = graphUrls.$2 ?? graphUrls.$1;
+      if (url != null && url.isNotEmpty) {
+        setState(() => _cardImageUrl = url);
+      }
     }
     final genId = _generateNodeId;
     if (genId == null) {
@@ -341,6 +352,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     final nodeId = _nodeId;
     if (nodeId == null) return;
     _listen(graph);
+    final graphUrls = LearningTrackSupport.imageUrlsFromGraph(graph, nodeId);
     final result = await showPackActionsSheet(
       context,
       nodeId: nodeId,
@@ -348,6 +360,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       pack: entry.pack,
       checkKind: entry.checkKind,
       hasPackImage: _hasPackImage,
+      hasTopicImage: graphUrls.$1 != null || graphUrls.$2 != null,
     );
     if (!mounted || result == null) return;
     if (result.deleted) {
@@ -360,6 +373,19 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         _hasPackImage = true;
         if (url != null && url.isNotEmpty) _cardImageUrl = url;
       });
+      return;
+    }
+    if (result.topicImageUpdated && !_hasPackImage) {
+      final refreshed = LearningTrackSupport.imageUrlsFromGraph(graph, nodeId);
+      final url = result.imageThumbUrl ??
+          result.imageUrl ??
+          refreshed.$2 ??
+          refreshed.$1;
+      if (url != null && url.isNotEmpty) {
+        setState(() => _cardImageUrl = url);
+      } else {
+        setState(() {});
+      }
     }
   }
 

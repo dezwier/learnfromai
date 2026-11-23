@@ -540,13 +540,20 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   }
 
   Future<void> _onPackLongPress(GraphController graph, _ReviewCard card) async {
+    final hasPack =
+        card.item.hasPackImage || card.item.pack.hasPackImage;
+    final topicThumb = card.item.imageThumbUrl?.trim();
+    final topicFull = card.item.imageUrl?.trim();
+    final hasTopic = (topicThumb != null && topicThumb.isNotEmpty) ||
+        (topicFull != null && topicFull.isNotEmpty);
     final result = await showPackActionsSheet(
       context,
       nodeId: card.item.nodeId,
       title: card.item.title,
       pack: card.item.pack,
       checkKind: card.checkKind,
-      hasPackImage: card.item.hasPackImage || card.item.pack.hasPackImage,
+      hasPackImage: hasPack,
+      hasTopicImage: hasTopic,
     );
     if (!mounted || result == null) return;
     if (result.deleted) {
@@ -579,7 +586,10 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
         next[_queueIndex] = _ReviewCard(item: updated, checkKind: card.checkKind);
         _queue = next;
       });
+      return;
     }
+    // Topic image: `_cardImageUrl` prefers atom, else item/graph topic URLs.
+    if (result.topicImageUpdated) setState(() {});
   }
 
   Widget _buildReview(BuildContext context, double bottomClearance) {

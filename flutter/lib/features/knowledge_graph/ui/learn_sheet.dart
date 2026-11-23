@@ -330,6 +330,7 @@ class _LearnSheetState extends State<LearnSheet> {
     GraphController graph,
     LearnDeckEntry entry,
   ) async {
+    final topicUrls = _topicImageUrls(graph);
     final result = await showPackActionsSheet(
       context,
       nodeId: widget.nodeId,
@@ -337,6 +338,7 @@ class _LearnSheetState extends State<LearnSheet> {
       pack: entry.pack,
       checkKind: entry.checkKind,
       hasPackImage: entry.pack.hasPackImage,
+      hasTopicImage: topicUrls.$1 != null || topicUrls.$2 != null,
     );
     if (!mounted || result == null) return;
     if (result.deleted) {
@@ -363,7 +365,10 @@ class _LearnSheetState extends State<LearnSheet> {
               row,
         ];
       });
+      return;
     }
+    // Topic image: `_effectiveImageUrl` already falls back to graph when no atom image.
+    if (result.topicImageUpdated) setState(() {});
   }
 
   @override
