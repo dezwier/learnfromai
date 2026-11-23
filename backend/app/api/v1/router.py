@@ -323,7 +323,11 @@ def post_run_cron(
     from app.features.ranking.cron_run import cron_queue_preview, cron_run_payload, run_daily_cron
 
     try:
-        run = run_daily_cron(session, queues=body.queues)
+        run = run_daily_cron(
+            session,
+            queues=body.queues,
+            watcher_user_id=user.id,
+        )
         session.commit()
         return {
             "run": cron_run_payload(session, run),

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/widgets/pulse_placeholder.dart';
 import '../auth/auth_controller.dart';
+import '../knowledge_graph/graph_controller.dart';
 import 'settings_cron_queue_table.dart';
 import 'settings_form_styles.dart';
 
@@ -94,6 +97,8 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
         await _load();
       }
       if (!mounted) return;
+      // Attach cron jobs to the same progress float as graph-triggered work.
+      unawaited(context.read<GraphController>().reattachJobs());
       final label = queue == 'neighbors' ? 'neighbor' : 'atom';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

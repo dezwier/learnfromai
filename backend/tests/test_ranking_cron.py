@@ -250,6 +250,12 @@ def test_admin_cron_preview_and_run_now(client, auth, session, user):
     assert "preview" in body
     assert isinstance(body["preview"]["neighbor_jobs"], list)
 
+    # Admin Run now attaches watchers so jobs show in the progress float.
+    watched = client.get("/api/v1/jobs?state=queued,running", headers=auth)
+    assert watched.status_code == 200
+    watched_jobs = watched.json()["jobs"]
+    assert any(j.get("title") == "CronNow" for j in watched_jobs)
+
     neighbors_only = client.post(
         "/api/v1/admin/cron-runs/run",
         headers=auth,

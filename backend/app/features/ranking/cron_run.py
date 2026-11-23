@@ -10,7 +10,7 @@ from app.core.config import Settings, get_settings
 from app.core.time import utcnow
 from app.features.content.models import DEFAULT_BAND, RECIPE_VERSION
 from app.features.knowledge_graph.preferences import min_per_bucket, neighborhood_counts
-from app.features.platform.jobs import enqueue
+from app.features.platform.jobs import enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.ranking.affinity import weights_snapshot
@@ -35,10 +35,13 @@ def run_daily_cron(
     *,
     settings: Settings | None = None,
     queues: list[str] | None = None,
+    watcher_user_id: UUID | None = None,
 ) -> CronRun:
     """Select top neighbor/learn jobs, enqueue them, return the CronRun row.
 
     ``queues`` may be ``["neighbors"]``, ``["learns"]``, or both (default).
+    When ``watcher_user_id`` is set (admin Run now), attach that user so jobs
+    appear in the progress float — scheduled cron leaves this None.
     """
     s = settings or get_settings()
     include_neighbors, include_learns = normalize_cron_queues(queues)
@@ -67,6 +70,13 @@ def run_daily_cron(
             ]
             for row in neighbor_rows:
                 job = _enqueue_neighbor(session, row=row, settings=s)
+                _watch_enqueued(
+                    session,
+                    job=job,
+                    watcher_user_id=watcher_user_id,
+                    node_id=row["node_id"],
+                    title=str(row["name"]),
+                )
                 neighbor_summary.append(
                     {
                         "node_id": str(row["node_id"]),
@@ -87,6 +97,13 @@ def run_daily_cron(
             ]
             for row in learn_rows:
                 job = _enqueue_learn(session, row=row)
+                _watch_enqueued(
+                    session,
+                    job=job,
+                    watcher_user_id=watcher_user_id,
+                    node_id=row["node_id"],
+                    title=str(row["name"]),
+                )
                 learn_summary.append(
                     {
                         "node_id": str(row["node_id"]),
@@ -271,6 +288,25 @@ def _enrich_job_rows(
                     pass
         out.append(item)
     return out
+
+
+def _watch_enqueued(
+    session: Session,
+    *,
+    job: GenerationJob | None,
+    watcher_user_id: UUID | None,
+    node_id: UUID,
+    title: str,
+) -> None:
+    if job is None or watcher_user_id is None:
+        return
+    ensure_watcher(
+        session,
+        job=job,
+        user_id=watcher_user_id,
+        node_id=node_id,
+        title=title,
+    )
 
 
 def _enqueue_neighbor(session: Session, *, row: dict, settings: Settings):

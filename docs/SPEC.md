@@ -41,7 +41,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/knowledge/nodes/{id}/jobs` → active `expand_neighborhood` / `expand_content` / `generate_image` / `generate_pack_image` jobs for that node (any user); caller is attached as a watcher. Different job types may run in parallel; the same type coalesces across users (atom image by `pack_index`).
 - `GET /api/v1/admin/cron-runs/latest` → last daily ranking cron summary (403 unless `is_admin`)
 - `GET /api/v1/admin/cron-runs/preview` → a-priori ranked neighbor/learn queues with affinity, counts, fill term, score, and live job result when a prior run enqueued that tile (403 unless `is_admin`)
-- `POST /api/v1/admin/cron-runs/run` → enqueue ranking cron now (`queues`: `neighbors` and/or `learns`; default both) and return `{run, preview}` (403 unless `is_admin`)
+- `POST /api/v1/admin/cron-runs/run` → enqueue ranking cron now (`queues`: `neighbors` and/or `learns`; default both; up to `CRON_*_JOBS_PER_DAY`, default 5 neighbor / 10 learn) and return `{run, preview}`; admin is attached as job watcher so jobs show in the progress float (403 unless `is_admin`)
 - `DELETE /api/v1/admin/knowledge/nodes/{id}/packs/{pack_index}` → delete atom bits + related events + Leitner rows (403 unless `is_admin`)
 - `DELETE /api/v1/admin/knowledge/nodes/{id}/packs/{pack_index}/bits/{kind}` → delete one quiz bit (+ events); last quiz returns 409 `CONFIRM_PACK_DELETE` unless `confirm_last_pack=true` (then deletes the atom)
 - `POST /api/v1/knowledge/focus` `{topic?}` or `{node_id?}` → graph (200); with `expand: true` and under budget → `{job_id}` (202)
