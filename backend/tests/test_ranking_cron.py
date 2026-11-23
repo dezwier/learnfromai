@@ -1,18 +1,14 @@
 """Ranking affinity, job scores, and daily cron enqueue."""
 
-from datetime import timedelta
-
 import pytest
 
 from app.core.config import get_settings
-from app.core.time import utcnow
 from app.features.content.models import KnowledgeBit
 from app.features.knowledge_graph.node_models import KnowledgeEdge, KnowledgeNode
 from app.features.platform.models import GenerationJob
 from app.features.ranking.affinity import recency, score_user_tiles
 from app.features.ranking.cron_run import cron_run_payload, run_daily_cron
 from app.features.ranking.job_scores import learn_job_scores, neighbor_job_scores
-from app.features.ranking.models import CronRun
 from app.features.user_events.service import record_events, record_focus
 
 
@@ -173,37 +169,6 @@ def test_cron_skips_complete_neighborhood(session, user):
 
     ranked = neighbor_job_scores(session, settings=settings)
     assert all(row["name"] != "Full" for row in ranked)
-
-
-def test_admin_cron_latest(client, auth, session, user):
-    response = client.get("/api/v1/admin/cron-runs/latest", headers=auth)
-    assert response.status_code == 403
-
-    user.is_admin = True
-    session.add(user)
-    session.commit()
-
-    # May already have runs from earlier tests in this session — still 200.
-    listed = client.get("/api/v1/admin/cron-runs/latest", headers=auth)
-    assert listed.status_code == 200
-    assert "run" in listed.json()
-
-    run = CronRun(
-        status="succeeded",
-        started_at=utcnow() + timedelta(minutes=1),
-        finished_at=utcnow() + timedelta(minutes=1),
-        neighbor_jobs=[{"node_id": "x", "name": "UniqueCronTile", "score": 1.0, "job_id": None}],
-        learn_jobs=[],
-        weights_snapshot={},
-    )
-    session.add(run)
-    session.commit()
-
-    latest = client.get("/api/v1/admin/cron-runs/latest", headers=auth)
-    assert latest.status_code == 200
-    body = latest.json()["run"]
-    assert body["status"] == "succeeded"
-    assert body["neighbor_jobs"][0]["name"] == "UniqueCronTile"
 
 
 def test_admin_cron_preview_and_run_now(client, auth, session, user):

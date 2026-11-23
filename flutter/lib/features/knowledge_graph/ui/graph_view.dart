@@ -620,7 +620,6 @@ class _FittingLabel extends StatelessWidget {
     required this.minFontSize,
     required this.maxFontSize,
     this.hyphenateWords = false,
-    this.align = Alignment.center,
   });
 
   final String text;
@@ -629,7 +628,6 @@ class _FittingLabel extends StatelessWidget {
   final double minFontSize;
   final double maxFontSize;
   final bool hyphenateWords;
-  final Alignment align;
 
   @override
   Widget build(BuildContext context) {
@@ -656,7 +654,7 @@ class _FittingLabel extends StatelessWidget {
         );
         return SizedBox.expand(
           child: Align(
-            alignment: align,
+            alignment: Alignment.center,
             child: Text(
               laidOut.text,
               textAlign: TextAlign.center,

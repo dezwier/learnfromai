@@ -8,7 +8,6 @@ from app.core.db import engine
 from app.core.errors import AppError
 from app.core.time import utcnow
 from app.features.content.generate import expand_content
-from app.features.graph_extend.models import ExtendRequest
 from app.features.knowledge_graph.neighborhood import expand_neighborhood
 from app.features.node_image.generate import generate_image
 from app.features.node_image.pack_generate import generate_pack_image
@@ -23,7 +22,6 @@ def handle(job_id: UUID, token: UUID) -> None:
             return
         dispatch = {
             "noop": _noop,
-            "expand_graph": _expand_graph,
             "expand_neighborhood": _expand_neighborhood,
             "expand_content": _expand_content,
             "generate_image": _generate_image,
@@ -36,13 +34,11 @@ def handle(job_id: UUID, token: UUID) -> None:
             result = fn(session, job)
         except Exception as exc:
             session.rollback()
-            code = exc.code if isinstance(exc, AppError) else "GENERATION_UNAVAILABLE"
             if isinstance(exc, AppError) and exc.details.get("terminal"):
                 fresh = session.get(GenerationJob, job_id)
                 if fresh is not None and fresh.attempts < fresh.max_attempts:
                     fresh.attempts = fresh.max_attempts
                     session.commit()
-            _fail_request(job_id, code)
             raise
         finish(session, job_id, token, result)
 
@@ -56,11 +52,6 @@ def _noop(session: Session, job: GenerationJob) -> dict:
         session.add(beat)
     session.commit()
     return {"ok": True, "payload": job.payload}
-
-
-def _expand_graph(session: Session, job: GenerationJob) -> dict:
-    _ = (session, job)
-    raise AppError("GONE", "Graph generation has been removed", 410, {"terminal": True})
 
 
 def _expand_neighborhood(session: Session, job: GenerationJob) -> dict:
@@ -77,22 +68,3 @@ def _generate_image(session: Session, job: GenerationJob) -> dict:
 
 def _generate_pack_image(session: Session, job: GenerationJob) -> dict:
     return generate_pack_image(session, job)
-
-
-def _fail_request(job_id: UUID, code: str) -> None:
-    with Session(engine, expire_on_commit=False) as session:
-        job = session.get(GenerationJob, job_id)
-        if job is None or job.type != "expand_graph":
-            return
-        if job.attempts < job.max_attempts:
-            return
-        request_id = (job.payload or {}).get("request_id")
-        if not request_id:
-            return
-        request = session.get(ExtendRequest, UUID(str(request_id)))
-        if request is None or request.status in {"succeeded", "failed"}:
-            return
-        request.status = "failed"
-        request.error_code = code
-        request.finished_at = utcnow()
-        session.commit()

@@ -47,7 +47,6 @@ class _GraphScreenState extends State<GraphScreen>
   var _testingOpen = false;
   var _learnOpen = false;
   var _jobsPanelOpen = false;
-  var _imageUploading = false;
   PlacedNode? _highlighted;
   GraphLayout? _layout;
   GraphLayout? _settledLayout;
@@ -57,7 +56,6 @@ class _GraphScreenState extends State<GraphScreen>
   /// Camera eases to canvas-center in lockstep with tile morph (not after).
   Matrix4? _morphCameraBegin;
   Matrix4? _morphCameraEnd;
-  Size _viewport = Size.zero;
   /// Cached completeness for highlighted nodes: true = under the user's budget.
   final Map<String, bool> _incompleteByNode = {};
   var _handlingJobCompletion = false;
@@ -253,21 +251,6 @@ class _GraphScreenState extends State<GraphScreen>
       ..translateByDouble(screenPoint.dx, screenPoint.dy, 0, 1)
       ..scaleByDouble(scale, scale, scale, 1)
       ..translateByDouble(-scenePoint.dx, -scenePoint.dy, 0, 1);
-  }
-
-  Future<void> _animatePanTo(Offset scenePoint, Size viewport) async {
-    if (viewport.isEmpty) return;
-    final scale = _transform.value.getMaxScaleOnAxis();
-    final begin = _transform.value.clone();
-    final end = _matrixCentering(scenePoint, viewport, scale: scale);
-    _panController.stop();
-    _panAnimation = Matrix4Tween(begin: begin, end: end).animate(
-      CurvedAnimation(parent: _panController, curve: Curves.easeOutCubic),
-    );
-    await _panController.forward(from: 0);
-    if (!mounted) return;
-    _panTargetId = null;
-    _panAnimation = null;
   }
 
   void _selectNode(PlacedNode node) {
@@ -816,30 +799,25 @@ class _GraphScreenState extends State<GraphScreen>
   Future<void> _uploadTopicImage(GraphController graph, PlacedNode node) async {
     final picked = await pickImageBytes();
     if (picked == null || !mounted) return;
-    setState(() => _imageUploading = true);
-    try {
-      final ok = await graph.uploadImage(
-        node.id,
-        bytes: picked.bytes,
-        filename: picked.filename,
-        contentType: picked.mimeType,
-      );
-      if (!mounted) return;
-      if (!ok) {
-        final message = graph.error ?? 'Image upload failed';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-        return;
-      }
-      final urls = _imageUrlsFromGraph(graph, node.id);
-      setState(
-        () => _highlighted = node.copyWith(
-          imageUrl: urls.$1,
-          imageThumbUrl: urls.$2,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _imageUploading = false);
+    final ok = await graph.uploadImage(
+      node.id,
+      bytes: picked.bytes,
+      filename: picked.filename,
+      contentType: picked.mimeType,
+    );
+    if (!mounted) return;
+    if (!ok) {
+      final message = graph.error ?? 'Image upload failed';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      return;
     }
+    final urls = _imageUrlsFromGraph(graph, node.id);
+    setState(
+      () => _highlighted = node.copyWith(
+        imageUrl: urls.$1,
+        imageThumbUrl: urls.$2,
+      ),
+    );
   }
 
   Future<void> _confirmDeleteHighlighted(GraphController graph) async {
@@ -1317,7 +1295,6 @@ class _GraphScreenState extends State<GraphScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        _viewport = viewport;
         final nextLayout = _layoutFor(graph, viewport);
         final focusId = graph.focusId;
         // First layout: snap the camera in this build so we never paint one frame of

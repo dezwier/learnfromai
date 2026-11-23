@@ -39,7 +39,6 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/me/reviews/due?limit=10` → `{items: [{node_id, title, pack_index, leitner_bin, pack, image_url?, image_thumb_url?, pack_image_url?, pack_image_thumb_url?}], due_count}`
 - `POST /api/v1/me/reviews/submit` `{node_id, pack_index, correct, check_kind, choice_index?|answer_bool?|answer_text?}` → `{leitner_bin, next_review_at, graduated, updated}` (also appends a check event)
 - `GET /api/v1/knowledge/nodes/{id}/jobs` → active `expand_neighborhood` / `expand_content` / `generate_image` / `generate_pack_image` jobs for that node (any user); caller is attached as a watcher. Different job types may run in parallel; the same type coalesces across users (atom image by `pack_index`).
-- `GET /api/v1/admin/cron-runs/latest` → last daily ranking cron summary (403 unless `is_admin`)
 - `GET /api/v1/admin/cron-runs/preview` → a-priori ranked neighbor/learn queues with affinity, counts, fill term, score, and live job result when a prior run enqueued that tile (403 unless `is_admin`)
 - `POST /api/v1/admin/cron-runs/run` → enqueue ranking cron now (`queues`: `neighbors` and/or `learns`; default both; up to `CRON_*_JOBS_PER_DAY`, default 5 neighbor / 10 learn) and return `{run, preview}`; admin is attached as job watcher so jobs show in the progress float (403 unless `is_admin`)
 - `DELETE /api/v1/admin/knowledge/nodes/{id}/packs/{pack_index}` → delete atom bits + related events + Leitner rows (403 unless `is_admin`)
@@ -57,11 +56,8 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `PUT /api/v1/knowledge/nodes/{node_id}/packs/{pack_index}/image` multipart `file` → metadata (200)
 - `GET /api/v1/knowledge/nodes/{node_id}/packs/{pack_index}/image/file?variant=full|thumb` → PNG/JPEG bytes (auth)
 - `DELETE /api/v1/knowledge/nodes/{node_id}` → delete topic + edges + atoms (+ pack images) + user events/reviews + job watchers for that node
-- `GET /api/v1/knowledge/graph` resume latest neighborhood only (no expand)
 - `GET /api/v1/knowledge/graph/{focus_id}` existing neighborhood only (no expand)
 - `GET /api/v1/jobs/{job_id}`
-- `GET /api/v1/workspace/graph`
-- `POST /api/v1/graph/extend` (410)
 - `GET /health`
 
 Graph payloads use UUID ids. Node `kind` is `parent`, `sibling`, `child`, `related`, `extended` (neighbors of neighbors), or `focus`. Edge `type` uses the stored relation names. The canvas always shows every direct neighbor, then tops up with unique neighbors-of-neighbors (≤14) beside the direct they hang off toward 30 tiles including focus (grows past 30 only when directs alone require it). Only the focus node includes `description` and full `image_url`; every node may include `image_thumb_url` for tiles.

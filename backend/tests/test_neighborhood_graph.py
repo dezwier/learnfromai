@@ -155,7 +155,7 @@ def test_focus_without_expand_does_not_enqueue(client, auth, session):
     assert body["focus_node_id"]
     assert session.exec(select(func.count()).select_from(GenerationJob)).one() == 0
 
-    resumed = client.get("/api/v1/knowledge/graph", headers=auth)
+    resumed = client.post("/api/v1/knowledge/focus", headers=auth, json={})
     assert resumed.status_code == 200
     assert resumed.json()["focus_node_id"] == body["focus_node_id"]
     assert resumed.json().get("job_id") is None
@@ -168,7 +168,7 @@ def test_focus_without_expand_does_not_enqueue(client, auth, session):
 
 
 def test_resume_empty_and_latest(client, auth, other_auth, session):
-    empty = client.get("/api/v1/knowledge/graph", headers=auth)
+    empty = client.post("/api/v1/knowledge/focus", headers=auth, json={})
     assert empty.status_code == 200
     assert empty.json()["nodes"] == []
 
@@ -176,11 +176,11 @@ def test_resume_empty_and_latest(client, auth, other_auth, session):
     focus_id = queued.json()["focus_node_id"]
     _run_queued(session)
 
-    resumed = client.get("/api/v1/knowledge/graph", headers=auth)
+    resumed = client.post("/api/v1/knowledge/focus", headers=auth, json={})
     assert resumed.status_code == 200
     assert resumed.json()["focus_node_id"] == focus_id
 
-    other = client.get("/api/v1/knowledge/graph", headers=other_auth)
+    other = client.post("/api/v1/knowledge/focus", headers=other_auth, json={})
     assert other.status_code == 200
     # No personal history → resume lands on a random shared topic (not an empty canvas).
     assert other.json()["focus_node_id"] is not None

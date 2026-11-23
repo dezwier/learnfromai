@@ -30,8 +30,6 @@ from app.features.knowledge_graph.preferences import (
     neighborhood_counts,
 )
 from app.features.knowledge_graph.search import search_nodes
-from app.features.knowledge_graph.service import remove_concept, remove_request
-from app.features.knowledge_graph.workspace import workspace_graph
 from app.features.node_image.pack_service import (
     image_bytes_for_pack,
     image_for_pack,
@@ -47,7 +45,6 @@ from app.features.node_image.upload import upload_node_image
 from app.features.platform.jobs import list_and_watch_node_jobs, list_watched_jobs, user_watches_job
 from app.features.platform.models import GenerationJob
 from app.features.knowledge_graph.node_models import KnowledgeNode
-from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.learning.service import learning_next
 from app.features.reviews.service import distribution_for_user, due_reviews, submit_review
 from app.features.user_events.affinity import topic_affinity
@@ -58,11 +55,6 @@ router = APIRouter()
 
 class FirebaseBody(BaseModel):
     id_token: str
-
-
-class ExtendBody(BaseModel):
-    instruction: str = Field(min_length=1, max_length=4000)
-    parent_concept_id: UUID | None = None
 
 
 class FocusBody(BaseModel):
@@ -277,21 +269,6 @@ def post_me_reviews_submit(
     return result
 
 
-@router.get("/admin/cron-runs/latest")
-def get_latest_cron_run(
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-):
-    if not user.is_admin:
-        raise forbidden()
-    from app.features.ranking.cron_run import cron_run_payload, latest_cron_run
-
-    run = latest_cron_run(session)
-    if run is None:
-        return {"run": None}
-    return {"run": cron_run_payload(session, run)}
-
-
 @router.get("/admin/cron-runs/preview")
 def get_cron_queue_preview(
     user: User = Depends(get_current_user),
@@ -422,12 +399,6 @@ def get_job(job_id: UUID, user: User = Depends(get_current_user), session: Sessi
         "error_message": job.error_message,
         "attempts": job.attempts,
     }
-
-
-@router.get("/workspace/graph")
-def workspace(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    _ = user
-    return workspace_graph(session)
 
 
 @router.post("/knowledge/focus")
@@ -696,23 +667,6 @@ def delete_knowledge_node_route(
     return payload
 
 
-@router.get("/knowledge/graph")
-def knowledge_graph(
-    response: Response,
-    topic: str | None = None,
-    node_id: UUID | None = None,
-    focus_qid: str | None = None,
-    category_id: str | None = None,
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-):
-    resolved = node_id or parse_uuid(focus_qid) or parse_uuid(category_id)
-    payload, status = focus_or_enqueue(session, user=user, topic=topic, node_id=resolved)
-    session.commit()
-    response.status_code = status
-    return payload
-
-
 @router.get("/knowledge/graph/{focus_id}")
 def knowledge_graph_focus(
     focus_id: UUID,
@@ -722,32 +676,6 @@ def knowledge_graph_focus(
     payload = graph_for_focus(session, user=user, focus_id=focus_id)
     session.commit()
     return payload
-
-
-@router.post("/graph/extend", status_code=410)
-def extend(body: ExtendBody, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    _ = (body, user, session)
-    raise AppError(
-        "GONE",
-        "Use topic search. Neighborhood generation runs as a background job.",
-        410,
-    )
-
-
-@router.delete("/graph/extend/{request_id}")
-def delete_extend(request_id: UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    _ = user
-    removed = remove_request(session, request_id)
-    session.commit()
-    return removed
-
-
-@router.delete("/graph/nodes/{concept_id}")
-def delete_node(concept_id: UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    _ = user
-    removed = remove_concept(session, concept_id)
-    session.commit()
-    return removed
 
 
 def _user_payload(user: User) -> dict:

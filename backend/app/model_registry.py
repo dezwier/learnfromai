@@ -2,9 +2,6 @@
 
 from app.features.accounts.models import User
 from app.features.content.models import KnowledgeBit
-from app.features.graph_extend.models import ExtendRequest
-from app.features.knowledge_graph.category_models import KnowledgeCategory, KnowledgeCategoryEdge
-from app.features.knowledge_graph.models import Concept, Edge, Graph
 from app.features.knowledge_graph.node_models import (
     KnowledgeEdge,
     KnowledgeNode,
@@ -30,12 +27,6 @@ def register_models() -> None:
         GenerationJobWatcher,
         LlmUsage,
         WorkerHeartbeat,
-        Graph,
-        Concept,
-        Edge,
-        ExtendRequest,
-        KnowledgeCategory,
-        KnowledgeCategoryEdge,
         KnowledgeNode,
         KnowledgeEdge,
         KnowledgeRequest,

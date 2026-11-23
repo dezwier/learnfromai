@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 class QuizFeedbackSounds {
   QuizFeedbackSounds._();
 
-  static AudioPlayer? _player;
   static Future<AudioPlayer>? _init;
 
   static const _correctAsset = 'sounds/quiz_correct.wav';
@@ -66,7 +65,6 @@ class QuizFeedbackSounds {
         ),
       ),
     );
-    _player = player;
     return player;
   }
 
@@ -88,7 +86,6 @@ class QuizFeedbackSounds {
       await player.play(AssetSource(asset), volume: 1.0);
     } catch (err, stack) {
       _init = null;
-      _player = null;
       debugPrint('QuizFeedbackSounds: $err\n$stack');
     }
   }

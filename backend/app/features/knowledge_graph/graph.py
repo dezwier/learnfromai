@@ -17,7 +17,6 @@ from app.features.knowledge_graph.node_models import KnowledgeNode, KnowledgeReq
 from app.features.knowledge_graph.preferences import neighborhood_counts
 from app.features.platform.jobs import active_job_for_node, enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
-from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.user_events.service import record_focus
 
 
@@ -182,22 +181,3 @@ def _enqueue_expand(
     )
     return job
 
-
-# Compatibility for older imports/tests.
-def load_knowledge_graph(session: Session, **kwargs):
-    user = kwargs.get("user")
-    if user is None:
-        user_id = kwargs.get("user_id")
-        user = session.get(User, user_id) if user_id else None
-    if user is None:
-        from app.core.errors import AppError
-
-        raise AppError("UNAUTHORIZED", "User required", 401)
-    node_id = kwargs.get("node_id") or parse_uuid(kwargs.get("focus_qid"))
-    payload, _status = focus_or_enqueue(
-        session,
-        user=user,
-        topic=kwargs.get("topic"),
-        node_id=node_id,
-    )
-    return payload
