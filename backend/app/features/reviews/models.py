@@ -10,10 +10,12 @@ from sqlmodel import Field, SQLModel
 
 from app.core.time import utcnow
 
-GRADUATION_BIN = 8
+GRADUATION_BIN = 7
 # Hours until next review after landing in bins 1..7.
-LEITNER_INTERVALS_HOURS = (3, 12, 24, 48, 96, 168, 336)
-LEITNER_BIN_8_HOURS = 672  # 4 weeks; each higher bin adds (672 - 336) = 336h
+# 1d, 2d, 4d, 1w, 2w, 3w, 4w
+LEITNER_INTERVALS_HOURS = (24, 48, 96, 168, 336, 504, 672)
+# Bin 8 = 6 weeks; each higher bin adds 2 weeks (672→1008 step).
+LEITNER_BIN_8_HOURS = 1008
 
 
 class UserPackReview(SQLModel, table=True):

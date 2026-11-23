@@ -15,8 +15,8 @@ from app.features.reviews.models import (
 def interval_hours_for_bin(bin_number: int) -> int:
     """Review interval hours by resulting bin (bin <= 0 treated as 1).
 
-    Bins 1..7 use fixed hours. Bin 8 uses LEITNER_BIN_8_HOURS; each higher bin
-    adds the gap between bin 7 and bin 8.
+    Bins 1..7 use fixed hours. Bin 8 uses LEITNER_BIN_8_HOURS (6w); each higher
+    bin adds the gap between bin 7 and bin 8 (+2w).
     """
     intervals = list(LEITNER_INTERVALS_HOURS)
     if bin_number <= 1:

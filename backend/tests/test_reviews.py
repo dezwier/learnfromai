@@ -72,11 +72,16 @@ def _complete_pack(client, auth, node_id, *, pack_index: int = 1):
 
 
 def test_interval_hours_for_bin():
-    assert interval_hours_for_bin(1) == 3
-    assert interval_hours_for_bin(7) == 336
-    assert interval_hours_for_bin(8) == 672
-    assert interval_hours_for_bin(9) == 1008
-    assert interval_hours_for_bin(10) == 1344
+    assert interval_hours_for_bin(1) == 24
+    assert interval_hours_for_bin(2) == 48
+    assert interval_hours_for_bin(3) == 96
+    assert interval_hours_for_bin(4) == 168
+    assert interval_hours_for_bin(5) == 336
+    assert interval_hours_for_bin(6) == 504
+    assert interval_hours_for_bin(7) == 672
+    assert interval_hours_for_bin(8) == 1008
+    assert interval_hours_for_bin(9) == 1344
+    assert interval_hours_for_bin(10) == 1680
 
 
 def test_apply_review_result_moves():
@@ -99,22 +104,22 @@ def test_apply_review_result_moves():
     assert row.leitner_bin == 1
 
 
-def test_apply_review_result_graduates_at_8():
+def test_apply_review_result_graduates_at_7():
     now = utcnow()
     row = UserPackReview(
         user_id=uuid4(),
         node_id=uuid4(),
         pack_index=1,
-        leitner_bin=7,
+        leitner_bin=6,
         next_review_at=now,
     )
     assert apply_review_result(row, correct=True, at=now) is True
-    assert row.leitner_bin == 8
+    assert row.leitner_bin == 7
     assert row.graduated_at is not None
 
     due_at = row.next_review_at
     assert apply_review_result(row, correct=True, at=due_at) is True
-    assert row.leitner_bin == 9
+    assert row.leitner_bin == 8
     assert row.graduated_at is not None
 
 
@@ -137,7 +142,7 @@ def test_distribution_and_due_after_making_due(client, auth, session):
     dist = client.get("/api/v1/me/reviews/distribution", headers=auth)
     assert dist.status_code == 200
     body = dist.json()
-    assert body["graduation_bin"] == 8
+    assert body["graduation_bin"] == 7
     assert body["due_count"] == 0
     assert body["distribution"][0]["bin"] == 1
     assert body["distribution"][0]["count"] == 1

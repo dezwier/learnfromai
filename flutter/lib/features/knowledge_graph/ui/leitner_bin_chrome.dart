@@ -26,9 +26,10 @@ class LeitnerBinChrome {
   }
 
   static LeitnerBinGroup groupForBin(int bin, {required int graduationBin}) {
+    // 1–2 learning, 3–4 familiar, 5–6 strong, graduationBin+ (7+) mastered.
     if (bin >= graduationBin) return LeitnerBinGroup.mastered;
-    if (bin <= 3) return LeitnerBinGroup.learning;
-    if (bin <= 5) return LeitnerBinGroup.familiar;
+    if (bin <= 2) return LeitnerBinGroup.learning;
+    if (bin <= 4) return LeitnerBinGroup.familiar;
     return LeitnerBinGroup.strong;
   }
 

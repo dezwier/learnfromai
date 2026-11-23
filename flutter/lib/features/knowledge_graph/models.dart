@@ -391,7 +391,7 @@ class LeitnerDistribution {
     final rows = raw['distribution'];
     final intervals = raw['intervals_hours'];
     return LeitnerDistribution(
-      graduationBin: (raw['graduation_bin'] as num?)?.toInt() ?? 8,
+      graduationBin: (raw['graduation_bin'] as num?)?.toInt() ?? 7,
       dueCount: (raw['due_count'] as num?)?.toInt() ?? 0,
       firstNextReviewAt: raw['first_next_review_at']?.toString(),
       intervalsHours: [
