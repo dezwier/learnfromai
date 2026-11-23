@@ -18,9 +18,12 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
   static const _placeholderHeight = 160.0;
 
   var _loading = true;
-  var _running = false;
+  /// Which queue is currently enqueueing: `neighbors`, `learns`, or null.
+  String? _runningQueue;
   String? _error;
   _CronPreview? _preview;
+
+  bool get _busy => _loading || _runningQueue != null;
 
   @override
   void initState() {
@@ -52,44 +55,80 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
     }
   }
 
-  Future<void> _runNow() async {
-    if (_running) return;
+  Future<void> _runQueue(String queue) async {
+    if (_runningQueue != null) return;
     final api = context.read<AuthController>().api;
     setState(() {
-      _running = true;
+      _runningQueue = queue;
       _error = null;
     });
     try {
       final raw = Map<String, dynamic>.from(
-        await api.post('/admin/cron-runs/run', body: {}) as Map,
+        await api.post(
+          '/admin/cron-runs/run',
+          body: {'queues': [queue]},
+        ) as Map,
       );
       final previewRaw = raw['preview'];
       final preview = previewRaw is Map
           ? _CronPreview.fromJson(Map<String, dynamic>.from(previewRaw))
           : null;
+      final runRaw = raw['run'];
+      final enqueued = runRaw is Map
+          ? (queue == 'neighbors'
+                ? (runRaw['neighbor_jobs'] is List
+                    ? (runRaw['neighbor_jobs'] as List).length
+                    : 0)
+                : (runRaw['learn_jobs'] is List
+                    ? (runRaw['learn_jobs'] as List).length
+                    : 0))
+          : 0;
       if (!mounted) return;
       if (preview != null) {
         setState(() {
           _preview = preview;
-          _running = false;
+          _runningQueue = null;
         });
       } else {
-        setState(() => _running = false);
+        setState(() => _runningQueue = null);
         await _load();
       }
       if (!mounted) return;
-      final n = preview?.neighborJobs.length ?? 0;
-      final p = preview?.learnJobs.length ?? 0;
+      final label = queue == 'neighbors' ? 'neighbor' : 'atom';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enqueued $n neighbor · $p atom jobs.')),
+        SnackBar(
+          content: Text(
+            enqueued == 1
+                ? 'Enqueued 1 $label job.'
+                : 'Enqueued $enqueued $label jobs.',
+          ),
+        ),
       );
     } catch (exc) {
       if (!mounted) return;
       setState(() {
         _error = exc.toString();
-        _running = false;
+        _runningQueue = null;
       });
     }
+  }
+
+  Widget _runButton(String queue) {
+    final running = _runningQueue == queue;
+    return FilledButton.tonal(
+      onPressed: _busy ? null : () => _runQueue(queue),
+      style: FilledButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+      ),
+      child: running
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Text('Run now'),
+    );
   }
 
   @override
@@ -109,20 +148,9 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
             ),
             IconButton(
               tooltip: 'Refresh',
-              onPressed: (_loading || _running) ? null : _load,
+              onPressed: _busy ? null : _load,
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.refresh_rounded, size: 20),
-            ),
-            const SizedBox(width: 4),
-            FilledButton.tonal(
-              onPressed: (_loading || _running) ? null : _runNow,
-              child: _running
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Run now'),
             ),
           ],
         ),
@@ -153,7 +181,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
             _error!,
             style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
           )
-        else if (_preview == null || _preview!.isEmpty)
+        else if (_preview == null)
           Text('Nothing ranked yet.', style: theme.textTheme.bodyMedium)
         else ...[
           CronQueueTable(
@@ -162,6 +190,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
                 'Top ${_preview!.limits.neighborJobsPerDay} · target ${_preview!.limits.desiredNeighbors}',
             columns: const ['Topic', 'Aff', 'N', 'Fill', 'Score', 'Result'],
             flex: const [3, 1, 1, 1, 1, 2],
+            trailing: _runButton('neighbors'),
             rows: [
               for (final job in _preview!.neighborJobs)
                 [
@@ -181,6 +210,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
                 'Top ${_preview!.limits.learnJobsPerDay} · target ${_preview!.limits.desiredPacks}',
             columns: const ['Topic', 'Aff', 'At', 'Fill', 'Score', 'Result'],
             flex: const [3, 1, 1, 1, 1, 2],
+            trailing: _runButton('learns'),
             rows: [
               for (final job in _preview!.learnJobs)
                 [
@@ -211,8 +241,6 @@ class _CronPreview {
   final List<_CronQueueRow> learnJobs;
   final _CronLimits limits;
   final String? latestRunLabel;
-
-  bool get isEmpty => neighborJobs.isEmpty && learnJobs.isEmpty;
 
   factory _CronPreview.fromJson(Map<String, dynamic> raw) {
     final limitsRaw = raw['limits'];

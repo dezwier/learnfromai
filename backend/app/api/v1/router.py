@@ -305,18 +305,25 @@ def get_cron_queue_preview(
     return cron_queue_preview(session)
 
 
+class CronRunBody(BaseModel):
+    """Optional queue filter: ``neighbors``, ``learns`` (alias ``atoms``), or both."""
+
+    queues: list[str] | None = None
+
+
 @router.post("/admin/cron-runs/run")
 def post_run_cron(
+    body: CronRunBody = CronRunBody(),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """Admin: enqueue the daily ranking cron immediately (same as the scheduled job)."""
+    """Admin: enqueue ranking cron queues now (neighbors and/or learns)."""
     if not user.is_admin:
         raise forbidden()
     from app.features.ranking.cron_run import cron_queue_preview, cron_run_payload, run_daily_cron
 
     try:
-        run = run_daily_cron(session)
+        run = run_daily_cron(session, queues=body.queues)
         session.commit()
         return {
             "run": cron_run_payload(session, run),

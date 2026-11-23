@@ -250,6 +250,30 @@ def test_admin_cron_preview_and_run_now(client, auth, session, user):
     assert "preview" in body
     assert isinstance(body["preview"]["neighbor_jobs"], list)
 
+    neighbors_only = client.post(
+        "/api/v1/admin/cron-runs/run",
+        headers=auth,
+        json={"queues": ["neighbors"]},
+    )
+    assert neighbors_only.status_code == 200
+    neighbors_body = neighbors_only.json()["run"]
+    assert neighbors_body["status"] == "succeeded"
+    assert isinstance(neighbors_body["neighbor_jobs"], list)
+    assert neighbors_body["learn_jobs"] == []
+    assert neighbors_body["weights_snapshot"].get("queues") == ["neighbors"]
+
+    learns_only = client.post(
+        "/api/v1/admin/cron-runs/run",
+        headers=auth,
+        json={"queues": ["learns"]},
+    )
+    assert learns_only.status_code == 200
+    learns_body = learns_only.json()["run"]
+    assert learns_body["status"] == "succeeded"
+    assert learns_body["neighbor_jobs"] == []
+    assert isinstance(learns_body["learn_jobs"], list)
+    assert learns_body["weights_snapshot"].get("queues") == ["learns"]
+
 
 def test_me_includes_is_admin(client, auth, user, session):
     response = client.get("/api/v1/me", headers=auth)

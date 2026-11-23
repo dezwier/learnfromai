@@ -17,6 +17,7 @@ class CronQueueTable extends StatelessWidget {
     required this.columns,
     required this.flex,
     required this.rows,
+    this.trailing,
   });
 
   final String title;
@@ -24,6 +25,7 @@ class CronQueueTable extends StatelessWidget {
   final List<String> columns;
   final List<int> flex;
   final List<List<String>> rows;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +55,10 @@ class CronQueueTable extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (trailing != null) ...[
+              const SizedBox(width: 8),
+              trailing!,
+            ],
           ],
         ),
         const SizedBox(height: 8),

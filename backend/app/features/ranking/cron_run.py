@@ -18,56 +18,89 @@ from app.features.ranking.job_scores import learn_job_scores, neighbor_job_score
 from app.features.ranking.models import CronRun
 
 
-def run_daily_cron(session: Session, *, settings: Settings | None = None) -> CronRun:
-    """Select top neighbor/learn jobs, enqueue them, return the CronRun row."""
+def normalize_cron_queues(queues: list[str] | None) -> tuple[bool, bool]:
+    """Return (include_neighbors, include_learns). Empty/None → both."""
+    if not queues:
+        return True, True
+    known = {str(q).strip().lower() for q in queues if str(q).strip()}
+    include_neighbors = "neighbors" in known
+    include_learns = "learns" in known or "atoms" in known
+    if not include_neighbors and not include_learns:
+        return True, True
+    return include_neighbors, include_learns
+
+
+def run_daily_cron(
+    session: Session,
+    *,
+    settings: Settings | None = None,
+    queues: list[str] | None = None,
+) -> CronRun:
+    """Select top neighbor/learn jobs, enqueue them, return the CronRun row.
+
+    ``queues`` may be ``["neighbors"]``, ``["learns"]``, or both (default).
+    """
     s = settings or get_settings()
+    include_neighbors, include_learns = normalize_cron_queues(queues)
+    snapshot = dict(weights_snapshot(s))
+    selected: list[str] = []
+    if include_neighbors:
+        selected.append("neighbors")
+    if include_learns:
+        selected.append("learns")
+    snapshot["queues"] = selected
     run = CronRun(
         status="running",
         started_at=utcnow(),
         neighbor_jobs=[],
         learn_jobs=[],
-        weights_snapshot=weights_snapshot(s),
+        weights_snapshot=snapshot,
     )
     session.add(run)
     session.flush()
 
     try:
-        neighbor_rows = neighbor_job_scores(session, settings=s)[: int(s.cron_neighbor_jobs_per_day)]
-        learn_rows = learn_job_scores(session, settings=s)[: int(s.cron_learn_jobs_per_day)]
-
         neighbor_summary: list[dict] = []
-        for row in neighbor_rows:
-            job = _enqueue_neighbor(session, row=row, settings=s)
-            neighbor_summary.append(
-                {
-                    "node_id": str(row["node_id"]),
-                    "name": row["name"],
-                    "tile_affinity": round(float(row["tile_affinity"]), 4),
-                    "score": round(float(row["score"]), 4),
-                    "neighbor_count": row["neighbor_count"],
-                    "fill_factor": round(float(row.get("fill_factor") or 0), 4),
-                    "fill_term": round(float(row.get("fill_term") or 0), 4),
-                    "job_id": str(job.id) if job is not None else None,
-                }
-            )
+        if include_neighbors:
+            neighbor_rows = neighbor_job_scores(session, settings=s)[
+                : int(s.cron_neighbor_jobs_per_day)
+            ]
+            for row in neighbor_rows:
+                job = _enqueue_neighbor(session, row=row, settings=s)
+                neighbor_summary.append(
+                    {
+                        "node_id": str(row["node_id"]),
+                        "name": row["name"],
+                        "tile_affinity": round(float(row["tile_affinity"]), 4),
+                        "score": round(float(row["score"]), 4),
+                        "neighbor_count": row["neighbor_count"],
+                        "fill_factor": round(float(row.get("fill_factor") or 0), 4),
+                        "fill_term": round(float(row.get("fill_term") or 0), 4),
+                        "job_id": str(job.id) if job is not None else None,
+                    }
+                )
 
         learn_summary: list[dict] = []
-        for row in learn_rows:
-            job = _enqueue_learn(session, row=row)
-            learn_summary.append(
-                {
-                    "node_id": str(row["node_id"]),
-                    "name": row["name"],
-                    "tile_affinity": round(float(row["tile_affinity"]), 4),
-                    "score": round(float(row["score"]), 4),
-                    "pack_index": row["pack_index"],
-                    "pack_count": row["pack_count"],
-                    "neighbor_count": row.get("neighbor_count"),
-                    "fill_factor": round(float(row.get("fill_factor") or 0), 4),
-                    "fill_term": round(float(row.get("fill_term") or 0), 4),
-                    "job_id": str(job.id) if job is not None else None,
-                }
-            )
+        if include_learns:
+            learn_rows = learn_job_scores(session, settings=s)[
+                : int(s.cron_learn_jobs_per_day)
+            ]
+            for row in learn_rows:
+                job = _enqueue_learn(session, row=row)
+                learn_summary.append(
+                    {
+                        "node_id": str(row["node_id"]),
+                        "name": row["name"],
+                        "tile_affinity": round(float(row["tile_affinity"]), 4),
+                        "score": round(float(row["score"]), 4),
+                        "pack_index": row["pack_index"],
+                        "pack_count": row["pack_count"],
+                        "neighbor_count": row.get("neighbor_count"),
+                        "fill_factor": round(float(row.get("fill_factor") or 0), 4),
+                        "fill_term": round(float(row.get("fill_term") or 0), 4),
+                        "job_id": str(job.id) if job is not None else None,
+                    }
+                )
 
         run.neighbor_jobs = neighbor_summary
         run.learn_jobs = learn_summary
@@ -114,16 +147,10 @@ def cron_queue_preview(session: Session, *, settings: Settings | None = None) ->
     neighbor_rows = neighbor_job_scores(session, settings=s)[:neighbor_limit]
     learn_rows = learn_job_scores(session, settings=s)[:learn_limit]
     latest = latest_cron_run(session)
-    latest_neighbor = {
-        str(row.get("node_id")): row
-        for row in (latest.neighbor_jobs if latest else []) or []
-        if isinstance(row, dict) and row.get("node_id")
-    }
-    latest_learn = {
-        str(row.get("node_id")): row
-        for row in (latest.learn_jobs if latest else []) or []
-        if isinstance(row, dict) and row.get("node_id")
-    }
+    # Prefer job_ids from recent runs so a neighbors-only run does not wipe
+    # learn Result columns (and vice versa).
+    latest_neighbor = _recent_job_rows_by_node(session, field="neighbor_jobs")
+    latest_learn = _recent_job_rows_by_node(session, field="learn_jobs")
 
     def _serialize_neighbor(row: dict) -> dict:
         nid = str(row["node_id"])
@@ -189,6 +216,26 @@ def cron_queue_preview(session: Session, *, settings: Settings | None = None) ->
             else None
         ),
     }
+
+
+def _recent_job_rows_by_node(
+    session: Session, *, field: str, limit: int = 20
+) -> dict[str, dict]:
+    """Map node_id → most recent cron summary row that has a job_id."""
+    runs = session.exec(
+        select(CronRun).order_by(col(CronRun.started_at).desc()).limit(limit)
+    ).all()
+    out: dict[str, dict] = {}
+    for run in runs:
+        rows = getattr(run, field, None) or []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            nid = str(row.get("node_id") or "")
+            if not nid or nid in out or not row.get("job_id"):
+                continue
+            out[nid] = row
+    return out
 
 
 def _enrich_job_rows(
