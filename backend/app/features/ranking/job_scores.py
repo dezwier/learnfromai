@@ -44,16 +44,18 @@ def neighbor_job_scores(
     session: Session,
     *,
     settings: Settings | None = None,
+    aggregated: dict | None = None,
 ) -> list[dict]:
     """Rank tiles for expand_neighborhood.
 
     score = aggregated_affinity + w_fill * (desired_neighbors - n) / desired_neighbors
+    Pass ``aggregated`` from ``aggregate_tile_affinity`` to avoid a second pass.
     """
     s = settings or get_settings()
     desired = int(s.cron_neighbor_budget_total)
-    aggregated = aggregate_tile_affinity(session, settings=s)
+    tiles = aggregated if aggregated is not None else aggregate_tile_affinity(session, settings=s)
     ranked: list[dict] = []
-    for nid, row in aggregated.items():
+    for nid, row in tiles.items():
         neighbors = _direct_neighbor_count(session, nid)
         if neighbors >= desired:
             continue
@@ -82,16 +84,18 @@ def learn_job_scores(
     settings: Settings | None = None,
     band: str = DEFAULT_BAND,
     recipe_version: int = RECIPE_VERSION,
+    aggregated: dict | None = None,
 ) -> list[dict]:
     """Rank tiles for expand_content.
 
     score = aggregated_affinity + w_fill * (desired_packs - packs) / desired_packs
+    Pass ``aggregated`` from ``aggregate_tile_affinity`` to avoid a second pass.
     """
     s = settings or get_settings()
     desired_packs = int(s.cron_learn_desired_packs)
-    aggregated = aggregate_tile_affinity(session, settings=s)
+    tiles = aggregated if aggregated is not None else aggregate_tile_affinity(session, settings=s)
     ranked: list[dict] = []
-    for nid, row in aggregated.items():
+    for nid, row in tiles.items():
         packs = _pack_count(session, nid, band=band, recipe_version=recipe_version)
         incomplete = first_incomplete_pack(
             session, nid, band=band, recipe_version=recipe_version

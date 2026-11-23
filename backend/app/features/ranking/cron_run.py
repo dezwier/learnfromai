@@ -13,7 +13,7 @@ from app.features.knowledge_graph.preferences import min_per_bucket, neighborhoo
 from app.features.platform.jobs import enqueue, ensure_watcher
 from app.features.platform.models import GenerationJob
 from app.features.platform.neighborhood_llm import parse_uuid
-from app.features.ranking.affinity import weights_snapshot
+from app.features.ranking.affinity import aggregate_tile_affinity, weights_snapshot
 from app.features.ranking.job_scores import learn_job_scores, neighbor_job_scores
 from app.features.ranking.models import CronRun
 
@@ -63,11 +63,17 @@ def run_daily_cron(
     session.flush()
 
     try:
+        # One affinity pass shared by both queues (preview / Run now / cron).
+        tiles = (
+            aggregate_tile_affinity(session, settings=s)
+            if include_neighbors or include_learns
+            else {}
+        )
         neighbor_summary: list[dict] = []
         if include_neighbors:
-            neighbor_rows = neighbor_job_scores(session, settings=s)[
-                : int(s.cron_neighbor_jobs_per_day)
-            ]
+            neighbor_rows = neighbor_job_scores(
+                session, settings=s, aggregated=tiles
+            )[: int(s.cron_neighbor_jobs_per_day)]
             for row in neighbor_rows:
                 job = _enqueue_neighbor(session, row=row, settings=s)
                 _watch_enqueued(
@@ -92,9 +98,9 @@ def run_daily_cron(
 
         learn_summary: list[dict] = []
         if include_learns:
-            learn_rows = learn_job_scores(session, settings=s)[
-                : int(s.cron_learn_jobs_per_day)
-            ]
+            learn_rows = learn_job_scores(
+                session, settings=s, aggregated=tiles
+            )[: int(s.cron_learn_jobs_per_day)]
             for row in learn_rows:
                 job = _enqueue_learn(session, row=row)
                 _watch_enqueued(
@@ -161,8 +167,13 @@ def cron_queue_preview(session: Session, *, settings: Settings | None = None) ->
     s = settings or get_settings()
     neighbor_limit = int(s.cron_neighbor_jobs_per_day)
     learn_limit = int(s.cron_learn_jobs_per_day)
-    neighbor_rows = neighbor_job_scores(session, settings=s)[:neighbor_limit]
-    learn_rows = learn_job_scores(session, settings=s)[:learn_limit]
+    tiles = aggregate_tile_affinity(session, settings=s)
+    neighbor_rows = neighbor_job_scores(
+        session, settings=s, aggregated=tiles
+    )[:neighbor_limit]
+    learn_rows = learn_job_scores(
+        session, settings=s, aggregated=tiles
+    )[:learn_limit]
     latest = latest_cron_run(session)
     # Prefer job_ids from recent runs so a neighbors-only run does not wipe
     # learn Result columns (and vice versa).
