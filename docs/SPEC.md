@@ -38,7 +38,7 @@ Sign in, then explore one shared knowledge graph grown by an LLM neighborhood ar
 - `GET /api/v1/me/reviews/distribution` → Leitner bins `{distribution: [{bin, count, count_due, count_not_due}], due_count, graduation_bin, intervals_hours, first_next_review_at}`
 - `GET /api/v1/me/reviews/due?limit=10` → `{items: [{node_id, title, pack_index, leitner_bin, pack, image_url?, image_thumb_url?, pack_image_url?, pack_image_thumb_url?}], due_count}`
 - `POST /api/v1/me/reviews/submit` `{node_id, pack_index, correct, check_kind, choice_index?|answer_bool?|answer_text?}` → `{leitner_bin, next_review_at, graduated, updated}` (also appends a check event)
-- `POST /api/v1/knowledge/bits/{bit_id}/feedback` `{rating: 1|-1}` → upsert per-user thumbs on that quiz bit (`quiz_bit_feedback`)
+- `POST /api/v1/knowledge/bits/{bit_id}/feedback` `{rating: 1|-1|null}` → upsert/clear per-user thumbs on that quiz bit (`quiz_bit_feedback`)
 - `GET /api/v1/knowledge/nodes/{id}/jobs` → active `expand_neighborhood` / `expand_content` / `generate_image` / `generate_pack_image` jobs for that node (any user); caller is attached as a watcher. Different job types may run in parallel; the same type coalesces across users (atom image by `pack_index`).
 - `GET /api/v1/admin/cron-runs/preview` → a-priori ranked neighbor/learn queues with affinity, counts, fill term, score, live job result when a prior run enqueued that tile, and `limits` including `neighbor_w_fill` / `learn_w_fill` (403 unless `is_admin`)
 - `PATCH /api/v1/admin/cron-runs/weights` `{neighbor_w_fill?, learn_w_fill?}` (≥0) → persist fill weights and return refreshed preview (403 unless `is_admin`)

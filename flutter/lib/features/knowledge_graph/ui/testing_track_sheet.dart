@@ -237,7 +237,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     });
   }
 
-  void _onQuizThumb(int rating) {
+  void _onQuizThumb(int? rating) {
     if (_queue.isEmpty || _queueIndex >= _queue.length) return;
     final card = _queue[_queueIndex];
     final bitId = card.item.pack.bit(card.checkKind)?.id.trim() ?? '';

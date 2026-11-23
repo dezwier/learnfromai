@@ -53,6 +53,15 @@ def test_quiz_feedback_upsert(client, auth, session, user):
     assert rows[0].user_id == user.id
     assert rows[0].rating == -1
 
+    clear = client.post(
+        f"/api/v1/knowledge/bits/{bit.id}/feedback",
+        headers=auth,
+        json={"rating": None},
+    )
+    assert clear.status_code == 200
+    assert clear.json()["rating"] is None
+    assert session.exec(select(QuizBitFeedback).where(QuizBitFeedback.bit_id == bit.id)).all() == []
+
     bad = client.post(
         f"/api/v1/knowledge/bits/{bit.id}/feedback",
         headers=auth,

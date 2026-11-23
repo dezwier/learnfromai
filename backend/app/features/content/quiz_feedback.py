@@ -19,11 +19,14 @@ def upsert_quiz_feedback(
     *,
     user: User,
     bit_id: UUID,
-    rating: int,
+    rating: int | None,
 ) -> dict:
-    """Store or update this user's thumbs rating on a quiz bit."""
-    if rating not in _VALID_RATINGS:
-        raise AppError("VALIDATION_ERROR", "rating must be 1 or -1", 422)
+    """Store, update, or clear this user's thumbs rating on a quiz bit.
+
+    ``rating`` is ``1`` / ``-1``, or ``None`` to undo.
+    """
+    if rating is not None and rating not in _VALID_RATINGS:
+        raise AppError("VALIDATION_ERROR", "rating must be 1, -1, or null", 422)
     bit = session.get(KnowledgeBit, bit_id)
     if bit is None:
         raise not_found("Quiz not found")
@@ -38,6 +41,18 @@ def upsert_quiz_feedback(
         )
     ).first()
     now = utcnow()
+    if rating is None:
+        if row is not None:
+            session.delete(row)
+            session.flush()
+        return {
+            "bit_id": str(bit_id),
+            "rating": None,
+            "kind": kind,
+            "pack_index": int(bit.pack_index),
+            "node_id": str(bit.node_id),
+        }
+
     if row is None:
         row = QuizBitFeedback(
             user_id=user.id,

@@ -448,7 +448,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     });
   }
 
-  void _onQuizThumb(int rating) {
+  void _onQuizThumb(int? rating) {
     final bitId = _entry?.pack.bit(_entry!.checkKind)?.id.trim() ?? '';
     if (bitId.isEmpty) return;
     setState(() => _quizRating = rating);

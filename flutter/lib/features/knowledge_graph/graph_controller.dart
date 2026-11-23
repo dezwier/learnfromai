@@ -631,13 +631,14 @@ class GraphController extends ChangeNotifier {
     }
   }
 
-  /// Fire-and-forget thumbs up/down on a quiz bit (`rating` 1 or -1).
+  /// Fire-and-forget thumbs on a quiz bit (`1` / `-1`, or `null` to clear).
   Future<void> submitQuizFeedback({
     required String bitId,
-    required int rating,
+    required int? rating,
   }) async {
     final id = bitId.trim();
-    if (id.isEmpty || (rating != 1 && rating != -1)) return;
+    if (id.isEmpty) return;
+    if (rating != null && rating != 1 && rating != -1) return;
     try {
       await _post('/knowledge/bits/$id/feedback', body: {'rating': rating});
     } catch (_) {
