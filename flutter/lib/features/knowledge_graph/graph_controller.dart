@@ -247,6 +247,49 @@ class GraphController extends ChangeNotifier {
     await refreshTrackedJobs();
   }
 
+  /// Track jobs just enqueued by admin cron Run now (neighbors / learns).
+  ///
+  /// Upserts from the run payload immediately, then attaches watchers via
+  /// per-node job list so polling works even before the cron watcher deploy.
+  Future<void> trackAdminCronJobs(Map<String, dynamic> run) async {
+    final nodeIds = <String>{};
+    void ingest(Object? raw, String type) {
+      if (raw is! List) return;
+      for (final row in raw) {
+        if (row is! Map) continue;
+        final jobId = row['job_id']?.toString();
+        final nodeId = row['node_id']?.toString();
+        if (jobId == null || nodeId == null) continue;
+        nodeIds.add(nodeId);
+        final state = row['job_state']?.toString() ?? 'queued';
+        if (state != 'queued' && state != 'running') continue;
+        _upsertTracked(
+          TrackedJob(
+            jobId: jobId,
+            nodeId: nodeId,
+            title: row['name']?.toString() ?? _titleForNode(nodeId) ?? 'Topic',
+            state: state,
+            type: type,
+            packIndex: type == 'expand_content'
+                ? (row['pack_index'] as num?)?.toInt()
+                : null,
+            progressMessage: 'Waiting for a worker…',
+            fraction: 0,
+          ),
+        );
+      }
+    }
+
+    ingest(run['neighbor_jobs'], 'expand_neighborhood');
+    ingest(run['learn_jobs'], 'expand_content');
+    if (trackedJobs.any((j) => j.isActive)) _ensurePoller();
+
+    for (final id in nodeIds) {
+      await syncNodeJobs(id);
+      if (_disposed) return;
+    }
+  }
+
   Future<void> search(String topic) async {
     final trimmed = topic.trim();
     if (trimmed.isEmpty || refreshing || loading) return;

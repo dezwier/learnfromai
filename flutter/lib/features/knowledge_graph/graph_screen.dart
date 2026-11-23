@@ -990,6 +990,9 @@ class _GraphScreenState extends State<GraphScreen>
     // Keep chrome mounted while learn cards are open so HUD can fade out/in.
     final showChrome = !_searchOpen && !_profileOpen && !_testingOpen;
     final chromeOpaque = showChrome && !_learnOpen;
+    // Jobs float stays up over profile/settings so Run now progress is visible.
+    final showJobsChrome = !_searchOpen && !_testingOpen;
+    final jobsChromeOpaque = showJobsChrome && !_learnOpen;
     final liveTrail = graph.focusTrail;
     // Hold the previous trail until morph begins (avoids a pop on the fetch frame).
     final trail = (_pendingFocusMorph && _trailShown.isNotEmpty) ? _trailShown : liveTrail;
@@ -1095,78 +1098,6 @@ class _GraphScreenState extends State<GraphScreen>
                 ),
               ),
             ),
-          if (showChrome && chromeOpaque && _jobsPanelOpen)
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _jobsPanelOpen = false),
-                child: const ColoredBox(color: Color(0x00000000)),
-              ),
-            ),
-          if (showChrome)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: floatBottom + 56,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: chromeOpaque ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          scheme.surface.withValues(alpha: 0.94),
-                          scheme.surface.withValues(alpha: 0.72),
-                          scheme.surface.withValues(alpha: 0.28),
-                          scheme.surface.withValues(alpha: 0.0),
-                        ],
-                        stops: const [0.0, 0.35, 0.72, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (showChrome)
-            Positioned(
-              left: 16,
-              bottom: floatBottom,
-              child: IgnorePointer(
-                ignoring: !chromeOpaque,
-                child: AnimatedOpacity(
-                  opacity: chromeOpaque ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_jobsPanelOpen && graph.hasActiveJobs) ...[
-                        JobsPanel(
-                          jobs: graph.trackedJobs.where((j) => j.isActive).toList(),
-                          onSelect: (job) {
-                            setState(() => _jobsPanelOpen = false);
-                            unawaited(_openTrackedJob(graph, job));
-                          },
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                      if (graph.hasActiveJobs)
-                        JobsBadgeButton(
-                          count: graph.activeJobCount,
-                          open: _jobsPanelOpen,
-                          onPressed: () => setState(() => _jobsPanelOpen = !_jobsPanelOpen),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           if (showChrome)
             Positioned(
               right: 16,
@@ -1260,6 +1191,80 @@ class _GraphScreenState extends State<GraphScreen>
               child: TestingTrackSheet(
                 key: const ValueKey('testing-track'),
                 onClose: _closeTestingTrack,
+              ),
+            ),
+          // Above profile/settings so Run now progress stays visible.
+          if (showJobsChrome && jobsChromeOpaque && _jobsPanelOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _jobsPanelOpen = false),
+                child: const ColoredBox(color: Color(0x00000000)),
+              ),
+            ),
+          if (showJobsChrome)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: floatBottom + 56,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: jobsChromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          scheme.surface.withValues(alpha: 0.94),
+                          scheme.surface.withValues(alpha: 0.72),
+                          scheme.surface.withValues(alpha: 0.28),
+                          scheme.surface.withValues(alpha: 0.0),
+                        ],
+                        stops: const [0.0, 0.35, 0.72, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (showJobsChrome)
+            Positioned(
+              left: 16,
+              bottom: floatBottom,
+              child: IgnorePointer(
+                ignoring: !jobsChromeOpaque,
+                child: AnimatedOpacity(
+                  opacity: jobsChromeOpaque ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_jobsPanelOpen && graph.hasActiveJobs) ...[
+                        JobsPanel(
+                          jobs: graph.trackedJobs.where((j) => j.isActive).toList(),
+                          onSelect: (job) {
+                            setState(() => _jobsPanelOpen = false);
+                            unawaited(_openTrackedJob(graph, job));
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      if (graph.hasActiveJobs)
+                        JobsBadgeButton(
+                          count: graph.activeJobCount,
+                          open: _jobsPanelOpen,
+                          onPressed: () =>
+                              setState(() => _jobsPanelOpen = !_jobsPanelOpen),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],

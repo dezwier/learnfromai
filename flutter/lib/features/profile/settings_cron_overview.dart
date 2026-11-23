@@ -97,8 +97,14 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
         await _load();
       }
       if (!mounted) return;
-      // Attach cron jobs to the same progress float as graph-triggered work.
-      unawaited(context.read<GraphController>().reattachJobs());
+      final graph = context.read<GraphController>();
+      if (runRaw is Map) {
+        unawaited(
+          graph.trackAdminCronJobs(Map<String, dynamic>.from(runRaw)),
+        );
+      } else {
+        unawaited(graph.reattachJobs());
+      }
       final label = queue == 'neighbors' ? 'neighbor' : 'atom';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
