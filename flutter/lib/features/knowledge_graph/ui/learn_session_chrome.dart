@@ -13,12 +13,15 @@ class LearnSessionFloatingCta extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.visible = true,
+    this.leading,
   });
 
   final String label;
   final VoidCallback? onPressed;
   /// When false, keeps layout space but fades out and ignores taps.
   final bool visible;
+  /// Optional control left of Next (e.g. quiz thumbs).
+  final Widget? leading;
 
   /// Space to keep clear above the home indicator for the CTA.
   ///
@@ -42,6 +45,22 @@ class LearnSessionFloatingCta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final button = FilledButton(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(52),
+        elevation: 4,
+        shadowColor: Colors.black.withValues(alpha: 0.28),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius),
+        ),
+        textStyle: const TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      child: Text(label),
+    );
     return Positioned(
       left: 20,
       right: 20,
@@ -49,26 +68,19 @@ class LearnSessionFloatingCta extends StatelessWidget {
       // Absorb (don't ignore) while hidden so leftover keyboard/Check taps
       // can't fall through to whatever sits under this slot.
       child: AbsorbPointer(
-        absorbing: !visible || onPressed == null,
+        absorbing: !visible || (onPressed == null && leading == null),
         // Instant with quiz feedback — no fade that lags the green/red badge.
         child: Opacity(
-          opacity: visible && onPressed != null ? 1 : 0,
-          child: FilledButton(
-            onPressed: onPressed,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              elevation: 4,
-              shadowColor: Colors.black.withValues(alpha: 0.28),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(radius),
-              ),
-              textStyle: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            child: Text(label),
-          ),
+          opacity: visible ? 1 : 0,
+          child: leading == null
+              ? button
+              : Row(
+                  children: [
+                    leading!,
+                    const SizedBox(width: 12),
+                    Expanded(child: button),
+                  ],
+                ),
         ),
       ),
     );

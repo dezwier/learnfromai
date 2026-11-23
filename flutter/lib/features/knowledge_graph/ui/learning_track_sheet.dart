@@ -11,6 +11,7 @@ import 'learn_edge_dismiss.dart';
 import 'learn_session_chrome.dart';
 import 'learning_track_support.dart';
 import 'pack_actions_sheet.dart';
+import 'quiz_thumbs.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -72,6 +73,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
   var _loading = true;
   var _advancing = false;
   var _quizDone = false;
+  int? _quizRating;
   var _dismissing = false;
   String? _topicTitle;
   String? _nodeId;
@@ -147,6 +149,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
     setState(() {
       _loading = true;
       _quizDone = false;
+      _quizRating = null;
       _entry = null;
       _cardImageUrl = null;
     });
@@ -253,6 +256,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _entry = LearnDeckEntry(pack: pack, checkKind: kind);
       _trackedKinds.clear();
       _quizDone = false;
+      _quizRating = null;
       _loading = false;
       _generateNodeId = null;
       _cardEpoch += 1;
@@ -438,7 +442,22 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
         },
       ),
     );
-    setState(() => _quizDone = true);
+    setState(() {
+      _quizDone = true;
+      _quizRating = null;
+    });
+  }
+
+  void _onQuizThumb(int rating) {
+    final bitId = _entry?.pack.bit(_entry!.checkKind)?.id.trim() ?? '';
+    if (bitId.isEmpty) return;
+    setState(() => _quizRating = rating);
+    unawaited(
+      context.read<GraphController>().submitQuizFeedback(
+            bitId: bitId,
+            rating: rating,
+          ),
+    );
   }
 
   Future<void> _onNext() async {
@@ -452,6 +471,7 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _advancing = true;
       _loading = true;
       _quizDone = false;
+      _quizRating = null;
       _entry = null;
       _cardImageUrl = null;
     });
@@ -586,6 +606,11 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
               LearnSessionFloatingCta(
                 label: _advancing ? 'Loading…' : 'Next',
                 onPressed: _advancing ? null : () => unawaited(_onNext()),
+                leading: QuizThumbs(
+                  value: _quizRating,
+                  enabled: !_advancing,
+                  onChanged: _onQuizThumb,
+                ),
               ),
           ],
         ),

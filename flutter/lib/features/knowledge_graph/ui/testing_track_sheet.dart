@@ -13,6 +13,7 @@ import 'learn_card.dart';
 import 'learn_session_chrome.dart';
 import 'leitner_distribution_card.dart';
 import 'pack_actions_sheet.dart';
+import 'quiz_thumbs.dart';
 
 const _checkKinds = ['check1', 'check2', 'check3'];
 
@@ -37,6 +38,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
   List<_ReviewCard> _queue = const [];
   int _queueIndex = 0;
   var _answered = false;
+  int? _quizRating;
   /// Brief gate so the answer tap doesn't also hit Next/Done.
   var _continueArmed = false;
   DateTime _nextAllowedAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -117,6 +119,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queue = const [];
       _queueIndex = 0;
       _answered = false;
+      _quizRating = null;
       _continueArmed = false;
       _submitting = false;
     });
@@ -208,6 +211,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     setState(() {
       _submitting = true;
       _answered = true;
+      _quizRating = null;
       _continueArmed = false;
     });
     unawaited(
@@ -233,6 +237,20 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     });
   }
 
+  void _onQuizThumb(int rating) {
+    if (_queue.isEmpty || _queueIndex >= _queue.length) return;
+    final card = _queue[_queueIndex];
+    final bitId = card.item.pack.bit(card.checkKind)?.id.trim() ?? '';
+    if (bitId.isEmpty) return;
+    setState(() => _quizRating = rating);
+    unawaited(
+      context.read<GraphController>().submitQuizFeedback(
+            bitId: bitId,
+            rating: rating,
+          ),
+    );
+  }
+
   Future<void> _onNextCard() async {
     if (!_answered || !_continueArmed || _submitting) return;
     if (DateTime.now().isBefore(_nextAllowedAt)) return;
@@ -243,6 +261,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     setState(() {
       _queueIndex += 1;
       _answered = false;
+      _quizRating = null;
       _continueArmed = false;
     });
   }
@@ -261,6 +280,7 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
       _queue = next;
       if (_queueIndex >= next.length) _queueIndex = next.length - 1;
       _answered = false;
+      _quizRating = null;
       _continueArmed = false;
     });
   }
@@ -344,7 +364,12 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
           if (showNext)
             LearnSessionFloatingCta(
               label: _queueIndex + 1 >= _queue.length ? 'Done' : 'Next',
-              onPressed: () => unawaited(_onNextCard()),
+              onPressed: nextTappable ? () => unawaited(_onNextCard()) : null,
+              leading: QuizThumbs(
+                value: _quizRating,
+                enabled: nextTappable,
+                onChanged: _onQuizThumb,
+              ),
             ),
         ],
       ),

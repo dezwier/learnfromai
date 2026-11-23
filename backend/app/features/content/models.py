@@ -55,3 +55,34 @@ class KnowledgeBit(SQLModel, table=True):
         default_factory=utcnow,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class QuizBitFeedback(SQLModel, table=True):
+    """Per-user thumbs up/down on a shared quiz bit (one rating per user×bit)."""
+
+    __tablename__ = "quiz_bit_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "bit_id", name="uq_quiz_bit_feedback_user_bit"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(
+        sa_column=Column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+    bit_id: UUID = Field(
+        sa_column=Column(
+            ForeignKey("knowledge_bits.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    # +1 thumbs up, -1 thumbs down
+    rating: int = Field(sa_column=Column(Integer, nullable=False))
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

@@ -485,6 +485,27 @@ def patch_knowledge_node(
     return payload
 
 
+class QuizFeedbackBody(BaseModel):
+    rating: int = Field(..., description="+1 thumbs up or -1 thumbs down")
+
+
+@router.post("/knowledge/bits/{bit_id}/feedback")
+def post_quiz_bit_feedback(
+    bit_id: UUID,
+    body: QuizFeedbackBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Thumbs up/down on a shared quiz bit (one rating per user)."""
+    from app.features.content.quiz_feedback import upsert_quiz_feedback
+
+    payload = upsert_quiz_feedback(
+        session, user=user, bit_id=bit_id, rating=body.rating
+    )
+    session.commit()
+    return payload
+
+
 @router.get("/knowledge/nodes/{node_id}/content")
 def get_knowledge_node_content(
     node_id: UUID,

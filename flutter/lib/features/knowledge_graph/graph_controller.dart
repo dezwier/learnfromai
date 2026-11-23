@@ -631,6 +631,20 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Fire-and-forget thumbs up/down on a quiz bit (`rating` 1 or -1).
+  Future<void> submitQuizFeedback({
+    required String bitId,
+    required int rating,
+  }) async {
+    final id = bitId.trim();
+    if (id.isEmpty || (rating != 1 && rating != -1)) return;
+    try {
+      await _post('/knowledge/bits/$id/feedback', body: {'rating': rating});
+    } catch (_) {
+      // Feedback must not block Next.
+    }
+  }
+
   /// Profile affinity map: scored topics + edge clusters.
   Future<Map<String, dynamic>?> fetchTopicAffinity({int limit = 24}) async {
     try {

@@ -1,7 +1,7 @@
 """Import every table model so SQLModel.metadata is complete."""
 
 from app.features.accounts.models import User
-from app.features.content.models import KnowledgeBit
+from app.features.content.models import KnowledgeBit, QuizBitFeedback
 from app.features.knowledge_graph.node_models import (
     KnowledgeEdge,
     KnowledgeNode,
@@ -32,6 +32,7 @@ def register_models() -> None:
         KnowledgeRequest,
         KnowledgeRequestNode,
         KnowledgeBit,
+        QuizBitFeedback,
         KnowledgePackImage,
         UserTopicEvent,
         UserPackReview,
