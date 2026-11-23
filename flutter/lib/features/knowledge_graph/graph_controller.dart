@@ -467,6 +467,24 @@ class GraphController extends ChangeNotifier {
     }
   }
 
+  /// Topic iconic image URLs from the in-memory neighborhood graph, if present.
+  (String? full, String? thumb) imageUrlsForNode(String? nodeId) {
+    if (nodeId == null || nodeId.isEmpty) return (null, null);
+    final nodes = categoryGraph?['nodes'];
+    if (nodes is! List) return (null, null);
+    for (final raw in nodes) {
+      if (raw is Map && raw['id']?.toString() == nodeId) {
+        final url = raw['image_url']?.toString().trim();
+        final thumb = raw['image_thumb_url']?.toString().trim();
+        return (
+          (url == null || url.isEmpty) ? null : url,
+          (thumb == null || thumb.isEmpty) ? null : thumb,
+        );
+      }
+    }
+    return (null, null);
+  }
+
   /// Image metadata for a node not present in the current neighborhood graph.
   Future<({String? imageUrl, String? imageThumbUrl})?> fetchNodeImageMeta(String nodeId) async {
     try {
@@ -1190,7 +1208,7 @@ class GraphController extends ChangeNotifier {
       for (final item in raw)
         if (item is Map)
           TopicChoice(
-            id: (item['id'] ?? item['node_id'] ?? item['wikidata_qid']).toString(),
+            id: (item['id'] ?? item['node_id']).toString(),
             title: item['title']?.toString() ?? item['name']?.toString() ?? 'Topic',
             description: item['description']?.toString(),
           ),

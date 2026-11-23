@@ -480,16 +480,8 @@ class _TestingTrackSheetState extends State<TestingTrackSheet> {
     if (full != null && full.isNotEmpty) return full;
     final packBest = item.pack.bestImageUrl;
     if (packBest != null) return packBest;
-    final nodes = graph.categoryGraph?['nodes'];
-    if (nodes is! List) return null;
-    for (final raw in nodes) {
-      if (raw is! Map || raw['id']?.toString() != item.nodeId) continue;
-      final gThumb = raw['image_thumb_url']?.toString().trim();
-      if (gThumb != null && gThumb.isNotEmpty) return gThumb;
-      final gFull = raw['image_url']?.toString().trim();
-      if (gFull != null && gFull.isNotEmpty) return gFull;
-    }
-    return null;
+    final graphUrls = graph.imageUrlsForNode(item.nodeId);
+    return graphUrls.$2 ?? graphUrls.$1;
   }
 
   /// When a pack-image job finishes, point the current card at the new asset.

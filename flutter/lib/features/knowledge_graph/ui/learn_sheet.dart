@@ -303,26 +303,10 @@ class _LearnSheetState extends State<LearnSheet> {
     _maybeMarkPackCompleted(entry.packIndex, entry.checkKind);
   }
 
-  (String?, String?) _topicImageUrls(GraphController graph) {
-    final nodes = graph.categoryGraph?['nodes'];
-    if (nodes is! List) return (null, null);
-    for (final raw in nodes) {
-      if (raw is Map && raw['id']?.toString() == widget.nodeId) {
-        final url = raw['image_url']?.toString().trim();
-        final thumb = raw['image_thumb_url']?.toString().trim();
-        return (
-          (url == null || url.isEmpty) ? null : url,
-          (thumb == null || thumb.isEmpty) ? null : thumb,
-        );
-      }
-    }
-    return (null, null);
-  }
-
   String? _effectiveImageUrl(GraphController graph, TopicPack pack) {
     final packBest = pack.bestImageUrl;
     if (packBest != null) return packBest;
-    final urls = _topicImageUrls(graph);
+    final urls = graph.imageUrlsForNode(widget.nodeId);
     return urls.$1 ?? urls.$2;
   }
 
@@ -330,7 +314,7 @@ class _LearnSheetState extends State<LearnSheet> {
     GraphController graph,
     LearnDeckEntry entry,
   ) async {
-    final topicUrls = _topicImageUrls(graph);
+    final topicUrls = graph.imageUrlsForNode(widget.nodeId);
     final result = await showPackActionsSheet(
       context,
       nodeId: widget.nodeId,

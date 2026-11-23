@@ -44,7 +44,9 @@ Future<PackActionResult?> showPackActionsSheet(
   final imageBusy = graph.isPackImageJobActive(nodeId, pack.packIndex);
   final topicBusy = graph.isJobTypeActive(nodeId, 'generate_image');
   final ownImage = hasPackImage || pack.hasPackImage;
-  final topicHasImage = hasTopicImage || _topicHasImage(graph, nodeId);
+  final topicUrls = graph.imageUrlsForNode(nodeId);
+  final topicHasImage =
+      hasTopicImage || topicUrls.$1 != null || topicUrls.$2 != null;
 
   final choice = await showModalBottomSheet<String>(
     context: context,
@@ -196,7 +198,7 @@ Future<PackActionResult?> showPackActionsSheet(
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       return null;
     }
-    final urls = _topicImageUrls(graph, nodeId);
+    final urls = graph.imageUrlsForNode(nodeId);
     return PackActionResult(
       topicImageUpdated: true,
       imageUrl: urls.$1,
@@ -217,25 +219,4 @@ Future<PackActionResult?> showPackActionsSheet(
   }
 
   return null;
-}
-
-bool _topicHasImage(GraphController graph, String nodeId) {
-  final urls = _topicImageUrls(graph, nodeId);
-  return urls.$1 != null || urls.$2 != null;
-}
-
-(String?, String?) _topicImageUrls(GraphController graph, String nodeId) {
-  final nodes = graph.categoryGraph?['nodes'];
-  if (nodes is! List) return (null, null);
-  for (final raw in nodes) {
-    if (raw is Map && raw['id']?.toString() == nodeId) {
-      final url = raw['image_url']?.toString().trim();
-      final thumb = raw['image_thumb_url']?.toString().trim();
-      return (
-        (url == null || url.isEmpty) ? null : url,
-        (thumb == null || thumb.isEmpty) ? null : thumb,
-      );
-    }
-  }
-  return (null, null);
 }

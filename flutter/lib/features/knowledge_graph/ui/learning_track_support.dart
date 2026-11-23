@@ -132,20 +132,7 @@ class LearningTrackSupport {
   }
 
   static (String?, String?) imageUrlsFromGraph(GraphController graph, String? nodeId) {
-    if (nodeId == null) return (null, null);
-    final nodes = graph.categoryGraph?['nodes'];
-    if (nodes is! List) return (null, null);
-    for (final raw in nodes) {
-      if (raw is Map && raw['id']?.toString() == nodeId) {
-        final url = raw['image_url']?.toString().trim();
-        final thumb = raw['image_thumb_url']?.toString().trim();
-        return (
-          (url == null || url.isEmpty) ? null : url,
-          (thumb == null || thumb.isEmpty) ? null : thumb,
-        );
-      }
-    }
-    return (null, null);
+    return graph.imageUrlsForNode(nodeId);
   }
 
   /// Resolve image for a topic that may not be in the current neighborhood.
