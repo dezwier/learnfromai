@@ -21,6 +21,7 @@ class CronQueueTable extends StatelessWidget {
     this.weightLabel,
     this.weight,
     this.onWeightChanged,
+    this.weightEnabled = true,
   });
 
   final String title;
@@ -32,6 +33,7 @@ class CronQueueTable extends StatelessWidget {
   final String? weightLabel;
   final double? weight;
   final ValueChanged<double>? onWeightChanged;
+  final bool weightEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -67,12 +69,12 @@ class CronQueueTable extends StatelessWidget {
             ],
           ],
         ),
-        if (weight != null && onWeightChanged != null) ...[
+        if (weight != null) ...[
           const SizedBox(height: 4),
           _FillWeightControl(
             label: weightLabel ?? 'Weight',
             value: weight!,
-            onChanged: onWeightChanged!,
+            onChanged: weightEnabled ? onWeightChanged : null,
           ),
         ],
         const SizedBox(height: 8),
@@ -142,9 +144,9 @@ class _FillWeightControl extends StatelessWidget {
 
   final String label;
   final double value;
-  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChanged;
 
-  static const _step = 0.5;
+  static const _step = 0.1;
   static const _max = 50.0;
 
   double _round(double v) => (v * 10).roundToDouble() / 10;
@@ -153,6 +155,7 @@ class _FillWeightControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final mute = theme.colorScheme.onSurface.withValues(alpha: 0.55);
+    final enabled = onChanged != null;
     final display = value == value.roundToDouble()
         ? value.toStringAsFixed(0)
         : cronFmtScore(value);
@@ -168,11 +171,13 @@ class _FillWeightControl extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-          onPressed: value > 0 ? () => onChanged(_round((value - _step).clamp(0, _max))) : null,
+          onPressed: enabled && value > 0
+              ? () => onChanged!(_round((value - _step).clamp(0, _max)))
+              : null,
           icon: const Icon(Icons.remove, size: 16),
         ),
         SizedBox(
-          width: 28,
+          width: 36,
           child: Text(
             display,
             textAlign: TextAlign.center,
@@ -184,7 +189,9 @@ class _FillWeightControl extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-          onPressed: value < _max ? () => onChanged(_round((value + _step).clamp(0, _max))) : null,
+          onPressed: enabled && value < _max
+              ? () => onChanged!(_round((value + _step).clamp(0, _max)))
+              : null,
           icon: const Icon(Icons.add, size: 16),
         ),
       ],

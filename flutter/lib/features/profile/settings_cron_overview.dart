@@ -37,8 +37,11 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
 
   Future<void> _load() async {
     final api = context.read<AuthController>().api;
+    final keepPreview = _preview != null;
     setState(() {
-      _loading = true;
+      // Keep the last ranking (and weights) on screen while refreshing.
+      _loading = !keepPreview;
+      _savingWeights = keepPreview;
       _error = null;
     });
     try {
@@ -49,20 +52,27 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
       setState(() {
         _preview = _CronPreview.fromJson(raw);
         _loading = false;
+        _savingWeights = false;
       });
     } catch (exc) {
       if (!mounted) return;
       setState(() {
         _error = exc.toString();
         _loading = false;
+        _savingWeights = false;
       });
     }
   }
 
   Future<void> _setWeight({double? neighborWFill, double? learnWFill}) async {
-    if (_busy) return;
+    if (_busy || _preview == null) return;
     final api = context.read<AuthController>().api;
+    final previous = _preview!;
     setState(() {
+      _preview = previous.withWeights(
+        neighborWFill: neighborWFill,
+        learnWFill: learnWFill,
+      );
       _savingWeights = true;
       _error = null;
     });
@@ -82,6 +92,7 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
     } catch (exc) {
       if (!mounted) return;
       setState(() {
+        _preview = previous;
         _error = exc.toString();
         _savingWeights = false;
       });
@@ -233,9 +244,8 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
             flex: const [3, 1, 1, 1, 1, 2],
             weightLabel: 'N weight',
             weight: _preview!.limits.neighborWFill,
-            onWeightChanged: _busy
-                ? null
-                : (value) => _setWeight(neighborWFill: value),
+            weightEnabled: !_busy,
+            onWeightChanged: (value) => _setWeight(neighborWFill: value),
             trailing: _runButton('neighbors'),
             rows: [
               for (final job in _preview!.neighborJobs)
@@ -258,9 +268,8 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
             flex: const [3, 1, 1, 1, 1, 2],
             weightLabel: 'Atom weight',
             weight: _preview!.limits.learnWFill,
-            onWeightChanged: _busy
-                ? null
-                : (value) => _setWeight(learnWFill: value),
+            weightEnabled: !_busy,
+            onWeightChanged: (value) => _setWeight(learnWFill: value),
             trailing: _runButton('learns'),
             rows: [
               for (final job in _preview!.learnJobs)
@@ -316,6 +325,18 @@ class _CronPreview {
     );
   }
 
+  _CronPreview withWeights({double? neighborWFill, double? learnWFill}) {
+    return _CronPreview(
+      neighborJobs: neighborJobs,
+      learnJobs: learnJobs,
+      limits: limits.copyWith(
+        neighborWFill: neighborWFill,
+        learnWFill: learnWFill,
+      ),
+      latestRunLabel: latestRunLabel,
+    );
+  }
+
   static List<_CronQueueRow> _rows(Object? raw, {bool pack = false}) {
     if (raw is! List) return const [];
     return [
@@ -353,6 +374,17 @@ class _CronLimits {
       desiredPacks: (raw?['desired_packs'] as num?)?.toInt() ?? 20,
       neighborWFill: (raw?['neighbor_w_fill'] as num?)?.toDouble() ?? 1.0,
       learnWFill: (raw?['learn_w_fill'] as num?)?.toDouble() ?? 1.0,
+    );
+  }
+
+  _CronLimits copyWith({double? neighborWFill, double? learnWFill}) {
+    return _CronLimits(
+      neighborJobsPerDay: neighborJobsPerDay,
+      learnJobsPerDay: learnJobsPerDay,
+      desiredNeighbors: desiredNeighbors,
+      desiredPacks: desiredPacks,
+      neighborWFill: neighborWFill ?? this.neighborWFill,
+      learnWFill: learnWFill ?? this.learnWFill,
     );
   }
 }
