@@ -1,6 +1,7 @@
 """User–tile affinity and job ranking for HUD + daily cron.
 
-Weights live on Settings, grouped by use case:
+Weights live on Settings (env defaults); admin may override cron fill weights
+in ``ranking_config`` (applied via ``effective_ranking_settings``):
 
   Affinity:      AFFINITY_W_INTEREST / NEIGHBOR / RECENCY + RECENCY_SPAN_DAYS
   Neighbor cron: CRON_NEIGHBOR_W_FILL + CRON_NEIGHBOR_BUDGET_TOTAL (+ jobs/day)

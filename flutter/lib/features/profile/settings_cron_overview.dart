@@ -21,12 +21,13 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
   static const _placeholderHeight = 160.0;
 
   var _loading = true;
+  var _savingWeights = false;
   /// Which queue is currently enqueueing: `neighbors`, `learns`, or null.
   String? _runningQueue;
   String? _error;
   _CronPreview? _preview;
 
-  bool get _busy => _loading || _runningQueue != null;
+  bool get _busy => _loading || _savingWeights || _runningQueue != null;
 
   @override
   void initState() {
@@ -54,6 +55,35 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
       setState(() {
         _error = exc.toString();
         _loading = false;
+      });
+    }
+  }
+
+  Future<void> _setWeight({double? neighborWFill, double? learnWFill}) async {
+    if (_busy) return;
+    final api = context.read<AuthController>().api;
+    setState(() {
+      _savingWeights = true;
+      _error = null;
+    });
+    try {
+      final body = <String, dynamic>{
+        'neighbor_w_fill': ?neighborWFill,
+        'learn_w_fill': ?learnWFill,
+      };
+      final raw = Map<String, dynamic>.from(
+        await api.patch('/admin/cron-runs/weights', body: body) as Map,
+      );
+      if (!mounted) return;
+      setState(() {
+        _preview = _CronPreview.fromJson(raw);
+        _savingWeights = false;
+      });
+    } catch (exc) {
+      if (!mounted) return;
+      setState(() {
+        _error = exc.toString();
+        _savingWeights = false;
       });
     }
   }
@@ -201,6 +231,11 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
                 'Top ${_preview!.limits.neighborJobsPerDay} · target ${_preview!.limits.desiredNeighbors}',
             columns: const ['Topic', 'Aff', 'N', 'Fill', 'Score', 'Result'],
             flex: const [3, 1, 1, 1, 1, 2],
+            weightLabel: 'N weight',
+            weight: _preview!.limits.neighborWFill,
+            onWeightChanged: _busy
+                ? null
+                : (value) => _setWeight(neighborWFill: value),
             trailing: _runButton('neighbors'),
             rows: [
               for (final job in _preview!.neighborJobs)
@@ -221,6 +256,11 @@ class _SettingsCronOverviewState extends State<SettingsCronOverview> {
                 'Top ${_preview!.limits.learnJobsPerDay} · target ${_preview!.limits.desiredPacks}',
             columns: const ['Topic', 'Aff', 'At', 'Fill', 'Score', 'Result'],
             flex: const [3, 1, 1, 1, 1, 2],
+            weightLabel: 'Atom weight',
+            weight: _preview!.limits.learnWFill,
+            onWeightChanged: _busy
+                ? null
+                : (value) => _setWeight(learnWFill: value),
             trailing: _runButton('learns'),
             rows: [
               for (final job in _preview!.learnJobs)
@@ -294,12 +334,16 @@ class _CronLimits {
     required this.learnJobsPerDay,
     required this.desiredNeighbors,
     required this.desiredPacks,
+    required this.neighborWFill,
+    required this.learnWFill,
   });
 
   final int neighborJobsPerDay;
   final int learnJobsPerDay;
   final int desiredNeighbors;
   final int desiredPacks;
+  final double neighborWFill;
+  final double learnWFill;
 
   factory _CronLimits.fromJson(Map<String, dynamic>? raw) {
     return _CronLimits(
@@ -307,6 +351,8 @@ class _CronLimits {
       learnJobsPerDay: (raw?['learn_jobs_per_day'] as num?)?.toInt() ?? 10,
       desiredNeighbors: (raw?['desired_neighbors'] as num?)?.toInt() ?? 16,
       desiredPacks: (raw?['desired_packs'] as num?)?.toInt() ?? 20,
+      neighborWFill: (raw?['neighbor_w_fill'] as num?)?.toDouble() ?? 1.0,
+      learnWFill: (raw?['learn_w_fill'] as num?)?.toDouble() ?? 1.0,
     );
   }
 }

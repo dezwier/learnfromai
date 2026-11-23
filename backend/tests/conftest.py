@@ -38,7 +38,7 @@ def clean_db():
                 "TRUNCATE TABLE user_pack_reviews, user_topic_events, knowledge_request_nodes, knowledge_requests, "
                 "knowledge_edges, knowledge_nodes, knowledge_bits, knowledge_pack_images, "
                 "llm_usage, generation_job_watchers, generation_jobs, "
-                "worker_heartbeats, cron_runs, users RESTART IDENTITY CASCADE"
+                "worker_heartbeats, cron_runs, ranking_config, users RESTART IDENTITY CASCADE"
             )
         )
         session.commit()

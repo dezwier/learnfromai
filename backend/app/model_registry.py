@@ -15,7 +15,7 @@ from app.features.platform.models import (
     LlmUsage,
     WorkerHeartbeat,
 )
-from app.features.ranking.models import CronRun
+from app.features.ranking.models import CronRun, RankingConfig
 from app.features.reviews.models import UserPackReview
 from app.features.user_events.models import UserTopicEvent
 
@@ -36,4 +36,5 @@ def register_models() -> None:
         UserTopicEvent,
         UserPackReview,
         CronRun,
+        RankingConfig,
     )

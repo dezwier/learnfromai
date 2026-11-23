@@ -246,6 +246,76 @@ def test_admin_cron_preview_and_run_now(client, auth, session, user):
     assert learns_body["weights_snapshot"].get("queues") == ["learns"]
 
 
+def test_admin_fill_weights_update_ranking(client, auth, user, session):
+    user.is_admin = True
+    session.add(user)
+    session.commit()
+
+    rich = KnowledgeNode(name="WeightRich", name_key="weight-rich", description="x")
+    sparse = KnowledgeNode(name="WeightSparse", name_key="weight-sparse", description="x")
+    session.add(rich)
+    session.add(sparse)
+    session.flush()
+    for i in range(8):
+        n = KnowledgeNode(name=f"WN{i}", name_key=f"wn-{i}", description="x")
+        session.add(n)
+        session.flush()
+        session.add(KnowledgeEdge(from_id=rich.id, relation="child", to_id=n.id))
+        session.add(KnowledgeEdge(from_id=n.id, relation="parent", to_id=rich.id))
+    # Sparse has higher affinity (more opens) but larger neighbor deficit.
+    record_focus(session, user=user, node_id=rich.id)
+    record_focus(session, user=user, node_id=sparse.id)
+    record_events(
+        session,
+        user=user,
+        items=[
+            {"node_id": str(rich.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(sparse.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(sparse.id), "kind": "open", "payload": {"source": "graph"}},
+            {"node_id": str(sparse.id), "kind": "open", "payload": {"source": "graph"}},
+        ],
+    )
+    session.commit()
+
+    preview = client.get("/api/v1/admin/cron-runs/preview", headers=auth)
+    assert preview.status_code == 200
+    assert preview.json()["limits"]["neighbor_w_fill"] == pytest.approx(1.0)
+    assert preview.json()["limits"]["learn_w_fill"] == pytest.approx(1.0)
+
+    # Zero neighbor fill → ranking follows affinity only (Sparse ahead).
+    zero = client.patch(
+        "/api/v1/admin/cron-runs/weights",
+        headers=auth,
+        json={"neighbor_w_fill": 0.0},
+    )
+    assert zero.status_code == 200
+    zero_body = zero.json()
+    assert zero_body["limits"]["neighbor_w_fill"] == pytest.approx(0.0)
+    zero_names = [row["name"] for row in zero_body["neighbor_jobs"]]
+    assert zero_names.index("WeightSparse") < zero_names.index("WeightRich")
+
+    # Huge neighbor fill → deficit dominates (Sparse still has fewer neighbors).
+    heavy = client.patch(
+        "/api/v1/admin/cron-runs/weights",
+        headers=auth,
+        json={"neighbor_w_fill": 100.0, "learn_w_fill": 3.5},
+    )
+    assert heavy.status_code == 200
+    heavy_body = heavy.json()
+    assert heavy_body["limits"]["neighbor_w_fill"] == pytest.approx(100.0)
+    assert heavy_body["limits"]["learn_w_fill"] == pytest.approx(3.5)
+    heavy_by_name = {row["name"]: row for row in heavy_body["neighbor_jobs"]}
+    assert heavy_by_name["WeightSparse"]["fill_term"] > heavy_by_name["WeightRich"]["fill_term"]
+    assert heavy_by_name["WeightSparse"]["score"] > heavy_by_name["WeightRich"]["score"]
+
+    forbidden = client.patch(
+        "/api/v1/admin/cron-runs/weights",
+        headers=auth,
+        json={"neighbor_w_fill": -1},
+    )
+    assert forbidden.status_code == 422
+
+
 def test_me_includes_is_admin(client, auth, user, session):
     response = client.get("/api/v1/me", headers=auth)
     assert response.status_code == 200

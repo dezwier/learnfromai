@@ -315,6 +315,40 @@ def post_run_cron(
         raise
 
 
+class CronWeightsBody(BaseModel):
+    """Admin-tunable fill weights for neighbor / atom job scores."""
+
+    neighbor_w_fill: float | None = Field(default=None, ge=0)
+    learn_w_fill: float | None = Field(default=None, ge=0)
+
+
+@router.patch("/admin/cron-runs/weights")
+def patch_cron_weights(
+    body: CronWeightsBody,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Admin: set neighbor/atom fill weights and return refreshed ranking preview."""
+    if not user.is_admin:
+        raise forbidden()
+    if body.neighbor_w_fill is None and body.learn_w_fill is None:
+        raise AppError(
+            "INVALID_WEIGHTS",
+            "Provide neighbor_w_fill and/or learn_w_fill",
+            400,
+        )
+    from app.features.ranking.cron_run import cron_queue_preview
+    from app.features.ranking.runtime_settings import update_fill_weights
+
+    update_fill_weights(
+        session,
+        neighbor_w_fill=body.neighbor_w_fill,
+        learn_w_fill=body.learn_w_fill,
+    )
+    session.commit()
+    return cron_queue_preview(session)
+
+
 @router.get("/me/preferences")
 def get_preferences(user: User = Depends(get_current_user)):
     return {

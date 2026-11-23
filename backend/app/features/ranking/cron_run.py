@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlmodel import Session, col, select
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.time import utcnow
 from app.features.content.models import DEFAULT_BAND, RECIPE_VERSION
 from app.features.knowledge_graph.preferences import min_per_bucket, neighborhood_counts
@@ -16,6 +16,7 @@ from app.features.platform.neighborhood_llm import parse_uuid
 from app.features.ranking.affinity import aggregate_tile_affinity, weights_snapshot
 from app.features.ranking.job_scores import learn_job_scores, neighbor_job_scores
 from app.features.ranking.models import CronRun
+from app.features.ranking.runtime_settings import effective_ranking_settings
 
 
 def normalize_cron_queues(queues: list[str] | None) -> tuple[bool, bool]:
@@ -43,7 +44,7 @@ def run_daily_cron(
     When ``watcher_user_id`` is set (admin Run now), attach that user so jobs
     appear in the progress float — scheduled cron leaves this None.
     """
-    s = settings or get_settings()
+    s = settings or effective_ranking_settings(session)
     include_neighbors, include_learns = normalize_cron_queues(queues)
     snapshot = dict(weights_snapshot(s))
     selected: list[str] = []
@@ -164,7 +165,7 @@ def cron_run_payload(session: Session, run: CronRun) -> dict:
 
 def cron_queue_preview(session: Session, *, settings: Settings | None = None) -> dict:
     """A-priori ranked neighbor/learn queues (what Run now would enqueue)."""
-    s = settings or get_settings()
+    s = settings or effective_ranking_settings(session)
     neighbor_limit = int(s.cron_neighbor_jobs_per_day)
     learn_limit = int(s.cron_learn_jobs_per_day)
     tiles = aggregate_tile_affinity(session, settings=s)
@@ -232,6 +233,8 @@ def cron_queue_preview(session: Session, *, settings: Settings | None = None) ->
             "learn_jobs_per_day": learn_limit,
             "desired_neighbors": int(s.cron_neighbor_budget_total),
             "desired_packs": int(s.cron_learn_desired_packs),
+            "neighbor_w_fill": float(s.cron_neighbor_w_fill),
+            "learn_w_fill": float(s.cron_learn_w_fill),
         },
         "latest_run": (
             {

@@ -18,6 +18,9 @@ class CronQueueTable extends StatelessWidget {
     required this.flex,
     required this.rows,
     this.trailing,
+    this.weightLabel,
+    this.weight,
+    this.onWeightChanged,
   });
 
   final String title;
@@ -26,6 +29,9 @@ class CronQueueTable extends StatelessWidget {
   final List<int> flex;
   final List<List<String>> rows;
   final Widget? trailing;
+  final String? weightLabel;
+  final double? weight;
+  final ValueChanged<double>? onWeightChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +67,14 @@ class CronQueueTable extends StatelessWidget {
             ],
           ],
         ),
+        if (weight != null && onWeightChanged != null) ...[
+          const SizedBox(height: 4),
+          _FillWeightControl(
+            label: weightLabel ?? 'Weight',
+            value: weight!,
+            onChanged: onWeightChanged!,
+          ),
+        ],
         const SizedBox(height: 8),
         DecoratedBox(
           decoration: BoxDecoration(
@@ -113,6 +127,65 @@ class CronQueueTable extends StatelessWidget {
                 ],
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FillWeightControl extends StatelessWidget {
+  const _FillWeightControl({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  static const _step = 0.5;
+  static const _max = 50.0;
+
+  double _round(double v) => (v * 10).roundToDouble() / 10;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mute = theme.colorScheme.onSurface.withValues(alpha: 0.55);
+    final display = value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : cronFmtScore(value);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(color: mute),
+        ),
+        IconButton(
+          tooltip: 'Decrease',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          onPressed: value > 0 ? () => onChanged(_round((value - _step).clamp(0, _max))) : null,
+          icon: const Icon(Icons.remove, size: 16),
+        ),
+        SizedBox(
+          width: 28,
+          child: Text(
+            display,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Increase',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          onPressed: value < _max ? () => onChanged(_round((value + _step).clamp(0, _max))) : null,
+          icon: const Icon(Icons.add, size: 16),
         ),
       ],
     );
