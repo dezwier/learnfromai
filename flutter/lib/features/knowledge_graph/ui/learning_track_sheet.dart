@@ -476,38 +476,45 @@ class _LearningTrackSheetState extends State<LearningTrackSheet> {
       _cardImageUrl = null;
     });
 
-    // If prefetch already kicked off generation, show that tile while we wait.
-    final peek = support.prefetched;
-    if (peek != null && peek.needsGenerate) {
-      setState(() {
-        _generateNodeId = peek.nodeId;
-        _nodeId = peek.nodeId;
-        _topicTitle = peek.title.trim().isNotEmpty ? peek.title : widget.seedTitle;
-      });
-    }
-
-    // Prefer the card prefetched (and possibly generated) while on the previous one.
+    // Dice HTTP + enqueue only — does not wait for background generate.
     await support.awaitPrefetch();
     if (!mounted) return;
     final prefetched = support.prefetched;
     support.cancelPrefetch();
 
-    if (prefetched != null) {
-      if (prefetched.needsGenerate) {
-        await _startGenerate(
-          graph,
-          prefetched.nodeId,
-          prefetched.title.trim().isNotEmpty
-              ? prefetched.title
-              : (_topicTitle ?? widget.seedTitle),
-        );
-        if (mounted) setState(() => _advancing = false);
-        return;
-      }
+    if (prefetched != null && prefetched.isReady) {
       _applyReady(graph, prefetched);
       return;
     }
 
+    if (prefetched != null && prefetched.needsGenerate) {
+      // Advance: dice tile if ready, else any unlearned in neighborhood,
+      // else wait on generate for the dice tile.
+      final advanced = await graph.fetchLearningNext(
+        widget.seedNodeId,
+        pickedNodeId: prefetched.nodeId,
+        excludeNodeId: shownNodeId,
+        excludePackIndex: shownPackIndex,
+      );
+      if (!mounted) return;
+      if (advanced != null && advanced.isReady) {
+        _applyReady(graph, advanced);
+        return;
+      }
+      final title = (advanced?.title.trim().isNotEmpty == true)
+          ? advanced!.title
+          : (prefetched.title.trim().isNotEmpty
+              ? prefetched.title
+              : (_topicTitle ?? widget.seedTitle));
+      final waitId = advanced?.nodeId.isNotEmpty == true
+          ? advanced!.nodeId
+          : prefetched.nodeId;
+      await _startGenerate(graph, waitId, title);
+      if (mounted) setState(() => _advancing = false);
+      return;
+    }
+
+    // No prefetch (or failed): fresh dice as last resort.
     await _loadNext(
       titleHint: _topicTitle,
       excludeNodeId: shownNodeId,

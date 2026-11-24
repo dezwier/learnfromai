@@ -434,9 +434,10 @@ class GraphController extends ChangeNotifier {
   /// Next learning-track pack from the focus tile's perspective.
   ///
   /// Pass [opening]: true for the first card (pack on the focus tile).
-  /// Later cards dice among focus / children / other neighbors.
-  /// Pass [excludeNodeId] + [excludePackIndex] to skip the on-screen pack when
-  /// prefetching the following card.
+  /// Without [pickedNodeId]: dice prefetch (unlearned on tile or generate).
+  /// With [pickedNodeId]: advance — that tile if ready, else neighborhood
+  /// unlearned (focus → children → others), else generate for picked.
+  /// Pass [excludeNodeId] + [excludePackIndex] to skip the on-screen pack.
   Future<LearningNext?> fetchLearningNext(
     String seedNodeId, {
     String? excludeNodeId,

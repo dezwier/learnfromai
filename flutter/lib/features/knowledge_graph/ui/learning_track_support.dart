@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/widgets/pulse_placeholder.dart';
 import '../graph_controller.dart';
-import '../models.dart';
 
 /// Prefetch + ad-hoc image helpers for [LearningTrackSheet].
 class LearningTrackSupport {
@@ -22,6 +21,9 @@ class LearningTrackSupport {
   }
 
   /// Prefetch the following card from the track's opening focus perspective.
+  ///
+  /// Dice may return `generate`; enqueue starts immediately but this future
+  /// does not wait on it. A light poll may upgrade [prefetched] to ready.
   void schedulePrefetch(
     LearningNext current, {
     required String focusNodeId,
@@ -49,7 +51,7 @@ class LearningTrackSupport {
     required int excludePackIndex,
     String? focusTitle,
   }) async {
-    // One dice roll for the following card; stick to that tile through generate.
+    // One dice roll for the following card (no neighborhood fallback here).
     final next = await _graph.fetchLearningNext(
       focusNodeId,
       excludeNodeId: excludeNodeId,
@@ -60,26 +62,23 @@ class LearningTrackSupport {
     _warmImage(next);
     if (next == null || !next.needsGenerate) return;
 
-    // Start generate for the dice-picked tile while the user is still on this card.
+    // Kick generate for the dice tile while the user finishes this card.
     final pickedId = next.nodeId;
     final title = next.title.trim().isNotEmpty
         ? next.title.trim()
         : ((focusTitle ?? '').trim().isNotEmpty ? focusTitle!.trim() : 'Topic');
     unawaited(_graph.enqueueContentForTrack(pickedId, title: title));
-    // Give the enqueue a moment to register the job, then poll that same tile.
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-    if (gen != _prefetchGen) return;
 
-    final ready = await _awaitGeneratedPack(
-      gen: gen,
-      pickedNodeId: pickedId,
-      focusNodeId: focusNodeId,
-      excludeNodeId: excludeNodeId,
-      excludePackIndex: excludePackIndex,
+    // Non-blocking: upgrade prefetched if the pack lands before Next.
+    unawaited(
+      _pollGeneratedPack(
+        gen: gen,
+        pickedNodeId: pickedId,
+        focusNodeId: focusNodeId,
+        excludeNodeId: excludeNodeId,
+        excludePackIndex: excludePackIndex,
+      ),
     );
-    if (gen != _prefetchGen || ready == null) return;
-    prefetched = ready;
-    _warmImage(ready);
   }
 
   void _warmImage(LearningNext? next) {
@@ -89,8 +88,8 @@ class LearningTrackSupport {
     }
   }
 
-  /// Wait for content on the dice-picked tile (do not roll again).
-  Future<LearningNext?> _awaitGeneratedPack({
+  /// Soft poll: if generate finishes, cache ready. Never blocks [awaitPrefetch].
+  Future<void> _pollGeneratedPack({
     required int gen,
     required String pickedNodeId,
     required String focusNodeId,
@@ -98,34 +97,40 @@ class LearningTrackSupport {
     int? excludePackIndex,
   }) async {
     var sawJob = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
-    // Kick enqueue if the fire-and-forget call has not registered yet.
-    if (!sawJob) {
-      await _graph.enqueueContentForTrack(pickedNodeId);
-      if (gen != _prefetchGen) return null;
-      sawJob = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
-    }
     for (var i = 0; i < 180; i++) {
-      if (gen != _prefetchGen) return null;
+      if (gen != _prefetchGen) return;
       final active = _graph.isJobTypeActive(pickedNodeId, 'expand_content');
       if (active) {
         sawJob = true;
-      } else {
+      } else if (sawJob || i > 0) {
         final again = await _graph.fetchLearningNext(
           focusNodeId,
           excludeNodeId: excludeNodeId,
           excludePackIndex: excludePackIndex,
           pickedNodeId: pickedNodeId,
         );
-        if (gen != _prefetchGen) return null;
-        if (again != null && again.isReady) return again;
-        // Finished a job (or never needed one) but still no pack — stop.
-        if (sawJob || i > 0) return again;
+        if (gen != _prefetchGen) return;
+        // Only cache ready when the dice tile itself is ready. Neighborhood
+        // fallback is decided on Next via advance (picked_node_id).
+        if (again != null &&
+            again.isReady &&
+            again.nodeId == pickedNodeId) {
+          final current = prefetched;
+          if (current != null &&
+              current.needsGenerate &&
+              current.nodeId == pickedNodeId) {
+            prefetched = again;
+            _warmImage(again);
+          }
+          return;
+        }
+        if (sawJob) return;
       }
       await Future<void>.delayed(const Duration(seconds: 1));
     }
-    return prefetched;
   }
 
+  /// Waits only for the dice HTTP call + enqueue kickoff — not for generate.
   Future<void> awaitPrefetch() async {
     final pending = prefetchInFlight;
     if (pending != null) await pending;

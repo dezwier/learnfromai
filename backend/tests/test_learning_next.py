@@ -161,6 +161,7 @@ def test_learning_next_exclude_can_land_on_child(session, user, monkeypatch):
 
 
 def test_learning_next_dice_generate_for_picked_tile(session, user, monkeypatch):
+    """Prefetch dice on an empty child returns generate for that child (no fallback)."""
     seed = KnowledgeNode(name="Focus", name_key="focus-gen", description="x")
     child = KnowledgeNode(name="EmptyKid", name_key="empty-kid", description="x")
     session.add(seed)
@@ -184,6 +185,135 @@ def test_learning_next_dice_generate_for_picked_tile(session, user, monkeypatch)
         exclude_node_id=seed.id,
         exclude_pack_index=1,
         rng=random.Random(2),
+    )
+    assert result["status"] == "generate"
+    assert result["node_id"] == str(child.id)
+
+
+def test_learning_next_advance_falls_back_to_focus_unlearned(session, user):
+    """Advance with empty picked tile uses focus unlearned instead of waiting."""
+    seed = KnowledgeNode(name="Focus", name_key="focus-adv", description="x")
+    child = KnowledgeNode(name="EmptyKid", name_key="empty-adv", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, seed.id, pack_index=1)
+    _add_pack(session, seed.id, pack_index=2)
+    session.commit()
+
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=child.id,
+        exclude_node_id=seed.id,
+        exclude_pack_index=1,
+        rng=random.Random(0),
+    )
+    assert result["status"] == "ready"
+    assert result["node_id"] == str(seed.id)
+    assert result["pack_index"] == 2
+
+
+def test_learning_next_advance_fallback_order_focus_child_other(session, user):
+    """When picked is empty: prefer focus, then child, then sibling/parent."""
+    seed = KnowledgeNode(name="Focus", name_key="focus-ord", description="x")
+    child = KnowledgeNode(name="Child", name_key="child-ord", description="x")
+    sibling = KnowledgeNode(name="Sib", name_key="sib-ord", description="x")
+    empty = KnowledgeNode(name="Empty", name_key="empty-ord", description="x")
+    session.add(seed)
+    session.add(child)
+    session.add(sibling)
+    session.add(empty)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    session.add(KnowledgeEdge(from_id=seed.id, relation="sibling", to_id=sibling.id))
+    session.add(KnowledgeEdge(from_id=seed.id, relation="parent", to_id=empty.id))
+    _add_pack(session, child.id, pack_index=1)
+    _add_pack(session, sibling.id, pack_index=1)
+    session.commit()
+
+    # No focus packs → child before sibling.
+    child_first = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=empty.id,
+        rng=random.Random(0),
+    )
+    assert child_first["status"] == "ready"
+    assert child_first["node_id"] == str(child.id)
+
+    # Focus pack present → prefer focus over child.
+    _add_pack(session, seed.id, pack_index=1)
+    session.commit()
+    focus_first = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=empty.id,
+        rng=random.Random(0),
+    )
+    assert focus_first["status"] == "ready"
+    assert focus_first["node_id"] == str(seed.id)
+
+
+def test_learning_next_advance_waits_generate_when_no_unlearned(session, user):
+    """Advance returns generate for picked only when neighborhood has no unlearned."""
+    seed = KnowledgeNode(name="Focus", name_key="focus-wait", description="x")
+    child = KnowledgeNode(name="Kid", name_key="kid-wait", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, seed.id, pack_index=1)
+    record_events(
+        session,
+        user=user,
+        items=[
+            {"node_id": str(seed.id), "kind": "learn", "payload": {"pack_index": 1}},
+            {
+                "node_id": str(seed.id),
+                "kind": "check1",
+                "payload": {"pack_index": 1, "correct": True, "choice_index": 0},
+            },
+        ],
+    )
+    session.commit()
+
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=child.id,
+        exclude_node_id=seed.id,
+        exclude_pack_index=1,
+        rng=random.Random(0),
+    )
+    assert result["status"] == "generate"
+    assert result["node_id"] == str(child.id)
+
+
+def test_learning_next_advance_exclude_skips_onscreen_pack(session, user):
+    seed = KnowledgeNode(name="Focus", name_key="focus-ex2", description="x")
+    child = KnowledgeNode(name="Empty", name_key="empty-ex2", description="x")
+    session.add(seed)
+    session.add(child)
+    session.flush()
+    session.add(KnowledgeEdge(from_id=seed.id, relation="child", to_id=child.id))
+    _add_pack(session, seed.id, pack_index=1)
+    session.commit()
+
+    # Only pack is the on-screen one → exclude leaves nothing → generate.
+    result = learning_next(
+        session,
+        user=user,
+        seed_node_id=seed.id,
+        picked_node_id=child.id,
+        exclude_node_id=seed.id,
+        exclude_pack_index=1,
+        rng=random.Random(0),
     )
     assert result["status"] == "generate"
     assert result["node_id"] == str(child.id)

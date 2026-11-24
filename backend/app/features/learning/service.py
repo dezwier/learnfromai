@@ -214,6 +214,61 @@ def _dice_tile(
     return buckets[-1][1][rng.randrange(len(buckets[-1][1]))]
 
 
+def _unlearned_on_tile(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    tile_id: UUID,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+    rng: random.Random,
+) -> dict | None:
+    """Ready payload for an unlearned pack on [tile_id], or None."""
+    skip = _exclude_for(
+        tile_id,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+    )
+    unlearned = _eligible_packs(
+        session, user_id=user.id, node_id=tile_id, exclude_pack_index=skip
+    )
+    if not unlearned:
+        return None
+    node = focus if tile_id == focus.id else session.get(KnowledgeNode, tile_id)
+    if node is None:
+        return None
+    return _ready_payload(
+        session, user_id=user.id, node=node, pack=_pick_pack(unlearned, rng)
+    )
+
+
+def _first_unlearned_in_neighborhood(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+    rng: random.Random,
+) -> dict | None:
+    """First unlearned pack: focus → children → siblings/parents/acquaintance."""
+    children, others = _neighbor_buckets(session, focus.id)
+    for tile_id in [focus.id, *children, *others]:
+        ready = _unlearned_on_tile(
+            session,
+            user=user,
+            focus=focus,
+            tile_id=tile_id,
+            exclude_node_id=exclude_node_id,
+            exclude_pack_index=exclude_pack_index,
+            rng=rng,
+        )
+        if ready is not None:
+            return ready
+    return None
+
+
 def _pack_for_tile(
     session: Session,
     *,
@@ -224,22 +279,63 @@ def _pack_for_tile(
     exclude_pack_index: int | None,
     rng: random.Random,
 ) -> dict:
-    """Unlearned pack on [tile_id], or generate for that tile."""
-    skip = _exclude_for(
-        tile_id,
+    """Unlearned pack on [tile_id], or generate for that tile (prefetch dice)."""
+    ready = _unlearned_on_tile(
+        session,
+        user=user,
+        focus=focus,
+        tile_id=tile_id,
         exclude_node_id=exclude_node_id,
         exclude_pack_index=exclude_pack_index,
+        rng=rng,
     )
-    unlearned = _eligible_packs(
-        session, user_id=user.id, node_id=tile_id, exclude_pack_index=skip
-    )
+    if ready is not None:
+        return ready
     node = focus if tile_id == focus.id else session.get(KnowledgeNode, tile_id)
     if node is None:
         return _generate_payload(session, focus)
-    if unlearned:
-        return _ready_payload(
-            session, user_id=user.id, node=node, pack=_pick_pack(unlearned, rng)
-        )
+    return _generate_payload(session, node)
+
+
+def _advance_picked(
+    session: Session,
+    *,
+    user: User,
+    focus: KnowledgeNode,
+    picked_node_id: UUID,
+    exclude_node_id: UUID | None,
+    exclude_pack_index: int | None,
+    rng: random.Random,
+) -> dict:
+    """On Next: dice tile if ready, else neighborhood unlearned, else generate(picked)."""
+    ready = _unlearned_on_tile(
+        session,
+        user=user,
+        focus=focus,
+        tile_id=picked_node_id,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+        rng=rng,
+    )
+    if ready is not None:
+        return ready
+    fallback = _first_unlearned_in_neighborhood(
+        session,
+        user=user,
+        focus=focus,
+        exclude_node_id=exclude_node_id,
+        exclude_pack_index=exclude_pack_index,
+        rng=rng,
+    )
+    if fallback is not None:
+        return fallback
+    node = (
+        focus
+        if picked_node_id == focus.id
+        else session.get(KnowledgeNode, picked_node_id)
+    )
+    if node is None:
+        return _generate_payload(session, focus)
     return _generate_payload(session, node)
 
 
@@ -252,7 +348,7 @@ def _continue_pack(
     exclude_pack_index: int | None,
     rng: random.Random,
 ) -> dict:
-    """Later cards: dice a tile, then unlearned pack or generate for that tile."""
+    """Prefetch: dice a tile, then unlearned pack or generate for that tile only."""
     children, others = _neighbor_buckets(session, focus.id)
     tile_id = _dice_tile(
         focus_id=focus.id, children=children, others=others, rng=rng
@@ -283,10 +379,12 @@ def learning_next(
 
     Always interpreted from the track's opening focus (`seed_node_id`):
     - `opening=True`: pack on the focus (prefer unlearned, else learned, else generate).
-    - `picked_node_id`: stick to that tile (after a dice roll started generate).
+    - `picked_node_id`: advance after a dice prefetch — prefer that tile's unlearned,
+      else any unlearned in the neighborhood (focus → children → others), else
+      `generate` for the picked tile (client waits only then).
     - otherwise: weighted dice (focus / children / other neighbors), then an
-      unlearned pack on that tile or `generate` for it.
-    Optional exclude_* skips the on-screen pack when prefetching.
+      unlearned pack on that tile or `generate` for it (prefetch hint; no fallback).
+    Optional exclude_* skips the on-screen pack when prefetching / advancing.
     """
     seed = session.get(KnowledgeNode, seed_node_id)
     if seed is None:
@@ -296,11 +394,11 @@ def learning_next(
     if opening:
         return _opening_pack(session, user=user, focus=seed, rng=picker)
     if picked_node_id is not None:
-        return _pack_for_tile(
+        return _advance_picked(
             session,
             user=user,
             focus=seed,
-            tile_id=picked_node_id,
+            picked_node_id=picked_node_id,
             exclude_node_id=exclude_node_id,
             exclude_pack_index=exclude_pack_index,
             rng=picker,
